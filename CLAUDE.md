@@ -49,6 +49,26 @@ stay outside this repository.
   Dialogs go through `common.ask` and `SettingsWindow.ask_close` so tests can answer them. HiDPI: PassThrough
   rounding, layouts only (no fixed pixel sizes except font-metric based ones).
 
+- `p6mcp/jsonc.py`: parser with spans (comments, trailing commas, BOM-free text) and minimal edits
+  `set_member(text, path, key, value)` / `delete_member`: only our member's text changes (indentation, line
+  endings and comments of the file followed), and every edit is re-parsed and compared with the expected
+  value before it is returned (`JsoncError` otherwise). An add then a delete gives back the original bytes,
+  except a trailing comma before our entry and the empty containers an add created.
+- `p6mcp/clients/`: one `Adapter` per client in `adapters.py` (`ADAPTERS`: Claude Desktop, Cursor, VS Code,
+  VS Code Insiders, LM Studio, Cline; paths and formats checked against each client's docs, sources in the
+  module docstring). An adapter declares `config_path()`, `installed()`, `container` and `stdio_entry()`;
+  `base.Adapter` does `status()` (not_installed / not_registered / registered / outdated / error, `others` =
+  other P6 MCP entries such as the v2 `primavera-p6`, `running`), `register()` (add or repair) and
+  `unregister(key)` (a foreign key only when it is a P6 entry). Every write: parse first (a malformed or
+  non-UTF-8 file is refused and untouched), backup in `%LOCALAPPDATA%\P6MCP\client_backups\<client>` (20 kept),
+  minimal edit, `files.write_atomic` (temp + `os.replace`, retried, BOM kept). `base.launch()`: frozen ->
+  `p6mcp-server.exe` beside the running exe, else `python.exe -m p6mcp`. Registration writes stdio entries;
+  HTTP entries come with the HTTP host (milestone 4); `clients.snippet()` gives stdio, HTTP and VS Code text.
+  CLI for the installer: `p6mcp-server clients list|register|unregister|snippet` (`--detected`).
+- Settings `ClientsPage` (`clients_page.py`): scan at every launch (thread pool), Register / Repair / Remove /
+  remove a v2 entry / Do not offer again (`clients_ignored`, saved with Save), snippets. The window banner
+  offers new clients and flags entries to repair (after the no-database warning).
+
 ## Running
 
 ```powershell

@@ -13,9 +13,12 @@ from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QListWidget, QMai
 from p6mcp import __version__, config, i18n, settings_logic
 from p6mcp.i18n import tr
 from p6mcp.settings_app.common import muted, pill
+from p6mcp.settings_app.clients_page import ClientsPage
 from p6mcp.settings_app.pages import DatabasePage, ServerPage, ToolsPage
 
-PAGES = (("nav.database", DatabasePage), ("nav.server", ServerPage), ("nav.tools", ToolsPage))
+PAGES = (("nav.database", DatabasePage), ("nav.server", ServerPage), ("nav.tools", ToolsPage),
+         ("nav.clients", ClientsPage))
+CLIENTS_PAGE = 3
 
 
 class SettingsWindow(QMainWindow):
@@ -25,6 +28,7 @@ class SettingsWindow(QMainWindow):
         self.saved: Optional[dict] = None if self.load_error else copy.deepcopy(self.data)
         self.restart_keys: list[str] = []
         self.pages: list[QWidget] = []
+        self.client_statuses: list = []  # filled by the Clients page scan (at every launch)
         i18n.set_language(self.data.get("language", "auto"))
         self.build()
 
@@ -37,8 +41,9 @@ class SettingsWindow(QMainWindow):
         self.banner = QLabel()
         self.banner.setWordWrap(True)
         self.banner.setVisible(False)
-        self.banner_btn = QPushButton(tr("app.reset_broken"))
-        self.banner_btn.clicked.connect(self.reset_broken)
+        self.banner_btn = QPushButton()
+        self.banner_btn.clicked.connect(lambda: self._banner_action and self._banner_action())
+        self._banner_action = None
         brow = QHBoxLayout()
         brow.addWidget(self.banner, 1)
         brow.addWidget(self.banner_btn)
@@ -112,15 +117,39 @@ class SettingsWindow(QMainWindow):
             self.status.setStyleSheet("")
         self._banner()
 
+    def client_offers(self) -> tuple[list, list]:
+        """(clients installed but not registered and not declined, clients whose entry needs repair)."""
+        ignored = set(self.data.get("clients_ignored", []))
+        new = [s for s in self.client_statuses if s.state == "not_registered" and s.client not in ignored]
+        bad = [s for s in self.client_statuses if s.state in ("outdated", "error")]
+        return new, bad
+
+    def _set_banner_button(self, key: Optional[str], action=None) -> None:
+        self._banner_action = action
+        self.banner_btn.setVisible(key is not None)
+        if key:
+            self.banner_btn.setText(tr(key))
+
+    def open_clients(self) -> None:
+        self.nav.setCurrentRow(CLIENTS_PAGE)
+
     def _banner(self) -> None:
-        self.banner_btn.setVisible(bool(self.load_error))
+        self._set_banner_button(None)
+        new, bad = self.client_offers()
         if self.load_error:
+            self._set_banner_button("app.reset_broken", self.reset_broken)
             pill(self.banner, "error", tr("app.broken", err=self.load_error))
         elif self.restart_keys:
             names = ", ".join(tr("restart." + k) for k in self.restart_keys)
             pill(self.banner, "info", tr("app.restart", what=names))
         elif not (self.data.get("active_database") and settings_logic.find(self.data, self.data["active_database"])):
             pill(self.banner, "warn", tr("app.no_database"))
+        elif bad:
+            self._set_banner_button("app.clients.open", self.open_clients)
+            pill(self.banner, "warn", tr("app.clients.repair", names=", ".join(s.name for s in bad)))
+        elif new:
+            self._set_banner_button("app.clients.open", self.open_clients)
+            pill(self.banner, "info", tr("app.clients.new", names=", ".join(s.name for s in new)))
         else:
             self.banner.setVisible(False)
             return

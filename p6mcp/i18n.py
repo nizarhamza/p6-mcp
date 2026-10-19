@@ -77,7 +77,7 @@ def is_rtl(code: Optional[str] = None) -> bool:
     return (code or _lang) in RTL
 
 
-def tr(key: str, **kw) -> str:
+def tr(key: str, /, **kw) -> str:
     if not _ref:
         set_language("en")
     text = _cat.get(key) or _ref.get(key) or key

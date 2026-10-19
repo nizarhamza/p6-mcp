@@ -24,10 +24,17 @@ TOKEN = "tok-abcdefghijklmnop-7890"
 def env(tmp_path, monkeypatch, golden):
     cfg = tmp_path / "config.json"
     monkeypatch.setenv("P6MCP_CONFIG", str(cfg))
+    for var, sub in (("APPDATA", "Roaming"), ("LOCALAPPDATA", "Local"), ("USERPROFILE", "User")):
+        (tmp_path / sub).mkdir()
+        monkeypatch.setenv(var, str(tmp_path / sub))  # a fake profile: the real client configs are never read
+    monkeypatch.delenv("CLINE_MCP_SETTINGS_PATH", raising=False)
+    monkeypatch.setattr("p6mcp.clients._running_names", lambda: set())
     monkeypatch.setattr(pages.credentials, "http_token", lambda create=True: TOKEN)
+    monkeypatch.setattr("p6mcp.settings_app.clients_page.credentials.http_token", lambda create=True: TOKEN)
     monkeypatch.setattr(pages.credentials, "regenerate_http_token", lambda: "tok-new-0000")
     answers = {"value": True}
     monkeypatch.setattr(pages, "ask", lambda *a, **k: answers["value"])
+    monkeypatch.setattr("p6mcp.settings_app.clients_page.ask", lambda *a, **k: answers["value"])
     monkeypatch.setattr(SettingsWindow, "ask_close", lambda self: "discard")
     warnings = []
     monkeypatch.setattr(window.QMessageBox, "warning", lambda *a, **k: warnings.append(a[2] if len(a) > 2 else ""))
@@ -41,6 +48,7 @@ def make(qtbot, data=None):
         config.save(data)
     w = SettingsWindow()
     qtbot.addWidget(w)
+    qtbot.waitUntil(lambda: w.pages[3].job is None, timeout=15000)  # the clients scan started at launch
     return w
 
 
@@ -182,3 +190,55 @@ def test_broken_config_file(qtbot, env):
     w.reset_broken()
     assert os.path.exists(str(env["cfg"]) + ".broken") and w.save()
     assert json.loads(env["cfg"].read_text(encoding="utf-8"))["schema_version"] == config.CONFIG_VERSION
+
+
+def test_clients_page_offers_registers_and_ignores(qtbot, env, golden, tmp_path):
+    os.makedirs(tmp_path / "User" / ".cursor")
+    db = env["db"]
+    data = {"language": "en", "databases": [{"name": "demo", "path": db, "confirmed": True}],
+            "active_database": "demo"}
+    w = make(qtbot, data)
+    page = w.pages[3]
+    states = {s.client: s.state for s in page.statuses}
+    assert states["cursor"] == "not_registered" and states["vscode"] == "not_installed"
+    assert w.banner.isVisibleTo(w) and "Cursor" in w.banner.text()
+    w.banner_btn.click()
+    assert w.nav.currentRow() == 3 and page.selected() == "cursor"
+    assert page.register()
+    qtbot.waitUntil(lambda: page.job is None, timeout=15000)
+    cfg = json.loads((tmp_path / "User" / ".cursor" / "mcp.json").read_text(encoding="utf-8"))
+    assert "p6mcp" in cfg["mcpServers"] and page.status().state == "registered"
+    assert not w.banner.isVisibleTo(w)
+    assert page.unregister()  # ask answers yes
+    qtbot.waitUntil(lambda: page.job is None, timeout=15000)
+    page.select("cursor")
+    page.toggle_ignore()
+    assert w.data["clients_ignored"] == ["cursor"] and not w.banner.isVisibleTo(w)
+
+
+def test_clients_page_legacy_entry_and_snippet(qtbot, env, tmp_path):
+    claude = tmp_path / "Roaming" / "Claude"
+    claude.mkdir()
+    v2 = {"mcpServers": {"primavera-p6": {"command": "python", "args": ["C:/p6-mcp/p6_mcp_server.py"]}}}
+    (claude / "claude_desktop_config.json").write_text(json.dumps(v2, indent=2), encoding="utf-8")
+    w = make(qtbot, {"language": "en"})
+    page = w.pages[3]
+    page.select("claude_desktop")
+    assert page.legacy.isVisibleTo(page) and "primavera-p6" in page.legacy.text()
+    assert page.remove_legacy()
+    qtbot.waitUntil(lambda: page.job is None, timeout=15000)
+    page.select("claude_desktop")
+    assert json.loads((claude / "claude_desktop_config.json").read_text(encoding="utf-8")) == {"mcpServers": {}}
+    assert not page.legacy.isVisibleTo(page)
+    page.kind.setCurrentIndex(page.kind.findData("vscode"))
+    assert '"servers"' in page.text.toPlainText()
+    page.kind.setCurrentIndex(page.kind.findData("http"))
+    assert "Bearer " + TOKEN in page.copy_snippet() and TOKEN not in page.text.toPlainText()
+
+
+def test_unreadable_client_config_asks_for_attention(qtbot, env, tmp_path):
+    (tmp_path / "User" / ".lmstudio").mkdir()
+    (tmp_path / "User" / ".lmstudio" / "mcp.json").write_text("{oops", encoding="utf-8")
+    w = make(qtbot, {"language": "en", "databases": [{"name": "d", "path": env["db"], "confirmed": True}],
+                     "active_database": "d"})
+    assert "LM Studio" in w.banner.text() and "attention" in w.banner.text()

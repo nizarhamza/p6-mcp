@@ -53,6 +53,7 @@ DEFAULTS: dict[str, Any] = {
     "run_at_startup": False,
     "start_minimized": True,
     "update_check": True,
+    "clients_ignored": [],        # client ids whose registration offer the user declined for good
 }
 
 
@@ -155,6 +156,8 @@ def validate(d: dict) -> dict:
         errs.append("p6_user must be non-empty text")
     if not isinstance(out["trusted_schemas"], list) or not all(isinstance(x, str) for x in out["trusted_schemas"]):
         errs.append("trusted_schemas must be a list of fingerprints")
+    if not isinstance(out["clients_ignored"], list) or not all(isinstance(x, str) for x in out["clients_ignored"]):
+        errs.append("clients_ignored must be a list of client ids")
     dbs = out["databases"]
     names = set()
     if not isinstance(dbs, list):

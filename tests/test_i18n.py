@@ -22,6 +22,8 @@ def used_keys() -> set:
         keys |= set(re.findall(r"""tr\(\s*["']([a-z_.0-9]+)["']""", src))
         keys |= set(re.findall(r"""["']((?:nav|db\.col|db\.kind|db\.r)\.[a-z_.0-9]+)["']""", src))
     keys |= {f"kind.{k}" for k in policy.KINDS} | {f"restart.{k}" for k in settings_logic.RESTART_KEYS}
+    states = ("not_installed", "not_registered", "registered", "outdated", "error")
+    keys |= {f"cl.state.{k}" for k in states} | {f"cl.detail.{k}" for k in states}
     return keys
 
 
