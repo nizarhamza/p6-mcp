@@ -1,0 +1,11 @@
+P6 MCP for Primavera P6
+Copyright 2026 Nizar Hamza
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+P6 MCP is an independent project. It is not affiliated with, endorsed by or sponsored by Oracle.
+Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. No Oracle software,
+binaries, schema documentation or sample data is distributed with this product.
+
+The Windows builds include third-party open source components (Python, Qt for Python, the MCP
+Python SDK and their dependencies), each under its own license.

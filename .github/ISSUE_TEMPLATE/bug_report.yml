@@ -1,0 +1,44 @@
+name: Bug report
+description: Something does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never attach a real schedule, database, XER file or log that names real projects.**
+        Describe the problem, or reproduce it with the synthetic test database (tests/fixtures/make_db.py).
+        For a security problem, use Security > Report a vulnerability instead.
+  - type: input
+    id: version
+    attributes:
+      label: P6 MCP version
+      description: Settings > About, or p6_diagnose
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: MCP client
+      options: [Claude Desktop, Cursor, VS Code, VS Code Insiders, LM Studio, Cline, Other]
+    validations:
+      required: true
+  - type: input
+    id: p6
+    attributes:
+      label: P6 version and data source
+      description: e.g. P6 Professional 25.12 standalone, or XER-only mode (from p6_diagnose, schema)
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: diagnose
+    attributes:
+      label: p6_diagnose output (remove paths and names you do not want to share)
+      render: json

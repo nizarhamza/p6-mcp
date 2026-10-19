@@ -1,0 +1,18 @@
+name: Feature request
+description: A tool, a client or a setting you need
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: "**Never attach real schedule data.** Describe the scheduling question you want answered."
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you want to do?
+      description: The planning or scheduling task, and why the current tools do not cover it
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could P6 MCP help?

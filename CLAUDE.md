@@ -121,6 +121,14 @@ stay outside this repository.
   rewrites `/D...` arguments into paths. Test an install with a fake profile in APPDATA / LOCALAPPDATA /
   USERPROFILE so the installer never registers the real clients.
 
+- `p6mcp/updates.py`: the only network call, `check()` reads the latest published release of
+  `nizarhamza/p6-mcp` from the GitHub API (never downloads); Settings `LogsPage` (log level, folders, update
+  check, at launch only from the tray app when `update_check`) and `AboutPage` (`about_pages.py`). Tests
+  replace `p6mcp.updates.check`: never call the network in tests.
+- Public repository: https://github.com/nizarhamza/p6-mcp (Apache 2.0, Copyright 2026 Nizar Hamza; LICENSE,
+  NOTICE, SECURITY.md, CHANGELOG.md, issue templates; README screenshots in `docs/images`, rendered from the
+  synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release.
+
 ## Running
 
 ```powershell

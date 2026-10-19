@@ -7,7 +7,7 @@
   #define AppVersion "0.0.0"
 #endif
 #ifndef RepoUrl
-  #define RepoUrl "https://github.com/p6mcp/p6mcp"
+  #define RepoUrl "https://github.com/nizarhamza/p6-mcp"
 #endif
 
 [Setup]
@@ -15,7 +15,7 @@ AppId={{6F3A2D5E-9B1C-4C8E-A7D2-2E5B8F0C4A91}
 AppName=P6 MCP for Primavera P6
 AppVersion={#AppVersion}
 AppVerName=P6 MCP {#AppVersion}
-AppPublisher=P6 MCP project
+AppPublisher=Nizar Hamza
 AppPublisherURL={#RepoUrl}
 AppSupportURL={#RepoUrl}/issues
 AppUpdatesURL={#RepoUrl}/releases
@@ -65,6 +65,8 @@ Name: "startup"; Description: "{cm:RunAtStartup}"; Flags: unchecked
 
 [Files]
 Source: "dist\P6MCP\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\NOTICE"; DestDir: "{app}"; DestName: "NOTICE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\P6 MCP Settings"; Filename: "{app}\p6mcp-settings.exe"

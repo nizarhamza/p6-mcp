@@ -21,7 +21,9 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(HERE, "dist")
 BUILD = os.path.join(HERE, "build")
-REPO = os.environ.get("P6MCP_REPO_URL", "https://github.com/p6mcp/p6mcp")
+ROOT = os.path.dirname(HERE)
+LEGAL = ("LICENSE", "NOTICE")
+REPO = os.environ.get("P6MCP_REPO_URL", "https://github.com/nizarhamza/p6-mcp")
 
 
 def semver(v: str) -> str:
@@ -51,7 +53,7 @@ def manifest(version: str) -> dict:
                        "float, DCMA health check, look-ahead, comparisons, CPM what-if. Not affiliated with Oracle.",
         "long_description": "Runs locally. The data the tools return goes to the model Claude uses. For the full "
                             "product (Settings window, XER-only mode, other MCP clients) use the installer.",
-        "author": {"name": "P6 MCP project", "url": REPO},
+        "author": {"name": "Nizar Hamza", "url": REPO},
         "repository": {"type": "git", "url": REPO},
         "homepage": REPO,
         "license": "Apache-2.0",
@@ -90,11 +92,17 @@ def main() -> None:
     for need in (full, server, os.path.join(BUILD, "icon.png")):
         if not os.path.exists(need):
             sys.exit(f"missing {need}: run make_assets.py and pyinstaller first")
-    zip_dir(full, os.path.join(DIST, f"P6MCP-{v}-portable.zip"), "P6MCP")
+    portable = os.path.join(DIST, f"P6MCP-{v}-portable.zip")
+    zip_dir(full, portable, "P6MCP")
+    with zipfile.ZipFile(portable, "a", zipfile.ZIP_DEFLATED) as z:
+        for f in LEGAL:
+            z.write(os.path.join(ROOT, f), f"P6MCP/{f}.txt")
     mcpb = os.path.join(DIST, f"p6mcp-{v}.mcpb")
     with zipfile.ZipFile(mcpb, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         z.writestr("manifest.json", json.dumps(manifest(v), indent=2))
         z.write(os.path.join(BUILD, "icon.png"), "icon.png")
+        for f in LEGAL:
+            z.write(os.path.join(ROOT, f), f)
         for root, _dirs, files in os.walk(server):
             for f in sorted(files):
                 full_path = os.path.join(root, f)

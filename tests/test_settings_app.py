@@ -12,6 +12,7 @@ pytestqt = pytest.importorskip("pytestqt")
 
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
+from PySide6.QtWidgets import QLabel as QLabelType  # noqa: E402
 
 from p6mcp import config, i18n  # noqa: E402
 from p6mcp.settings_app import pages, window  # noqa: E402
@@ -38,6 +39,8 @@ def env(tmp_path, monkeypatch, golden):
     monkeypatch.setattr(pages, "ask", lambda *a, **k: answers["value"])
     monkeypatch.setattr("p6mcp.settings_app.clients_page.ask", lambda *a, **k: answers["value"])
     monkeypatch.setattr(SettingsWindow, "ask_close", lambda self: "discard")
+    monkeypatch.setattr("p6mcp.updates.check", lambda *a, **k: {"current": "1.0.0", "latest": "1.0.0",
+                                                                  "newer": False, "url": "x", "error": None})
     registry = {"cmd": None}  # the real HKCU Run key is never touched
     monkeypatch.setattr(window.startup, "sync", lambda data: registry.__setitem__(
         "cmd", "p6mcp --minimized" if data.get("run_at_startup") else None))
@@ -362,3 +365,24 @@ def tools_allow_enabled(w):
     tools = w.page(ToolsPage)
     tools.full.click()
     return tools.allow.isEnabled()
+
+
+def test_logs_and_about_pages(qtbot, win, monkeypatch):
+    from p6mcp.settings_app.about_pages import AboutPage, LogsPage
+    logs = win.page(LogsPage)
+    logs.level.setCurrentIndex(logs.level.findData("DEBUG"))
+    assert win.data["log_level"] == "DEBUG"
+    logs.auto.click()
+    assert win.data["update_check"] is False
+    logs.check()
+    qtbot.waitUntil(lambda: logs.job is None, timeout=10000)
+    assert "latest version" in logs.state.text() and not logs.open_btn.isVisibleTo(logs)
+    monkeypatch.setattr("p6mcp.updates.check", lambda *a, **k: {"current": "1.0.0", "latest": "1.1.0",
+                                                                  "newer": True, "url": "u", "error": None})
+    logs.check()
+    qtbot.waitUntil(lambda: logs.job is None, timeout=10000)
+    assert "1.1.0 is available" in logs.state.text() and logs.open_btn.isVisibleTo(logs)
+    assert "1.1.0" in win.banner.text() or "No database" in win.banner.text()
+    about = win.page(AboutPage)
+    texts = " ".join(w.text() for w in about.findChildren(QLabelType))
+    assert "Apache" in texts and "Oracle" in texts and "local model" in texts

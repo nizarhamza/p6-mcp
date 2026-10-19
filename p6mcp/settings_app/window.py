@@ -13,16 +13,17 @@ from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QListWidget, QMai
 from p6mcp import __version__, config, i18n, settings_logic, startup
 from p6mcp.i18n import tr
 from p6mcp.settings_app.common import muted, pill
+from p6mcp.settings_app.about_pages import AboutPage, LogsPage
 from p6mcp.settings_app.clients_page import ClientsPage
 from p6mcp.settings_app.pages import DatabasePage, ServerPage, StartupPage, ToolsPage
 
 PAGES = (("nav.database", DatabasePage), ("nav.startup", StartupPage), ("nav.server", ServerPage),
-         ("nav.clients", ClientsPage), ("nav.tools", ToolsPage))
+         ("nav.clients", ClientsPage), ("nav.tools", ToolsPage), ("nav.logs", LogsPage), ("nav.about", AboutPage))
 CLIENTS_PAGE = [cls for _k, cls in PAGES].index(ClientsPage)
 
 
 class SettingsWindow(QMainWindow):
-    def __init__(self, supervisor=None, on_close=None):
+    def __init__(self, supervisor=None, on_close=None, auto_update_check: bool = False):
         """supervisor: the tray app's HTTP server supervisor (None: status read from the status file).
         on_close: called when a close is accepted; returning True hides the window instead (tray)."""
         super().__init__()
@@ -34,6 +35,8 @@ class SettingsWindow(QMainWindow):
         self.client_statuses: list = []  # filled by the Clients page scan (at every launch)
         i18n.set_language(self.data.get("language", "auto"))
         self.build()
+        if self.data.get("update_check", True) and auto_update_check:  # the only network call, can be off
+            self.page(LogsPage).check()
 
     # -- layout (rebuilt when the language changes)
     def build(self, page: int = 0) -> None:
@@ -133,6 +136,13 @@ class SettingsWindow(QMainWindow):
         if key:
             self.banner_btn.setText(tr(key))
 
+    def _update(self) -> Optional[dict]:
+        r = self.page(LogsPage).result if self.pages else None
+        return r if r and r.get("newer") else None
+
+    def _open_update(self) -> None:
+        self.page(LogsPage)._open_release()
+
     def open_clients(self) -> None:
         self.nav.setCurrentRow(CLIENTS_PAGE)
 
@@ -151,6 +161,9 @@ class SettingsWindow(QMainWindow):
         elif self.data.get("data_source") != "xer" and not (
                 self.data.get("active_database") and settings_logic.find(self.data, self.data["active_database"])):
             pill(self.banner, "warn", tr("app.no_database"))
+        elif self._update() is not None:
+            self._set_banner_button("upd.open", self._open_update)
+            pill(self.banner, "info", tr("upd.newer", latest=self._update()["latest"], current=__version__))
         elif bad:
             self._set_banner_button("app.clients.open", self.open_clients)
             pill(self.banner, "warn", tr("app.clients.repair", names=", ".join(s.name for s in bad)))

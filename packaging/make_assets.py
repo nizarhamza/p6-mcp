@@ -59,11 +59,11 @@ VERSION_TEMPLATE = """VSVersionInfo(
                     date=(0, 0)),
   kids=[
     StringFileInfo([StringTable('040904B0', [
-      StringStruct('CompanyName', 'P6 MCP project'),
+      StringStruct('CompanyName', 'Nizar Hamza'),
       StringStruct('FileDescription', '{desc}'),
       StringStruct('FileVersion', '{v}'),
       StringStruct('InternalName', '{name}'),
-      StringStruct('LegalCopyright', 'Apache License 2.0. Not affiliated with Oracle.'),
+      StringStruct('LegalCopyright', 'Copyright 2026 Nizar Hamza. Apache License 2.0. Not affiliated with Oracle.'),
       StringStruct('OriginalFilename', '{name}.exe'),
       StringStruct('ProductName', 'P6 MCP for Primavera P6'),
       StringStruct('ProductVersion', '{v}')])]),

@@ -157,7 +157,8 @@ class TrayApp(QObject):
     def show_window(self) -> None:
         if self.window is None:
             from p6mcp.settings_app.window import SettingsWindow
-            self.window = SettingsWindow(supervisor=self.supervisor, on_close=self._window_closed)
+            self.window = SettingsWindow(supervisor=self.supervisor, on_close=self._window_closed,
+                                         auto_update_check=True)
             self.window.server_state(self.supervisor.state)
         self.window.show()
         self.window.setWindowState(self.window.windowState() & ~Qt.WindowState.WindowMinimized)
