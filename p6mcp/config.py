@@ -29,6 +29,7 @@ TOOL_PROFILES = ("basic", "full")
 TRANSPORTS = ("stdio", "http")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 DB_KINDS = ("sqlite",)  # SQL Server / Oracle: later versions (read only)
+DATA_SOURCES = ("database", "xer")  # xer: read-only analysis of XER files, no P6 database
 BACKUP_SCOPES = ("every_write", "session")
 SECRET_KEYS = ("password", "token", "secret", "pwd")  # never stored in the file
 
@@ -36,6 +37,9 @@ DEFAULTS: dict[str, Any] = {
     "schema_version": CONFIG_VERSION,
     "databases": [],              # [{name, kind, path, confirmed, tested_at, schema_fingerprint, ...}]
     "active_database": None,      # name of the active entry of databases
+    "data_source": "database",    # database, or xer (XER-only mode, read only)
+    "xer_files": [],              # XER-only mode: the files loaded together (two updates to compare...)
+    "xer_confirmed": False,       # the files were loaded and checked in the Settings app
     "tool_profile": "basic",      # basic: read-only curated set; full: every tool
     "allow_writes": False,
     "backup_before_write": True,
@@ -139,6 +143,11 @@ def validate(d: dict) -> dict:
     enum("transport", TRANSPORTS)
     enum("log_level", LOG_LEVELS)
     enum("backup_scope", BACKUP_SCOPES)
+    enum("data_source", DATA_SOURCES)
+    if not isinstance(out["xer_files"], list) or not all(isinstance(x, str) and x.strip() for x in out["xer_files"]):
+        errs.append("xer_files must be a list of file paths")
+    if not isinstance(out["xer_confirmed"], bool):
+        errs.append("xer_confirmed must be true or false")
     for key in ("allow_writes", "backup_before_write", "block_when_p6_running", "run_at_startup",
                 "start_minimized", "update_check"):
         if not isinstance(out[key], bool):
@@ -263,6 +272,7 @@ class Settings:
     db_path: str = ""                 # "" when no usable database is selected
     db_name: Optional[str] = None
     db_problem: Optional[str] = None  # why db_path is empty or unusable (user-facing)
+    xer_files: tuple[str, ...] = ()   # XER-only mode: db_path is then set by the server (p6mcp.xerstore)
     tool_profile: str = "basic"
     allow_writes: bool = False
     backup_before_write: bool = True
@@ -306,8 +316,21 @@ def load() -> Settings:
     db_path, db_name, problem = "", None, None
     if err:
         problem = f"{err} Open P6 MCP Settings to fix it."
+    xer_files: tuple[str, ...] = ()
     if env_db:
         db_path, db_name, problem = os.path.abspath(env_db), "P6_DB_PATH", None
+    elif not err and cfg.get("data_source") == "xer":
+        files = [os.path.abspath(f) for f in cfg.get("xer_files", [])]
+        if not files:
+            problem = "XER-only mode: no XER file selected. Open P6 MCP Settings (Database) to add one."
+        elif not cfg.get("xer_confirmed"):
+            problem = ("XER-only mode: the XER files were selected but not loaded and checked. Open P6 MCP "
+                       "Settings (Database) and click Load.")
+        elif any(not os.path.isfile(f) for f in files):
+            problem = (f"XER file not found: {next(f for f in files if not os.path.isfile(f))}. Open P6 MCP "
+                       "Settings to fix the list.")
+        else:
+            xer_files, db_name = tuple(files), "XER files"
     elif not err:
         active = cfg.get("active_database")
         entry = next((d for d in cfg["databases"] if d.get("name") == active), None)
@@ -336,9 +359,11 @@ def load() -> Settings:
     if profile not in TOOL_PROFILES:
         profile = "basic"
     allow = _env_flag("P6MCP_ALLOW_WRITES")
+    if xer_files:
+        allow = False  # XER-only mode never writes
     block = cfg["block_when_p6_running"] and os.environ.get("P6_SKIP_PROCESS_CHECK", "0") != "1"
     return Settings(
-        source=source, db_path=db_path, db_name=db_name, db_problem=problem,
+        source=source, db_path=db_path, db_name=db_name, db_problem=problem, xer_files=xer_files,
         tool_profile=profile, allow_writes=cfg["allow_writes"] if allow is None else allow,
         backup_before_write=cfg["backup_before_write"],
         backup_scope="session" if legacy and data is None else cfg["backup_scope"],

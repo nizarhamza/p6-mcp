@@ -334,3 +334,31 @@ def test_tray_app(qtbot, env):
         app.server.close()
         if app.tray is not None:
             app.tray.hide()
+
+
+def test_xer_only_mode_in_settings(qtbot, win, env, p6, tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    xer = str(tmp_path / "demo.xer")
+    p6.call("p6_export_xer", project="DEMO-A", path=xer)
+    page = win.page(DatabasePage)
+    assert not page.xer.isVisibleTo(page) and page.profiles_box.isVisibleTo(page)
+    page.src_xer.click()
+    assert win.data["data_source"] == "xer" and page.xer.isVisibleTo(page) and not page.profiles_box.isVisibleTo(page)
+    assert "XER-only mode" in win.banner.text()
+    page.xer.add_files([xer, xer])  # a duplicate is ignored
+    assert win.data["xer_files"] == [os.path.normpath(xer)] and win.data["xer_confirmed"] is False
+    page.xer.load()
+    qtbot.waitUntil(lambda: page.xer.job is None, timeout=30000)
+    assert win.data["xer_confirmed"] is True and "DEMO-A" in page.xer.details.text()
+    assert not tools_allow_enabled(win)
+    assert win.save()
+    st = config.load()
+    assert st.xer_files == (os.path.normpath(xer),) and st.allow_writes is False
+    page.xer.add_files([str(tmp_path / "other.xer")])
+    assert win.data["xer_confirmed"] is False  # a changed list needs a new load check
+
+
+def tools_allow_enabled(w):
+    tools = w.page(ToolsPage)
+    tools.full.click()
+    return tools.allow.isEnabled()

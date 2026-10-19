@@ -145,7 +145,11 @@ class SettingsWindow(QMainWindow):
         elif self.restart_keys:
             names = ", ".join(tr("restart." + k) for k in self.restart_keys)
             pill(self.banner, "info", tr("app.restart", what=names))
-        elif not (self.data.get("active_database") and settings_logic.find(self.data, self.data["active_database"])):
+        elif self.data.get("data_source") == "xer" and not (self.data.get("xer_files")
+                                                             and self.data.get("xer_confirmed")):
+            pill(self.banner, "warn", tr("app.no_xer"))
+        elif self.data.get("data_source") != "xer" and not (
+                self.data.get("active_database") and settings_logic.find(self.data, self.data["active_database"])):
             pill(self.banner, "warn", tr("app.no_database"))
         elif bad:
             self._set_banner_button("app.clients.open", self.open_clients)

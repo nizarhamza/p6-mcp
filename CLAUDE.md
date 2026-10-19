@@ -96,6 +96,18 @@ stay outside this repository.
   `append_item` / `remove_items`), Claude Desktop always stdio (`supports_http = False`). A regenerated token
   makes HTTP entries outdated (repair).
 
+- XER-only mode (`p6mcp/xerstore.py`): config `data_source: xer`, `xer_files`, `xer_confirmed` (set by the
+  Settings "Load and check"). `ensure(paths)` builds (or reuses: key = paths, sizes, mtimes, `STORE_VERSION`)
+  a SQLite store in `%LOCALAPPDATA%\P6MCP\xer_store` from the XER tables (`_xer_read_meta` rows, `xer_fields`
+  for tables without rows); column types from the name (`NUM_HINTS` / `INT_HINTS` / `TEXT_HINTS`) and the
+  values; file k's ids shifted by k * `ID_STEP`; a repeated Project ID becomes `name~2`; SCHEDOPTIONS ->
+  PROJPROP 'scheduling' through `_sched_write`; PREFER / NEXTKEY / PROJPROP and the core tables created when
+  missing (no other empty tables: the tools check optional tables themselves). The server's `_refresh` points
+  `DB_PATH` at the store (`XER_MANIFEST` in `p6_diagnose`); write tools are refused (`XER_READ_ONLY`, also in
+  `_write_refusal`), `allow_writes` is forced off so they are not listed. Private check: on the reference XER
+  files every read tool runs and `p6_cpm_validate` gives a match rate of 1.0. Settings: Database page data
+  source radios and `xer_panel.XerPanel` (files, order, load check on the thread pool).
+
 ## Running
 
 ```powershell

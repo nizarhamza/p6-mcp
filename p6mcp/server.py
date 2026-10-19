@@ -43,6 +43,7 @@ from __future__ import annotations
 import base64
 import bisect
 import contextvars
+import dataclasses
 import difflib
 import functools
 import html
@@ -90,6 +91,7 @@ from p6mcp import config as _config
 from p6mcp import confirm as _confirm
 from p6mcp import policy as _policy
 from p6mcp import schema as _schema
+from p6mcp import xerstore as _xerstore
 
 # Effective settings: refreshed by _refresh() at the start of every tool call (config.json may change
 # while the server runs). STARTUP = the settings the tool list was built with.
@@ -282,6 +284,9 @@ _last_pruned: list[str] = []  # backups the retention rule removed after the las
 _cols_cache: dict[str, set[str]] = {}
 _log_cache: dict[str, tuple] = {}  # edit log file -> ((mtime_ns, size), entries)
 _schema_cache: dict[str, dict] = {}  # db path -> schema.detect() (trust applied at read time)
+XER_MANIFEST: Optional[dict] = None  # XER-only mode: files, projects (Project ID renames), warnings
+XER_READ_ONLY = ("XER-only mode is read only: the XER files are analysed, never changed. Select a P6 database in "
+                 "P6 MCP Settings to write.")
 TOOL_HINTS: dict[str, dict[str, bool]] = {}
 REGISTERED: dict[str, Callable] = {}  # tool -> what a client call runs (policy gate + two-step write flow)
 LISTED: set[str] = set()  # tools offered to clients (fixed at startup)
@@ -298,8 +303,15 @@ DESTRUCTIVE_DOC = " This tool deletes or replaces data: step 2 also needs confir
 def _refresh() -> _config.Settings:
     """Re-read the settings (cheap while config.json is unchanged). A new database clears the caches
     tied to the old one."""
-    global SETTINGS, DB_PATH, P6_USER, BACKUP_DIR, LOG_DIR, SKIP_PROC, _backup_done, _last_backup
+    global SETTINGS, DB_PATH, P6_USER, BACKUP_DIR, LOG_DIR, SKIP_PROC, _backup_done, _last_backup, XER_MANIFEST
     st = _config.load()
+    XER_MANIFEST = None
+    if st.xer_files:  # XER-only mode: the read-only store built from the files (cached until they change)
+        try:
+            path, XER_MANIFEST = _xerstore.ensure(st.xer_files)
+            st = dataclasses.replace(st, db_path=path)
+        except (_xerstore.XerStoreError, OSError, ValueError) as e:
+            st = dataclasses.replace(st, db_problem=f"XER-only mode: the XER files cannot be loaded: {e}")
     if os.path.normcase(st.db_path) != os.path.normcase(DB_PATH):
         _cols_cache.clear()
         _schema_cache.clear()
@@ -312,6 +324,8 @@ def _refresh() -> _config.Settings:
 def _before_call(tool: str) -> _config.Settings:
     """Settings of this call; raises when the policy refuses the tool or no database is usable."""
     st = _refresh()
+    if st.xer_files and _policy.is_write(tool):
+        raise ValueError(XER_READ_ONLY)
     why = _policy.refusal(tool, st.tool_profile, st.allow_writes)
     if why:
         raise ValueError(why)
@@ -335,6 +349,8 @@ def _schema_info() -> dict:
 
 def _write_refusal() -> Optional[str]:
     """Why this database may not be written now (settings and schema), None when it may."""
+    if SETTINGS.xer_files:
+        return XER_READ_ONLY
     why = _policy.write_refusal(SETTINGS.tool_profile, SETTINGS.allow_writes)
     if why:
         return why
@@ -5198,6 +5214,11 @@ def p6_diagnose() -> dict:
     if out["restart_required"]:
         out["restart_note"] = ("The tool profile or the write permission changed since the server started: restart "
                                "your MCP client to refresh its tool list.")
+    if XER_MANIFEST is not None:
+        out["xer_mode"] = {"files": [{"file": os.path.basename(f["path"]), "path": f["path"],
+                                      "xer_version": f.get("xer_version"), "projects": f["projects"],
+                                      "warnings": f["warnings"][:10]} for f in XER_MANIFEST["files"]],
+                           "note": "Read only. A Project ID already used by an earlier file gets a ~2 suffix."}
     if not DB_PATH:
         out["database_problem"] = st.db_problem or _config.NO_DB_MESSAGE
         return out

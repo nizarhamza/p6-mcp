@@ -40,7 +40,18 @@ class DatabasePage(QWidget):
         lay = QVBoxLayout(self)
         lay.addWidget(note(tr("db.intro")))
 
+        box, sl = group(tr("db.source"))
+        self.src_db = QRadioButton(tr("db.source.database"))
+        self.src_xer = QRadioButton(tr("db.source.xer"))
+        self.src_grp = QButtonGroup(self)
+        for b in (self.src_db, self.src_xer):
+            self.src_grp.addButton(b)
+            sl.addWidget(b)
+        self.src_grp.buttonClicked.connect(self._source)
+        lay.addWidget(box)
+
         box, bl = group(tr("db.profiles"))
+        self.profiles_box = box
         self.table = QTableWidget(0, len(self.COLS))
         self.table.setHorizontalHeaderLabels([tr(c) for c in self.COLS])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -112,7 +123,14 @@ class DatabasePage(QWidget):
         crow.addStretch(1)
         dl.addLayout(crow)
         lay.addWidget(box)
+        from p6mcp.settings_app.xer_panel import XerPanel
+        self.xer = XerPanel(win)
+        lay.addWidget(self.xer)
         lay.addStretch(1)
+        self.refresh()
+
+    def _source(self, *_args) -> None:
+        self.win.set_data(dict(self.win.data, data_source="xer" if self.src_xer.isChecked() else "database"))
         self.refresh()
 
     # -- table
@@ -126,6 +144,13 @@ class DatabasePage(QWidget):
     def refresh(self, select: Optional[str] = None) -> None:
         keep = select or self.selected()
         data = self.win.data
+        xer = data.get("data_source") == "xer"
+        (self.src_xer if xer else self.src_db).setChecked(True)
+        self.profiles_box.setVisible(not xer)
+        self.detail.setVisible(not xer)
+        if hasattr(self, "xer"):
+            self.xer.setVisible(xer)
+            self.xer.refresh()
         self.table.blockSignals(True)
         self.table.setRowCount(0)
         for d in data.get("databases", []):
@@ -640,16 +665,17 @@ class ToolsPage(QWidget):
         d = self.win.data
         full = d.get("tool_profile") == "full"
         (self.full if full else self.basic).setChecked(True)
+        xer = d.get("data_source") == "xer"
         self.allow.setChecked(bool(d.get("allow_writes")))
-        self.allow.setEnabled(full)
-        self.allow.setToolTip("" if full else tr("tools.allow.needs_full"))
+        self.allow.setEnabled(full and not xer)
+        self.allow.setToolTip(tr("tools.allow.xer") if xer else ("" if full else tr("tools.allow.needs_full")))
         self.backup.setChecked(bool(d.get("backup_before_write", True)))
         self.block.setChecked(bool(d.get("block_when_p6_running", True)))
         self.folder.setText(d.get("backup_dir") or "")
         self.keep.blockSignals(True)
         self.keep.setValue(int(d.get("backup_retention", config.DEFAULTS["backup_retention"])))
         self.keep.blockSignals(False)
-        rows = settings_logic.tool_rows(d.get("tool_profile", "basic"), bool(d.get("allow_writes")))
+        rows = settings_logic.tool_rows(d.get("tool_profile", "basic"), bool(d.get("allow_writes")) and not xer)
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             self.table.setItem(i, 0, QTableWidgetItem(r["tool"]))
