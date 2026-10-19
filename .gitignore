@@ -1,0 +1,33 @@
+# Schedules and databases: never commit real project data
+*.xer
+*.XER
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+!tests/fixtures/*.py
+
+# Runtime output
+logs/
+*.log
+*.jsonl
+p6_mcp_backups/
+p6_mcp_logs/
+backups/
+health/
+
+# Local configuration
+config.json
+*.local.json
+.env
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/

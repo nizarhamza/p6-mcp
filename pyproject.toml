@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "p6mcp"
+dynamic = ["version"]
+description = "Local MCP server for Primavera P6 Professional standalone databases (not affiliated with Oracle)"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.8,<3",
+    "keyring>=25",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+p6mcp-server = "p6mcp.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "p6mcp.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["p6mcp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["p6mcp/server.py"]  # legacy single-file module: linted once it is split
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
