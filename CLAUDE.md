@@ -108,6 +108,19 @@ stay outside this repository.
   files every read tool runs and `p6_cpm_validate` gives a match rate of 1.0. Settings: Database page data
   source radios and `xer_panel.XerPanel` (files, order, load check on the thread pool).
 
+- Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (icon from `tray.badge`, PNG-in-ICO,
+  version resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`
+  without Qt for the bundle; locales and package metadata collected), `installer.iss` (per user, `AppMutex` =
+  `tray.MUTEX`, one postinstall register entry per adapter with `Check: ClientDetected(id)` from
+  `p6mcp-server setup detected-clients`, uninstall runs `clients unregister --detected` and
+  `setup startup off`; a test keeps it in step with `clients.BY_ID`), `bundle.py` (portable zip, `.mcpb`
+  manifest 0.3 type binary with `user_config` -> env, SHA256SUMS), `build.ps1`, `sign.ps1` (pfx). Unresolved
+  `${...}` bundle templates in env vars are ignored by `config.load`. CI: `.github/workflows/ci.yml`
+  (windows-2025, Python 3.12 and 3.13, ruff, pytest, no data files), `release.yml` (tag vX.Y.Z = version,
+  signing per `P6MCP_SIGNING`: none / pfx / azure, draft release with gh). Run ISCC from PowerShell: Git Bash
+  rewrites `/D...` arguments into paths. Test an install with a fake profile in APPDATA / LOCALAPPDATA /
+  USERPROFILE so the installer never registers the real clients.
+
 ## Running
 
 ```powershell

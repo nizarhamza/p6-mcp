@@ -15,6 +15,7 @@ from p6mcp import config, runtime, supervisor
 from p6mcp.i18n import tr
 
 TICK_MS = 2000
+MUTEX = "P6MCP-Tray"  # the installer's AppMutex: setup asks to close the app while it runs
 
 
 def instance_name() -> str:
@@ -34,31 +35,45 @@ def signal_running_instance() -> bool:
     return True
 
 
+def _named_mutex(name: str):
+    """A named mutex held while the app runs (None outside Windows)."""
+    import sys
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    return ctypes.windll.kernel32.CreateMutexW(None, False, name)
+
+
+def badge(size: int, dot: Optional[str] = None) -> QPixmap:
+    """The app's "P6" badge (also the source of the .ico and the bundle icon)."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setBrush(QColor("#1f4e79"))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawRoundedRect(0, 0, size, size, size * 0.2, size * 0.2)
+    f = QFont("Segoe UI")
+    f.setBold(True)
+    f.setPixelSize(int(size * 0.5))
+    p.setFont(f)
+    p.setPen(QColor("white"))
+    p.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, "P6")
+    if dot:
+        r = max(4, size // 4)
+        p.setBrush(QColor(dot))
+        p.setPen(QColor("white"))
+        p.drawEllipse(size - r - 1, size - r - 1, r, r)
+    p.end()
+    return pm
+
+
 def make_icon(state: str = supervisor.DISABLED) -> QIcon:
     """A small "P6" badge; its dot shows the HTTP server state (green running, red error)."""
     icon = QIcon()
     dot = {supervisor.RUNNING: "#2e9d57", supervisor.ERROR: "#c62828", supervisor.STARTING: "#e0a000"}.get(state)
     for size in (16, 20, 24, 32, 40, 48, 64):
-        pm = QPixmap(size, size)
-        pm.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(QColor("#1f4e79"))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawRoundedRect(0, 0, size, size, size * 0.2, size * 0.2)
-        f = QFont("Segoe UI")
-        f.setBold(True)
-        f.setPixelSize(int(size * 0.5))
-        p.setFont(f)
-        p.setPen(QColor("white"))
-        p.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, "P6")
-        if dot:
-            r = max(4, size // 4)
-            p.setBrush(QColor(dot))
-            p.setPen(QColor("white"))
-            p.drawEllipse(size - r - 1, size - r - 1, r, r)
-        p.end()
-        icon.addPixmap(pm)
+        icon.addPixmap(badge(size, dot))
     return icon
 
 
@@ -67,6 +82,7 @@ class TrayApp(QObject):
         super().__init__()
         self.app = app
         self.supervisor = sup or supervisor.Supervisor()
+        self._mutex = _named_mutex(MUTEX)
         self.window = None
         self.notified = False
         self.server = QLocalServer(self)

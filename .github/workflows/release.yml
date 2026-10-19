@@ -1,0 +1,139 @@
+name: Release
+
+# Push a tag vX.Y.Z (matching p6mcp.__version__) to build, optionally sign, and publish a draft release.
+# Signing: repository variable P6MCP_SIGNING = none (default) | pfx | azure, or the input of a manual run.
+#   pfx:   secrets P6MCP_PFX_BASE64 (the .pfx file, base64) and P6MCP_PFX_PASSWORD
+#   azure: Azure Artifact Signing with OpenID Connect: secrets AZURE_CLIENT_ID, AZURE_TENANT_ID,
+#          AZURE_SUBSCRIPTION_ID; variables AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: Signing method
+        type: choice
+        options: [none, pfx, azure]
+        default: none
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: windows-2025
+    env:
+      SIGNING: ${{ inputs.sign || vars.P6MCP_SIGNING || 'none' }}
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+      P6MCP_REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" "pyinstaller==6.22.3"
+      - name: Version matches the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          v=$(python -c "import p6mcp; print(p6mcp.__version__)")
+          test "v$v" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} but version $v"; exit 1; }
+      - name: Tests
+        run: python -m pytest -q
+      - name: Build executables
+        run: |
+          python packaging/make_assets.py
+          python -m PyInstaller packaging/p6mcp.spec --noconfirm --distpath packaging/dist --workpath packaging/build/pyi --log-level WARN
+
+      - name: Azure login (signing)
+        if: env.SIGNING == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign executables (Azure Artifact Signing)
+        if: env.SIGNING == 'azure'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_CERT_PROFILE }}
+          files: |
+            ${{ github.workspace }}\packaging\dist\P6MCP\p6mcp-server.exe
+            ${{ github.workspace }}\packaging\dist\P6MCP\p6mcp-settings.exe
+            ${{ github.workspace }}\packaging\dist\P6MCP-server\p6mcp-server.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Sign executables (PFX)
+        if: env.SIGNING == 'pfx'
+        shell: pwsh
+        env:
+          P6MCP_PFX_BASE64: ${{ secrets.P6MCP_PFX_BASE64 }}
+          P6MCP_PFX_PASSWORD: ${{ secrets.P6MCP_PFX_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "p6mcp.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:P6MCP_PFX_BASE64))
+          "P6MCP_PFX_PATH=$pfx" >> $env:GITHUB_ENV
+          $env:P6MCP_PFX_PATH = $pfx
+          ./packaging/sign.ps1 -Files packaging/dist/P6MCP/p6mcp-server.exe, packaging/dist/P6MCP/p6mcp-settings.exe, packaging/dist/P6MCP-server/p6mcp-server.exe
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          P6MCP_PFX_PASSWORD: ${{ secrets.P6MCP_PFX_PASSWORD }}
+        run: |
+          $v = (Get-Content packaging/build/version.txt -Raw).Trim()
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $isccArgs = @("/Q", "/DAppVersion=$v", "/DRepoUrl=$env:P6MCP_REPO_URL")
+          if ($env:SIGNING -eq "pfx") {
+            $sign = "pwsh -NoProfile -File `"$PWD\packaging\sign.ps1`" -Files `$f"
+            $isccArgs += @("/DSIGN", "/Sp6sign=$sign")
+          }
+          & $iscc @isccArgs packaging/installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+      - name: Sign installer (Azure Artifact Signing)
+        if: env.SIGNING == 'azure'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\packaging\dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Portable zip, MCP bundle, checksums
+        run: python packaging/bundle.py
+      - name: Draft GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "${GITHUB_REF_NAME}" in *dev*|*rc*|*a*|*b*) pre="--prerelease";; esac
+          notes="Unsigned build." ; [ "$SIGNING" != "none" ] && notes="Signed with ${SIGNING}."
+          gh release create "${GITHUB_REF_NAME}" --draft $pre --title "P6 MCP ${GITHUB_REF_NAME}" \
+            --notes "$notes See CHANGELOG.md. Verify downloads with SHA256SUMS.txt." \
+            packaging/dist/*.exe packaging/dist/*.zip packaging/dist/*.mcpb packaging/dist/SHA256SUMS.txt
+      - name: Keep the artifacts (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p6mcp-build
+          path: |
+            packaging/dist/*.exe
+            packaging/dist/*.zip
+            packaging/dist/*.mcpb
+            packaging/dist/SHA256SUMS.txt

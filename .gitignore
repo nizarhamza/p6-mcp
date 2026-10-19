@@ -31,3 +31,7 @@ __pycache__/
 .ruff_cache/
 build/
 dist/
+
+# Packaging output
+packaging/build/
+packaging/dist/

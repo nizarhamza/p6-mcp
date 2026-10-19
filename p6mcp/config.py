@@ -295,7 +295,7 @@ class Settings:
 
 def _env_flag(name: str) -> Optional[bool]:
     v = os.environ.get(name)
-    if v is None or v.strip() == "":
+    if v is None or v.strip() == "" or "${" in v:  # unset, or an unresolved bundle template
         return None
     return v.strip().lower() in ("1", "true", "yes", "on")
 
@@ -310,6 +310,8 @@ def load() -> Settings:
     except ConfigError as e:
         data, steps, err = None, [], str(e)
     env_db = os.environ.get("P6_DB_PATH", "").strip()
+    if "${" in env_db:  # an MCP bundle option left empty: the host passes the template unresolved
+        env_db = ""
     cfg = data or copy.deepcopy(DEFAULTS)
     source = "config" if data is not None else ("env" if env_db else "none")
 
@@ -355,7 +357,9 @@ def load() -> Settings:
     if legacy_log and os.path.normcase(os.path.abspath(legacy_log)) == os.path.normcase(os.path.abspath(log_dir)):
         legacy_log = None
 
-    profile = os.environ.get("P6MCP_TOOL_PROFILE", "").strip().lower() or cfg["tool_profile"]
+    profile = os.environ.get("P6MCP_TOOL_PROFILE", "").strip().lower()
+    if not profile or "${" in profile:
+        profile = cfg["tool_profile"]
     if profile not in TOOL_PROFILES:
         profile = "basic"
     allow = _env_flag("P6MCP_ALLOW_WRITES")
