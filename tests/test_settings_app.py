@@ -1,0 +1,184 @@
+"""Settings window, driven offscreen with pytest-qt (dialogs replaced, Credential Manager faked)."""
+
+import json
+import os
+import shutil
+import socket
+
+import pytest
+
+pytest.importorskip("PySide6")
+pytestqt = pytest.importorskip("pytestqt")
+
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtGui import QGuiApplication  # noqa: E402
+
+from p6mcp import config, i18n  # noqa: E402
+from p6mcp.settings_app import pages, window  # noqa: E402
+from p6mcp.settings_app.window import SettingsWindow  # noqa: E402
+
+TOKEN = "tok-abcdefghijklmnop-7890"
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch, golden):
+    cfg = tmp_path / "config.json"
+    monkeypatch.setenv("P6MCP_CONFIG", str(cfg))
+    monkeypatch.setattr(pages.credentials, "http_token", lambda create=True: TOKEN)
+    monkeypatch.setattr(pages.credentials, "regenerate_http_token", lambda: "tok-new-0000")
+    answers = {"value": True}
+    monkeypatch.setattr(pages, "ask", lambda *a, **k: answers["value"])
+    monkeypatch.setattr(SettingsWindow, "ask_close", lambda self: "discard")
+    warnings = []
+    monkeypatch.setattr(window.QMessageBox, "warning", lambda *a, **k: warnings.append(a[2] if len(a) > 2 else ""))
+    db = tmp_path / "demo.db"
+    shutil.copyfile(golden, db)
+    return {"cfg": cfg, "db": str(db), "answers": answers, "warnings": warnings}
+
+
+def make(qtbot, data=None):
+    if data is not None:
+        config.save(data)
+    w = SettingsWindow()
+    qtbot.addWidget(w)
+    return w
+
+
+@pytest.fixture
+def win(qtbot, env):
+    w = make(qtbot, {"language": "en"})
+    yield w
+    i18n.set_language("en")
+
+
+def test_starts_with_no_database_and_says_so(win):
+    assert win.windowTitle() == "P6 MCP Settings"
+    assert win.banner.isVisibleTo(win)
+    assert "No database" in win.banner.text()
+    assert win.pages[0].table.rowCount() == 0 and not win.pages[0].detail.isEnabled()
+
+
+def test_add_test_trust_confirm_and_save(qtbot, win, env):
+    page = win.pages[0]
+    page._add(env["db"])
+    assert page.table.rowCount() == 1 and page.selected() == "demo"
+    assert not page.use_btn.isEnabled()  # never usable before a test
+    page.run_test()
+    qtbot.waitUntil(lambda: "demo" in page.results, timeout=15000)
+    res = page.results["demo"]
+    assert res["ok"] and "25.12" in page.result.text()
+    assert page.trust.isVisibleTo(page) and page.use_btn.isEnabled()
+    page.trust.click()  # the dialog answers yes
+    assert win.data["trusted_schemas"] == [res["schema"]["fingerprint"]]
+    page.use_btn.click()
+    assert win.data["active_database"] == "demo" and page.table.item(0, 2).text() == "In use"
+    assert win.dirty() and win.save_btn.isEnabled()
+    assert win.save()
+    st = config.load()
+    assert st.db_path == os.path.abspath(env["db"]) and st.trusted_schemas == (res["schema"]["fingerprint"],)
+    assert not win.dirty() and not win.banner.isVisibleTo(win)
+
+
+def test_new_path_needs_a_new_test(qtbot, win, env, tmp_path):
+    page = win.pages[0]
+    page._add(env["db"])
+    page.run_test()
+    qtbot.waitUntil(lambda: "demo" in page.results, timeout=15000)
+    page.use_btn.click()
+    other = tmp_path / "copy.db"
+    shutil.copyfile(env["db"], other)
+    page.path_edit.setText(str(other))
+    page._repoint()
+    e = win.data["databases"][0]
+    assert e["confirmed"] is False and win.data["active_database"] is None and not page.use_btn.isEnabled()
+
+
+def test_failed_test_cannot_be_confirmed(qtbot, win, tmp_path):
+    bad = tmp_path / "bad.db"
+    bad.write_text("not a database" * 100, encoding="utf-8")
+    page = win.pages[0]
+    page._add(str(bad))
+    page.run_test()
+    qtbot.waitUntil(lambda: "bad" in page.results, timeout=15000)
+    assert "SQLite" in page.result.text() and not page.use_btn.isEnabled()
+
+
+def test_unsaved_changes_and_revert(win):
+    tools = win.pages[2]
+    tools.full.click()
+    assert win.data["tool_profile"] == "full" and win.dirty() and "Unsaved" in win.status.text()
+    win.revert()
+    assert win.data["tool_profile"] == "basic" and tools.basic.isChecked() and not win.dirty()
+
+
+def test_writes_need_full_profile_and_a_confirmation(win, env):
+    tools = win.pages[2]
+    assert not tools.allow.isEnabled()  # Basic profile
+    tools.full.click()
+    assert tools.allow.isEnabled()
+    env["answers"]["value"] = False
+    tools.allow.click()
+    assert not tools.allow.isChecked() and win.data.get("allow_writes") is False
+    env["answers"]["value"] = True
+    tools.allow.click()
+    assert win.data["allow_writes"] is True
+    assert tools.count.text().startswith(f"{tools.table.rowCount()} of")
+    env["answers"]["value"] = False
+    tools.backup.click()  # turning backups off while writes are allowed asks first
+    assert tools.backup.isChecked() and win.data["backup_before_write"] is True
+    tools.block.click()
+    assert tools.block.isChecked()
+    assert win.save()
+    assert win.banner.isVisibleTo(win) and "tool profile, write permission" in win.banner.text()
+
+
+def test_backup_folder_and_retention(win):
+    tools = win.pages[2]
+    tools.keep.setValue(3)
+    tools.folder.setText(r"D:\Backups\P6")
+    tools._folder()
+    assert win.data["backup_retention"] == 3 and win.data["backup_dir"] == os.path.normpath(r"D:\Backups\P6")
+    tools._default_folder()
+    assert win.data["backup_dir"] is None
+    tools.keep.setValue(0)
+    assert tools.keep.text() == "all"
+
+
+def test_server_page(win):
+    srv = win.pages[1]
+    assert srv.stdio.isChecked() and not srv.http_box.isEnabled()
+    srv.http.click()
+    assert win.data["transport"] == "http" and srv.http_box.isEnabled()
+    assert srv.token_edit.text().endswith("7890") and TOKEN not in srv.token_edit.text()
+    srv.show_btn.click()
+    assert srv.token_edit.text() == TOKEN
+    srv.copy_btn.click()
+    assert QGuiApplication.clipboard().text() == TOKEN
+    srv.regen_btn.click()
+    assert srv.token == "tok-new-0000"
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen()
+        srv.port.setValue(s.getsockname()[1])
+        assert srv.check_port() is False and "In use" in srv.port_state.text()
+    assert win.data["http_port"] == srv.port.value()
+
+
+def test_language_switch_and_rtl(win, monkeypatch):
+    win.lang.setCurrentIndex(win.lang.findData("fr"))
+    assert win.nav.item(0).text() == "Base de données" and win.data["language"] == "fr"
+    assert win.windowTitle() == "Paramètres P6 MCP"
+    assert win.layoutDirection() == Qt.LayoutDirection.LeftToRight
+    monkeypatch.setattr(i18n, "RTL", {"fr"})  # stands for Arabic until its catalog exists
+    win.build(0)
+    assert win.layoutDirection() == Qt.LayoutDirection.RightToLeft
+
+
+def test_broken_config_file(qtbot, env):
+    env["cfg"].write_text("{broken", encoding="utf-8")
+    w = make(qtbot)
+    assert w.banner.isVisibleTo(w) and "cannot be read" in w.banner.text() and w.banner_btn.isVisibleTo(w)
+    assert w.save() is False and env["warnings"]
+    w.reset_broken()
+    assert os.path.exists(str(env["cfg"]) + ".broken") and w.save()
+    assert json.loads(env["cfg"].read_text(encoding="utf-8"))["schema_version"] == config.CONFIG_VERSION

@@ -15,16 +15,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+settings = ["PySide6-Essentials>=6.7"]
+dev = ["pytest>=8", "pytest-qt>=4.4", "ruff>=0.6", "PySide6-Essentials>=6.7"]
 
 [project.scripts]
 p6mcp-server = "p6mcp.__main__:main"
+
+[project.gui-scripts]
+p6mcp-settings = "p6mcp.settings_app.__main__:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "p6mcp.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["p6mcp*"]
+
+[tool.setuptools.package-data]
+p6mcp = ["locales/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

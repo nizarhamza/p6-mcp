@@ -31,13 +31,36 @@ stay outside this repository.
 - `p6mcp/confirm.py`: `TokenStore` (in process, 15 min, single use, bound to tool + canonical arguments +
   database + plan digest).
 
+- `p6mcp/dbcheck.py`: `suggestions()` (SQLite connections of P6's `PrmBootStrapV2.xml` under
+  `%APPDATA%`/`%LOCALAPPDATA%\Oracle\Primavera P6\P6 Professional\<version>`, newest first, then
+  `Documents\PPMDBSQLite.db`; suggestions only, never selected) and `test_connection(path, trusted)` (read only:
+  schema, P6 version, project / EPS / baseline counts, `writes_possible`, `warnings`).
+- `p6mcp/settings_logic.py`: config edits without Qt (add / update / remove / set_active / confirm a database,
+  `trust_schema`, `port_free`, `restart_needed` on `RESTART_KEYS`, `tool_rows`, broken file set aside). A new
+  path clears the confirmation; `confirm` needs an ok test of the same file.
+- `p6mcp/i18n.py` + `p6mcp/locales/<lang>.json`: `tr(key, **fmt)`, en is the reference and fallback, `auto` =
+  Windows display language, `is_rtl()` mirrors the layout (Arabic only needs its catalog). Strings: straight
+  quotes, no long dashes (test). Every key used by the UI must exist in en.json and every catalog must have the
+  same keys and placeholders (`tests/test_i18n.py`).
+- `p6mcp/settings_app/`: PySide6 Settings window (`python -m p6mcp.settings_app`, `p6mcp-settings`):
+  `window.SettingsWindow` edits `self.data` (config dict) and writes only on Save (`config.save`); pages
+  `DatabasePage` (test runs on the thread pool through `common.Job`), `ServerPage` (transport, port check,
+  token in the Credential Manager), `ToolsPage` (profile, writes with confirmation dialogs, backups, tool list).
+  Dialogs go through `common.ask` and `SettingsWindow.ask_close` so tests can answer them. HiDPI: PassThrough
+  rounding, layouts only (no fixed pixel sizes except font-metric based ones).
+
 ## Running
 
 ```powershell
 python -m venv .venv; .venv\Scripts\pip install -e .[dev]
 $env:P6MCP_CONFIG = "<path>\config.json"; .venv\Scripts\python -m p6mcp     # stdio server
+.venv\Scripts\python -m p6mcp.settings_app                                       # Settings window
 .venv\Scripts\python -m pytest -q; .venv\Scripts\ruff check .
 ```
+
+The window tests run offscreen (`QT_QPA_PLATFORM=offscreen`, set in conftest); use `isVisibleTo()` there, never
+`isVisible()`, and never leave a modal dialog unanswered (it blocks the run). Offscreen rendering has no usable
+font: render screenshots with the native platform (`widget.grab()`, `QT_SCALE_FACTOR` for 110 / 125 %).
 
 ## Server gate and two-step writes (milestone 1)
 

@@ -1,0 +1,205 @@
+"""P6 MCP Settings: main window (navigation, Save / Revert, language, banners)."""
+
+from __future__ import annotations
+
+import copy
+from typing import Optional
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QCloseEvent
+from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton,
+                               QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
+
+from p6mcp import __version__, config, i18n, settings_logic
+from p6mcp.i18n import tr
+from p6mcp.settings_app.common import muted, pill
+from p6mcp.settings_app.pages import DatabasePage, ServerPage, ToolsPage
+
+PAGES = (("nav.database", DatabasePage), ("nav.server", ServerPage), ("nav.tools", ToolsPage))
+
+
+class SettingsWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.data, self.load_error = settings_logic.load_for_edit()
+        self.saved: Optional[dict] = None if self.load_error else copy.deepcopy(self.data)
+        self.restart_keys: list[str] = []
+        self.pages: list[QWidget] = []
+        i18n.set_language(self.data.get("language", "auto"))
+        self.build()
+
+    # -- layout (rebuilt when the language changes)
+    def build(self, page: int = 0) -> None:
+        self.setWindowTitle(tr("app.title"))
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft if i18n.is_rtl() else Qt.LayoutDirection.LeftToRight)
+        root = QWidget()
+        lay = QVBoxLayout(root)
+        self.banner = QLabel()
+        self.banner.setWordWrap(True)
+        self.banner.setVisible(False)
+        self.banner_btn = QPushButton(tr("app.reset_broken"))
+        self.banner_btn.clicked.connect(self.reset_broken)
+        brow = QHBoxLayout()
+        brow.addWidget(self.banner, 1)
+        brow.addWidget(self.banner_btn)
+        lay.addLayout(brow)
+
+        body = QHBoxLayout()
+        self.nav = QListWidget()
+        self.stack = QStackedWidget()
+        self.pages = []
+        for key, cls in PAGES:
+            self.nav.addItem(tr(key))
+            page_w = cls(self)
+            self.pages.append(page_w)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+            scroll.setWidget(page_w)
+            self.stack.addWidget(scroll)
+        fm = self.nav.fontMetrics()
+        self.nav.setFixedWidth(max(fm.horizontalAdvance(tr(k)) for k, _ in PAGES) + fm.height() * 3)
+        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        body.addWidget(self.nav)
+        body.addWidget(self.stack, 1)
+        lay.addLayout(body, 1)
+
+        bottom = QHBoxLayout()
+        bottom.addWidget(QLabel(tr("app.language")))
+        self.lang = QComboBox()
+        self.lang.addItem(tr("app.language.auto"), "auto")
+        for code in i18n.available():
+            self.lang.addItem(i18n.NAMES.get(code, code), code)
+        idx = self.lang.findData(self.data.get("language", "auto"))
+        self.lang.setCurrentIndex(max(idx, 0))
+        self.lang.currentIndexChanged.connect(self._language)
+        bottom.addWidget(self.lang)
+        bottom.addStretch(1)
+        self.status = QLabel()
+        bottom.addWidget(self.status)
+        self.revert_btn = QPushButton(tr("app.revert"))
+        self.revert_btn.clicked.connect(self.revert)
+        self.save_btn = QPushButton(tr("app.save"))
+        self.save_btn.setDefault(True)
+        self.save_btn.clicked.connect(self.save)
+        bottom.addWidget(self.revert_btn)
+        bottom.addWidget(self.save_btn)
+        lay.addLayout(bottom)
+        lay.addWidget(muted(QLabel(tr("app.footer", version=__version__))))
+
+        self.setCentralWidget(root)
+        self.nav.setCurrentRow(page)
+        fm = self.fontMetrics()
+        self.resize(max(self.width(), fm.averageCharWidth() * 110), max(self.height(), fm.height() * 40))
+        self.page_changed()
+
+    # -- state
+    def dirty(self) -> bool:
+        return self.saved is None or self.data != self.saved
+
+    def set_data(self, data: dict) -> None:
+        self.data = data
+        self.page_changed()
+
+    def page_changed(self) -> None:
+        dirty = self.dirty()
+        self.save_btn.setEnabled(dirty)
+        self.revert_btn.setEnabled(dirty and self.saved is not None)
+        if dirty:
+            pill(self.status, "warn", tr("app.unsaved"))
+        else:
+            self.status.setText(tr("app.saved"))
+            self.status.setStyleSheet("")
+        self._banner()
+
+    def _banner(self) -> None:
+        self.banner_btn.setVisible(bool(self.load_error))
+        if self.load_error:
+            pill(self.banner, "error", tr("app.broken", err=self.load_error))
+        elif self.restart_keys:
+            names = ", ".join(tr("restart." + k) for k in self.restart_keys)
+            pill(self.banner, "info", tr("app.restart", what=names))
+        elif not (self.data.get("active_database") and settings_logic.find(self.data, self.data["active_database"])):
+            pill(self.banner, "warn", tr("app.no_database"))
+        else:
+            self.banner.setVisible(False)
+            return
+        self.banner.setVisible(True)
+
+    def refresh_pages(self) -> None:
+        for p in self.pages:
+            p.refresh()
+        self.page_changed()
+
+    # -- actions
+    def save(self) -> bool:
+        if self.load_error:
+            QMessageBox.warning(self, tr("app.title"), tr("app.broken.save_first"))
+            return False
+        try:
+            config.save(self.data)
+        except (config.ConfigError, OSError) as e:
+            self.error(tr("app.save_failed", err=e))
+            return False
+        before = self.saved or {}
+        self.restart_keys = sorted(set(self.restart_keys) | set(settings_logic.restart_needed(before, self.data)),
+                                   key=settings_logic.RESTART_KEYS.index)
+        self.saved = copy.deepcopy(self.data)
+        self.page_changed()
+        self.flash(tr("app.saved"))
+        return True
+
+    def revert(self) -> None:
+        if self.saved is not None:
+            self.data = copy.deepcopy(self.saved)
+            self.refresh_pages()
+
+    def reset_broken(self) -> None:
+        if not self.load_error:
+            return
+        try:
+            moved = settings_logic.set_aside_broken_file()
+        except OSError as e:
+            self.error(str(e))
+            return
+        self.load_error = None
+        self.saved = None
+        self.data = copy.deepcopy(config.DEFAULTS)
+        self.flash(tr("app.broken.moved", path=moved or ""))
+        self.refresh_pages()
+
+    def _language(self, _index: int) -> None:
+        code = self.lang.currentData()
+        self.data = dict(self.data, language=code)
+        i18n.set_language(code)
+        self.build(self.nav.currentRow())
+
+    def error(self, text: str) -> None:
+        QMessageBox.warning(self, tr("app.title"), text)
+
+    def flash(self, text: str) -> None:
+        self.statusBar().showMessage(text, 4000)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if not self.dirty() or self.load_error:
+            event.accept()
+            return
+        answer = self.ask_close()
+        if answer == "save" and self.save():
+            event.accept()
+        elif answer == "discard":
+            event.accept()
+        else:
+            event.ignore()
+
+    def ask_close(self) -> str:
+        """'save', 'discard' or 'cancel' (a separate method so tests can answer it)."""
+        box = QMessageBox(QMessageBox.Icon.Question, tr("app.title"), tr("app.close.ask"),
+                          QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
+                          | QMessageBox.StandardButton.Cancel, self)
+        box.button(QMessageBox.StandardButton.Save).setText(tr("app.save"))
+        box.button(QMessageBox.StandardButton.Discard).setText(tr("app.discard"))
+        box.button(QMessageBox.StandardButton.Cancel).setText(tr("common.cancel"))
+        answer = box.exec()
+        return {QMessageBox.StandardButton.Save: "save",
+                QMessageBox.StandardButton.Discard: "discard"}.get(answer, "cancel")
