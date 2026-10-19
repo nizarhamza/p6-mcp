@@ -18,7 +18,10 @@ from __future__ import annotations
 import glob
 import os
 
-from p6mcp.clients.base import Adapter, Launch
+from p6mcp import jsonc
+from p6mcp.clients.base import Adapter, HttpTarget, Launch
+
+VSCODE_INPUT = "p6mcp-token"
 
 
 def _env(name: str) -> str:
@@ -33,6 +36,7 @@ class ClaudeDesktop(Adapter):
     id, name = "claude_desktop", "Claude Desktop"
     process_names = ("claude.exe",)
     docs = "https://modelcontextprotocol.io/docs/develop/connect-local-servers"
+    supports_http = False  # its config file only starts local (stdio) servers
 
     def _packages(self) -> list[str]:
         return glob.glob(os.path.join(_env("LOCALAPPDATA"), "Packages", "Claude_*"))
@@ -79,8 +83,27 @@ class VSCode(Adapter):
         roots = [os.path.join(_env("LOCALAPPDATA"), "Programs"), _env("ProgramFiles")]
         return any(os.path.isdir(os.path.join(r, d)) for r in roots if r for d in self.exe_dirs)
 
+    token_in_file = False  # VS Code asks for the token once and keeps it in its secret storage
+
     def stdio_entry(self, ln: Launch) -> dict:
         return {"type": "stdio", "command": ln.command, "args": list(ln.args)}
+
+    def http_entry(self, http: HttpTarget) -> dict:
+        return {"type": "http", "url": http.url, "headers": {"Authorization": "Bearer ${input:" + VSCODE_INPUT + "}"}}
+
+    def extra_register(self, text: str, entry: dict) -> str:
+        inputs = (jsonc.loads(text) or {}).get("inputs") or []
+        has = any(isinstance(i, dict) and i.get("id") == VSCODE_INPUT for i in inputs)
+        if entry.get("type") == "http" and not has:
+            return jsonc.append_item(text, ["inputs"], {
+                "type": "promptString", "id": VSCODE_INPUT, "password": True,
+                "description": "P6 MCP access token (P6 MCP Settings, Server page, Copy)"})
+        if entry.get("type") != "http" and has:
+            return self.extra_unregister(text)
+        return text
+
+    def extra_unregister(self, text: str) -> str:
+        return jsonc.remove_items(text, ["inputs"], lambda i: isinstance(i, dict) and i.get("id") == VSCODE_INPUT)
 
 
 class VSCodeInsiders(VSCode):
@@ -132,6 +155,10 @@ class Cline(Adapter):
 
     def stdio_entry(self, ln: Launch) -> dict:
         return {"command": ln.command, "args": list(ln.args), "disabled": False, "autoApprove": []}
+
+    def http_entry(self, http: HttpTarget) -> dict:  # without type Cline falls back to legacy SSE
+        return {"type": "streamableHttp", "url": http.url, "headers": {"Authorization": f"Bearer {http.token}"},
+                "disabled": False, "autoApprove": []}
 
 
 ADAPTERS: tuple[Adapter, ...] = (ClaudeDesktop(), Cursor(), VSCode(), VSCodeInsiders(), LMStudio(), Cline())

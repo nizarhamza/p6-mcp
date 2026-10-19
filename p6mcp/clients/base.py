@@ -44,6 +44,13 @@ def launch() -> Launch:
 
 
 @dataclass
+class HttpTarget:
+    """The local HTTP server a client should connect to (transport http)."""
+    url: str
+    token: str
+
+
+@dataclass
 class Status:
     client: str
     name: str
@@ -53,6 +60,7 @@ class Status:
     others: list[str] = field(default_factory=list)      # other P6 MCP entries (legacy installs)
     running: bool = False
     message: Optional[str] = None
+    transport: str = "stdio"          # of the entry this installation expects for this client
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -86,6 +94,8 @@ class Adapter:
     container: tuple[str, ...] = ("mcpServers",)
     process_names: tuple[str, ...] = ()
     docs = ""  # where the path and format were checked
+    supports_http = True      # False: the client only starts stdio servers (gets a stdio entry in http mode)
+    token_in_file = True      # an HTTP entry holds the access token in the client's file
 
     # -- to define per client
     def config_path(self) -> str:
@@ -97,9 +107,22 @@ class Adapter:
     def stdio_entry(self, ln: Launch) -> dict:
         return {"command": ln.command, "args": list(ln.args)}
 
+    def http_entry(self, http: HttpTarget) -> dict:
+        return {"url": http.url, "headers": {"Authorization": f"Bearer {http.token}"}}
+
+    def extra_register(self, text: str, entry: dict) -> str:
+        """Further edits a registration needs besides the entry (VS Code: its token prompt)."""
+        return text
+
+    def extra_unregister(self, text: str) -> str:
+        return text
+
     # -- shared
-    def expected(self, ln: Optional[Launch] = None) -> dict:
-        return self.stdio_entry(ln or launch())
+    def uses_http(self, http: Optional[HttpTarget]) -> bool:
+        return http is not None and self.supports_http
+
+    def expected(self, ln: Optional[Launch] = None, http: Optional[HttpTarget] = None) -> dict:
+        return self.http_entry(http) if self.uses_http(http) else self.stdio_entry(ln or launch())
 
     def _load(self) -> tuple[Optional[str], bool, Any]:
         path = self.config_path()
@@ -117,8 +140,10 @@ class Adapter:
             node = node.get(k) if isinstance(node, dict) else None
         return node if isinstance(node, dict) else {}
 
-    def status(self, ln: Optional[Launch] = None, running: Optional[set] = None) -> Status:
-        st = Status(self.id, self.name, NOT_INSTALLED, self.config_path())
+    def status(self, ln: Optional[Launch] = None, running: Optional[set] = None,
+               http: Optional[HttpTarget] = None) -> Status:
+        st = Status(self.id, self.name, NOT_INSTALLED, self.config_path(),
+                    transport="http" if self.uses_http(http) else "stdio")
         if running is not None:
             st.running = any(p.lower() in running for p in self.process_names)
         if not self.installed():
@@ -134,7 +159,7 @@ class Adapter:
             st.state = NOT_REGISTERED
             return st
         st.entry = servers[SERVER_KEY]
-        st.state = REGISTERED if _norm(st.entry) == _norm(self.expected(ln)) else OUTDATED
+        st.state = REGISTERED if _norm(st.entry) == _norm(self.expected(ln, http)) else OUTDATED
         return st
 
     def _edit(self, change) -> dict:
@@ -147,10 +172,11 @@ class Adapter:
         files.write_atomic(path, new, bom)
         return {"changed": True, "path": path, "backup": saved}
 
-    def register(self, ln: Optional[Launch] = None) -> dict:
-        """Add or repair the p6mcp entry."""
-        entry = self.expected(ln)
-        return self._edit(lambda t: jsonc.set_member(t, list(self.container), SERVER_KEY, entry))
+    def register(self, ln: Optional[Launch] = None, http: Optional[HttpTarget] = None) -> dict:
+        """Add or repair the p6mcp entry (HTTP when http is given and the client supports it)."""
+        entry = self.expected(ln, http)
+        return self._edit(lambda t: self.extra_register(
+            jsonc.set_member(t, list(self.container), SERVER_KEY, entry), entry))
 
     def unregister(self, key: str = SERVER_KEY) -> dict:
         """Remove the p6mcp entry (or, with key, another P6 MCP entry such as a v2 install)."""
@@ -158,7 +184,10 @@ class Adapter:
             _t, _b, data = self._load()
             if key not in self.servers(data) or not _is_p6(self.servers(data)[key]):
                 raise ValueError(f"{key} is not a P6 MCP entry of {self.name}: left unchanged")
-        return self._edit(lambda t: jsonc.delete_member(t, list(self.container), key) if t.strip() else t)
+        if key != SERVER_KEY:
+            return self._edit(lambda t: jsonc.delete_member(t, list(self.container), key) if t.strip() else t)
+        return self._edit(lambda t: self.extra_unregister(jsonc.delete_member(t, list(self.container), key))
+                          if t.strip() else t)
 
 
 def _is_p6(entry: Any) -> bool:

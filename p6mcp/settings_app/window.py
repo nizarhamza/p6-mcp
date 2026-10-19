@@ -10,20 +10,23 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton,
                                QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
-from p6mcp import __version__, config, i18n, settings_logic
+from p6mcp import __version__, config, i18n, settings_logic, startup
 from p6mcp.i18n import tr
 from p6mcp.settings_app.common import muted, pill
 from p6mcp.settings_app.clients_page import ClientsPage
-from p6mcp.settings_app.pages import DatabasePage, ServerPage, ToolsPage
+from p6mcp.settings_app.pages import DatabasePage, ServerPage, StartupPage, ToolsPage
 
-PAGES = (("nav.database", DatabasePage), ("nav.server", ServerPage), ("nav.tools", ToolsPage),
-         ("nav.clients", ClientsPage))
-CLIENTS_PAGE = 3
+PAGES = (("nav.database", DatabasePage), ("nav.startup", StartupPage), ("nav.server", ServerPage),
+         ("nav.clients", ClientsPage), ("nav.tools", ToolsPage))
+CLIENTS_PAGE = [cls for _k, cls in PAGES].index(ClientsPage)
 
 
 class SettingsWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, supervisor=None, on_close=None):
+        """supervisor: the tray app's HTTP server supervisor (None: status read from the status file).
+        on_close: called when a close is accepted; returning True hides the window instead (tray)."""
         super().__init__()
+        self.supervisor, self.on_close = supervisor, on_close
         self.data, self.load_error = settings_logic.load_for_edit()
         self.saved: Optional[dict] = None if self.load_error else copy.deepcopy(self.data)
         self.restart_keys: list[str] = []
@@ -155,6 +158,13 @@ class SettingsWindow(QMainWindow):
             return
         self.banner.setVisible(True)
 
+    def page(self, cls):
+        return next(p for p in self.pages if isinstance(p, cls))
+
+    def server_state(self, st) -> None:
+        """New HTTP server state from the tray app's supervisor."""
+        self.page(ServerPage).set_state(st)
+
     def refresh_pages(self) -> None:
         for p in self.pages:
             p.refresh()
@@ -170,10 +180,15 @@ class SettingsWindow(QMainWindow):
         except (config.ConfigError, OSError) as e:
             self.error(tr("app.save_failed", err=e))
             return False
+        try:
+            startup.sync(self.data)
+        except OSError as e:  # the settings are saved; only the startup entry failed
+            self.error(tr("st.sync_failed", err=e))
         before = self.saved or {}
         self.restart_keys = sorted(set(self.restart_keys) | set(settings_logic.restart_needed(before, self.data)),
                                    key=settings_logic.RESTART_KEYS.index)
         self.saved = copy.deepcopy(self.data)
+        self.page(StartupPage).refresh()
         self.page_changed()
         self.flash(tr("app.saved"))
         return True
@@ -209,17 +224,25 @@ class SettingsWindow(QMainWindow):
     def flash(self, text: str) -> None:
         self.statusBar().showMessage(text, 4000)
 
-    def closeEvent(self, event: QCloseEvent) -> None:
+    def close_for_quit(self) -> bool:
+        """Before the app quits: False when the user cancels (unsaved changes)."""
         if not self.dirty() or self.load_error:
-            event.accept()
-            return
+            return True
         answer = self.ask_close()
-        if answer == "save" and self.save():
-            event.accept()
-        elif answer == "discard":
-            event.accept()
-        else:
+        return (answer == "save" and self.save()) or answer == "discard"
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if not self.close_for_quit():
             event.ignore()
+            return
+        if self.on_close is not None and self.on_close():
+            if self.dirty() and self.saved is not None:  # discarded: start from the saved settings next time
+                self.data = copy.deepcopy(self.saved)
+                self.refresh_pages()
+            event.ignore()
+            self.hide()
+            return
+        event.accept()
 
     def ask_close(self) -> str:
         """'save', 'discard' or 'cancel' (a separate method so tests can answer it)."""

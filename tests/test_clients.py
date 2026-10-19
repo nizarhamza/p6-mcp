@@ -223,3 +223,48 @@ def test_launch_uses_console_python(monkeypatch):
     monkeypatch.setattr(base.sys, "frozen", True, raising=False)
     monkeypatch.setattr(base.sys, "executable", r"C:\Program Files\P6 MCP\p6mcp-settings.exe")
     assert base.launch().command == r"C:\Program Files\P6 MCP\p6mcp-server.exe"
+
+
+HTTP = clients.HttpTarget("http://127.0.0.1:40000/mcp", "tok-123")
+
+
+def test_http_entries(home):
+    os.makedirs(os.path.join(home["profile"], ".cursor"))
+    put(os.path.join(home["roaming"], "Claude", "claude_desktop_config.json"), "{}")
+    cursor, claude = clients.get("cursor"), clients.get("claude_desktop")
+    cursor.register(LN, HTTP)
+    claude.register(LN, HTTP)
+    c = json.loads(raw(cursor.config_path()))["mcpServers"]["p6mcp"]
+    assert c == {"url": HTTP.url, "headers": {"Authorization": "Bearer tok-123"}}
+    assert json.loads(raw(claude.config_path()))["mcpServers"]["p6mcp"] == {"command": LN.command, "args": []}
+    assert cursor.status(LN, http=HTTP).state == clients.REGISTERED
+    assert claude.status(LN, http=HTTP).transport == "stdio"
+    new_token = clients.HttpTarget(HTTP.url, "tok-456")
+    assert cursor.status(LN, http=new_token).state == clients.OUTDATED  # regenerated token: repair
+    assert cursor.status(LN).state == clients.OUTDATED  # back to stdio: repair
+
+
+def test_vscode_http_uses_a_password_prompt(home):
+    path = os.path.join(home["roaming"], "Code", "User", "mcp.json")
+    put(path, VSCODE)
+    ad = clients.get("vscode")
+    ad.register(LN, HTTP)
+    data = jsonc.loads(raw(path))
+    assert data["servers"]["p6mcp"] == {"type": "http", "url": HTTP.url,
+                                        "headers": {"Authorization": "Bearer ${input:p6mcp-token}"}}
+    assert [i["id"] for i in data["inputs"]] == ["tok", "p6mcp-token"] and "tok-123" not in raw(path)
+    ad.register(LN, HTTP)  # idempotent: one prompt only
+    assert len(jsonc.loads(raw(path))["inputs"]) == 2
+    ad.register(LN)  # back to stdio: the prompt goes
+    assert [i["id"] for i in jsonc.loads(raw(path))["inputs"]] == ["tok"]
+    ad.register(LN, HTTP)
+    ad.unregister()
+    assert jsonc.loads(raw(path)) == jsonc.loads(VSCODE) and "// my MCP servers" in raw(path)
+
+
+def test_cline_http_entry(home, monkeypatch, tmp_path):
+    monkeypatch.setenv("CLINE_MCP_SETTINGS_PATH", str(tmp_path / "cline.json"))
+    ad = clients.get("cline")
+    ad.register(LN, HTTP)
+    e = json.loads(raw(ad.config_path()))["mcpServers"]["p6mcp"]
+    assert e["type"] == "streamableHttp" and e["url"] == HTTP.url and e["disabled"] is False

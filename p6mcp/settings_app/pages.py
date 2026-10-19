@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComb
                                QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QRadioButton,
                                QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from p6mcp import config, credentials, dbcheck, policy, settings_logic
+from p6mcp import config, credentials, dbcheck, policy, runtime, settings_logic, startup
 from p6mcp.i18n import tr
 from p6mcp.settings_app.common import Job, ask, group, note, pill, start
 
@@ -347,11 +347,26 @@ def _esc(text) -> str:
 
 # ----------------------------------------------------------------- Server
 
-def server_status(data: dict) -> tuple[str, str]:
-    """(level, text) of the server status. The HTTP host is supervised by the tray app (later milestone)."""
+def server_status(data: dict, st=None) -> tuple[str, str]:
+    """(level, text) of the server status: the tray app's supervisor state when given, else the
+    status file the HTTP server writes."""
     if data.get("transport", "stdio") == "stdio":
         return "info", tr("srv.status.stdio")
-    return "idle", tr("srv.status.http_stopped")
+    if st is None:
+        f = runtime.read_status()
+        if f.get("state") == "running":
+            return "ok", tr("srv.status.running", port=f.get("port"))
+        return "idle", tr("srv.status.no_tray") + (" " + tr("srv.status.last_error", err=f["error"])
+                                                   if f.get("error") else "")
+    if st.state == "running":
+        return "ok", tr("srv.status.running", port=st.port)
+    if st.state == "starting":
+        return "info", tr("srv.status.starting", port=st.port)
+    if st.state == "error":
+        return "error", tr("srv.status.error", err=st.error or "?")
+    if st.state == "disabled":  # the saved settings still say stdio
+        return "warn", tr("srv.status.save_first")
+    return "idle", tr("srv.status.stopped")
 
 
 class ServerPage(QWidget):
@@ -408,9 +423,20 @@ class ServerPage(QWidget):
 
         box, sl = group(tr("srv.status"))
         self.status = QLabel()
+        self.status.setWordWrap(True)
         sl.addWidget(self.status)
+        brow = QHBoxLayout()
+        self.restart_btn = QPushButton(tr("srv.restart"))
+        self.restart_btn.clicked.connect(self._restart)
+        logs = QPushButton(tr("srv.open_logs"))
+        logs.clicked.connect(self._open_logs)
+        brow.addWidget(self.restart_btn)
+        brow.addWidget(logs)
+        brow.addStretch(1)
+        sl.addLayout(brow)
         lay.addWidget(box)
         lay.addStretch(1)
+        self.sup_state = None
         self.refresh()
 
     def refresh(self) -> None:
@@ -424,8 +450,27 @@ class ServerPage(QWidget):
         if http and self.token is None and self.token_error is None:
             self._load_token()
         self._render_token()
-        level, text = server_status(d)
+        self._render_status()
+
+    def set_state(self, st) -> None:
+        self.sup_state = st
+        self._render_status()
+
+    def _render_status(self) -> None:
+        d = self.win.data
+        level, text = server_status(d, self.sup_state if self.win.supervisor is not None else None)
         pill(self.status, level, text)
+        self.restart_btn.setEnabled(self.win.supervisor is not None and d.get("transport") == "http")
+
+    def _restart(self) -> None:
+        if self.win.supervisor is not None:
+            self.set_state(self.win.supervisor.restart())
+
+    def _open_logs(self) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        os.makedirs(runtime.logs_dir(), exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(runtime.logs_dir()))
 
     def _transport(self, *_):
         self.win.set_data(dict(self.win.data, transport="http" if self.http.isChecked() else "stdio"))
@@ -476,6 +521,48 @@ class ServerPage(QWidget):
             return
         self._render_token()
         self.win.flash(tr("srv.token.regenerated"))
+
+
+# ----------------------------------------------------------------- Startup
+
+class StartupPage(QWidget):
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        lay = QVBoxLayout(self)
+        box, bl = group(tr("st.box"))
+        self.run = QCheckBox(tr("st.run"))
+        self.run.clicked.connect(lambda c: self._set(run_at_startup=bool(c)))
+        self.minimized = QCheckBox(tr("st.minimized"))
+        self.minimized.clicked.connect(lambda c: self._set(start_minimized=bool(c)))
+        bl.addWidget(self.run)
+        bl.addWidget(self.minimized)
+        bl.addWidget(note(tr("st.note")))
+        self.registry = QLabel()
+        self.registry.setWordWrap(True)
+        bl.addWidget(self.registry)
+        lay.addWidget(box)
+        lay.addStretch(1)
+        self.refresh()
+
+    def _set(self, **changes) -> None:
+        self.win.set_data(dict(self.win.data, **changes))
+        self.refresh()
+
+    def refresh(self) -> None:
+        d = self.win.data
+        run = bool(d.get("run_at_startup"))
+        self.run.setChecked(run)
+        self.minimized.setChecked(bool(d.get("start_minimized", True)))
+        self.minimized.setEnabled(run)
+        current = startup.current()
+        saved = (self.win.saved or {}).get("run_at_startup")
+        if bool(current) != bool(saved) and self.win.saved is not None:
+            pill(self.registry, "warn", tr("st.mismatch"))
+        elif current:
+            pill(self.registry, "ok", tr("st.registered", cmd=current))
+        else:
+            pill(self.registry, "idle", tr("st.not_registered"))
 
 
 # ----------------------------------------------------------------- Tools and safety

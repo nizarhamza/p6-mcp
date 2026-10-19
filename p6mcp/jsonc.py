@@ -35,6 +35,21 @@ class Member:
 
 
 @dataclass
+class Item:
+    start: int
+    end: int
+    value: Any
+    comma: Optional[int] = None
+
+
+@dataclass
+class Arr:
+    start: int  # index of '['
+    end: int    # index after ']'
+    items: list[Item] = field(default_factory=list)
+
+
+@dataclass
 class Obj:
     start: int  # index of '{'
     end: int    # index after '}'
@@ -137,17 +152,21 @@ class _Parser:
                 raise JsoncError("expected ',' or '}'", self.t, j)
 
     def arr(self, i: int):
-        out = []
+        out, node = [], Arr(i, i)
         j = self.ws(i + 1)
         while True:
             if j >= self.n:
                 raise JsoncError("unterminated array", self.t, i)
             if self.t[j] == "]":
-                return out, i, j + 1, None
-            v, _vs, ve, _ = self.value(j)
+                node.end = j + 1
+                return out, i, j + 1, node
+            v, vs, ve, _ = self.value(j)
             out.append(v)
+            item = Item(vs, ve, v)
+            node.items.append(item)
             j = self.ws(ve)
             if j < self.n and self.t[j] == ",":
+                item.comma = j
                 j = self.ws(j + 1)
             elif j < self.n and self.t[j] != "]":
                 raise JsoncError("expected ',' or ']'", self.t, j)
@@ -328,3 +347,94 @@ def delete_member(text: str, path: Sequence[str], key: str) -> str:
 
 def text_between(text: str, obj: Obj) -> str:
     return text[obj.start + 1:obj.end - 1]
+
+
+# ----------------------------------------------------------------- arrays (VS Code "inputs")
+
+def _find_arr(root: Obj, path: Sequence[str]) -> Optional[Arr]:
+    parent = _find(root, path[:-1])
+    m = parent.get(path[-1]) if parent is not None else None
+    return m.node if m is not None and isinstance(m.node, Arr) else None
+
+
+def _check(new: str, expected: Any) -> str:
+    if loads(new) != expected:
+        raise JsoncError("internal edit error (other entries would change), file left unchanged")
+    return new
+
+
+def append_item(text: str, path: Sequence[str], item: Any) -> str:
+    """Append item to the array at path (created when missing). Other text is unchanged."""
+    if not text.strip():
+        text = "{}"
+    data, root = parse(text)
+    if not isinstance(root, Obj):
+        raise JsoncError("the file does not hold a JSON object")
+    arr = _find_arr(root, path)
+    if arr is None:
+        parent = _find(root, path[:-1])
+        if parent is not None and parent.get(path[-1]) is not None:
+            raise JsoncError(f"{'.'.join(path)} is not an array")
+        return set_member(text, list(path[:-1]), path[-1], [item])
+    nl, unit = _newline(text), _indent_unit(text)
+    if arr.items:
+        first, last = arr.items[0], arr.items[-1]
+        same_line = text.rfind("\n", 0, first.start) < arr.start
+        indent = _line_indent(text, arr.start) + unit if same_line else _line_indent(text, first.start)
+        pos = (last.comma + 1) if last.comma is not None else last.end
+        m = re.match(r"[ \t]*(//[^\r\n]*)?", text[pos:])
+        after = pos + (m.end() if m else 0)
+        comma = "" if last.comma is not None else ","
+        new = (text[:last.end] + comma + text[last.end:after] + nl + indent + _dump(item, indent, unit, nl)
+               + text[after:])
+    else:
+        indent = _line_indent(text, arr.start) + unit
+        new = (text[:arr.start + 1] + nl + indent + _dump(item, indent, unit, nl) + nl
+               + _line_indent(text, arr.start) + text[arr.end - 1:])
+    expected = json.loads(json.dumps(data))
+    node = expected
+    for k in path:
+        node = node[k]
+    node.append(item)
+    return _check(new, expected)
+
+
+def remove_items(text: str, path: Sequence[str], match) -> str:
+    """Remove the items of the array at path for which match(value) is true."""
+    data, root = parse(text)
+    arr = _find_arr(root, path) if isinstance(root, Obj) else None
+    hits = [i for i, it in enumerate(arr.items) if match(it.value)] if arr is not None else []
+    if not hits:
+        return text
+    k = hits[-1]
+    it = arr.items[k]
+    line_start = text.rfind("\n", 0, it.start) + 1
+    start = line_start if not text[line_start:it.start].strip() else it.start
+    if it.comma is not None:
+        end = it.comma + 1
+        rest = re.match(r"[ \t]*(\r?\n)?", text[end:])
+        end += rest.end() if rest and rest.group(1) else 0
+        new = text[:start] + text[end:]
+    elif k > 0:
+        prev = arr.items[k - 1]
+        if start == line_start and line_start > 0:
+            start = line_start - 1
+            if start > 0 and text[start - 1] == "\r":
+                start -= 1
+        if prev.comma is not None and prev.comma < start:
+            new = text[:prev.comma] + text[prev.comma + 1:start] + text[it.end:]
+        else:
+            new = text[:start] + text[it.end:]
+    else:
+        new = text[:start] + text[it.end:]
+        _, nroot = parse(new)
+        narr = _find_arr(nroot, path)
+        if narr is not None and not narr.items and not new[narr.start + 1:narr.end - 1].strip():
+            new = new[:narr.start] + "[]" + new[narr.end:]
+    expected = json.loads(json.dumps(data))
+    node = expected
+    for p in path[:-1]:
+        node = node[p]
+    node[path[-1]] = [v for i, v in enumerate(node[path[-1]]) if i != k]
+    return remove_items(_check(new, expected), path, match)
+

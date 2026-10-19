@@ -69,6 +69,33 @@ stay outside this repository.
   remove a v2 entry / Do not offer again (`clients_ignored`, saved with Save), snippets. The window banner
   offers new clients and flags entries to repair (after the no-database warning).
 
+- `p6mcp/http_server.py` (`p6mcp-server --http [--port N]`): the SDK's `streamable_http_app` (path `/mcp`, its
+  own Host/Origin protection on) behind `Guard`, an ASGI middleware that checks on every HTTP request the Host
+  (127.0.0.1 or localhost on this port, 421), a browser Origin (same local origin only, 403) and
+  `Authorization: Bearer <token>` (`hmac.compare_digest`, 401); uvicorn bound to 127.0.0.1 only. The token is
+  the Credential Manager one. `serve()` refuses a busy port (exit 3) and reports through the status file.
+- `p6mcp/runtime.py`: rotating logs in `%LOCALAPPDATA%\P6MCP\logs` (`setup_logging(name)`, level from config;
+  the stdio server never logs to stdout), the HTTP status file `http_status.json` (`write_status` retries the
+  rename: a reader blocks it on Windows; `read_status` turns a dead pid into stopped), `pid_alive` (no
+  `os.kill` on Windows: it terminates), `port_open`.
+- `p6mcp/supervisor.py` (no Qt): `tick()` makes reality match the saved settings (transport http = one child
+  `p6mcp-server --http --port N`; port change = restart; stdio = none), restarts a child that ends with
+  `BACKOFF` delays and gives up after `MAX_FAILS` in `FAIL_WINDOW` until `restart()` or a settings change.
+  The status file is ours when its pid or ppid is the child (a venv `python.exe` is a launcher that starts
+  the real interpreter); stop kills the process tree (`taskkill /T`).
+- `p6mcp/startup.py`: HKCU `...\CurrentVersion\Run` value `P6MCP` (`command()`: frozen settings exe, else
+  `pythonw -m p6mcp.settings_app`, `--minimized` when start_minimized); `sync(data)` runs on Save. Tests use
+  their own key and the window tests fake it: never touch the real Run key in tests.
+- `p6mcp/settings_app/tray.py` `TrayApp`: single instance per user (`QLocalServer`; a second start only shows
+  the window), tray icon with state dot and menu (open, status, restart HTTP server, quit), timer driving the
+  supervisor, window created on demand; closing the window keeps the app in the tray when transport is http
+  or run_at_startup (`SettingsWindow(on_close=...)`), else quits. `p6mcp-settings --minimized` = tray only.
+- Clients in HTTP mode: `clients.target(data)` (url + token) is passed to `scan` / `register`; Cursor,
+  LM Studio get `{url, headers}`, Cline `{type: streamableHttp, ...}` (token in their file, the page says so),
+  VS Code `{type: http, headers: Bearer ${input:p6mcp-token}}` plus a `promptString` input (jsonc
+  `append_item` / `remove_items`), Claude Desktop always stdio (`supports_http = False`). A regenerated token
+  makes HTTP entries outdated (repair).
+
 ## Running
 
 ```powershell

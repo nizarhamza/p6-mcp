@@ -32,8 +32,10 @@ def main(argv=None) -> int:
     sn.add_argument("kind", nargs="?", default="stdio", choices=("stdio", "http", "vscode"))
     a = ap.parse_args(argv)
 
+    data = config.read_file()[0] or config.DEFAULTS
+    http = clients.target(data)
     if a.cmd == "list":
-        sts = clients.scan()
+        sts = clients.scan(http=http)
         if a.json:
             print(json.dumps([s.as_dict() for s in sts], indent=2))
         else:
@@ -41,20 +43,19 @@ def main(argv=None) -> int:
                 print(f"{s.client:16} {s.state:15} {s.path}" + (f"  ({s.message})" if s.message else ""))
         return 0
     if a.cmd == "snippet":
-        data = config.read_file()[0] or config.DEFAULTS
         print(clients.snippet(a.kind, port=data.get("http_port", 39217)))
         return 0
 
     ids = list(a.ids)
     if a.detected:
-        ids += [s.client for s in clients.scan() if s.state != clients.NOT_INSTALLED and s.client not in ids]
+        ids += [s.client for s in clients.scan(http=http) if s.state != clients.NOT_INSTALLED and s.client not in ids]
     if not ids:
         ap.error("name at least one client, or --detected")
     ok = True
     for cid in ids:
         try:
             ad = clients.get(cid)
-            res = ad.register() if a.cmd == "register" else ad.unregister()
+            res = ad.register(http=http) if a.cmd == "register" else ad.unregister()
             print(f"{cid}: {'updated' if res['changed'] else 'unchanged'} {res['path']}"
                   + (f" (backup {res['backup']})" if res["backup"] else ""))
         except (ValueError, files.ClientFileError, JsoncError, OSError) as e:

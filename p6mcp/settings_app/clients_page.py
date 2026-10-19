@@ -105,7 +105,16 @@ class ClientsPage(QWidget):
         if self.job is not None:
             return
         self.scan_btn.setEnabled(False)
-        self.job = start(Job(clients.scan, self._scanned))
+        data = dict(self.win.data)
+        self.job = start(Job(lambda: clients.scan(http=self.target(data)), self._scanned))
+
+    @staticmethod
+    def target(data: dict):
+        """HTTP target of these settings; without a reachable Credential Manager, stdio entries."""
+        try:
+            return clients.target(data)
+        except credentials.SecretStoreError:
+            return None
 
     def _scanned(self, res) -> None:
         self.job = None
@@ -175,6 +184,14 @@ class ClientsPage(QWidget):
                 text += " " + st.message
             if st.running and installed:
                 text += " " + tr("cl.detail.running", name=st.name)
+            if installed and self.win.data.get("transport") == "http":
+                ad = clients.get(st.client)
+                if not ad.supports_http:
+                    text += " " + tr("cl.detail.stdio_only", name=st.name)
+                elif ad.token_in_file:
+                    text += " " + tr("cl.detail.token_in_file", name=st.name)
+                else:
+                    text += " " + tr("cl.detail.token_prompt", name=st.name)
             pill(self.state, STATE_LEVEL.get(st.state, "idle"), text)
         others = st.others if st else []
         self.legacy.setVisible(bool(others))
@@ -201,7 +218,8 @@ class ClientsPage(QWidget):
         return True
 
     def register(self) -> bool:
-        return self._act(lambda ad: ad.register(), "cl.done.register")
+        http = self.target(self.win.data)
+        return self._act(lambda ad: ad.register(http=http), "cl.done.register")
 
     def unregister(self) -> bool:
         st = self.status()

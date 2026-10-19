@@ -1,11 +1,22 @@
-"""Entry point of p6mcp-server: python -m p6mcp (stdio transport)."""
+"""Entry point of p6mcp-server: python -m p6mcp
+
+    p6mcp-server                    stdio transport (started by an MCP client)
+    p6mcp-server --http [--port N]  local Streamable HTTP transport (started by the tray app)
+    p6mcp-server clients ...        client registration (see p6mcp.clients.__main__)
+"""
 
 
 def main() -> None:
     import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "clients":  # registration commands (installer)
+    args = sys.argv[1:]
+    if args[:1] == ["clients"]:  # registration commands (installer)
         from p6mcp.clients.__main__ import main as clients_main
-        sys.exit(clients_main(sys.argv[2:]))
+        sys.exit(clients_main(args[1:]))
+    if "--http" in args:
+        from p6mcp.http_server import main as http_main
+        sys.exit(http_main(args))
+    from p6mcp import runtime
+    runtime.setup_logging("stdio-server")  # never log to stdout: it carries the protocol
     from p6mcp.server import mcp
     mcp.run()
 

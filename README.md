@@ -5,8 +5,8 @@ and, when you allow it, edit a **Primavera P6 Professional standalone (SQLite)**
 
 > Not affiliated with, endorsed by or sponsored by Oracle. Primavera and P6 are trademarks of Oracle.
 
-Status: under development (milestones 1 and 2 of 7: configuration, tool policy, two-step writes, Settings window). The installer,
-tray app and client registration come in the next milestones.
+Status: under development (milestones 1 to 4 of 7: configuration, tool policy, two-step writes, Settings and tray app,
+client registration, local HTTP transport). XER-only mode, the installer and releases come next.
 
 ## Privacy
 
