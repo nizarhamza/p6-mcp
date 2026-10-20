@@ -186,12 +186,14 @@ Removable = Literal["TASKPRED", "TASKRSRC"]
 CstrName = Literal["none", "start_on_or_after", "start_on_or_before", "start_on", "finish_on_or_after",
                    "finish_on_or_before", "finish_on", "mandatory_start", "mandatory_finish",
                    "as_late_as_possible"]
-XerTable = Literal["CURRTYPE", "FINTMPL", "OBS", "UDFTYPE", "PROJECT", "CALENDAR", "PROJWBS", "RSRC",
-                   "ACTVTYPE", "RSRCRATE", "TASK", "ACTVCODE", "TASKPRED", "TASKRSRC", "TASKACTV", "UDFVALUE"]
+XerTable = Literal["CURRTYPE", "FINTMPL", "OBS", "UDFTYPE", "PROJECT", "CALENDAR", "SCHEDOPTIONS", "PROJWBS",
+                   "RSRC", "ACTVTYPE", "RSRCRATE", "TASK", "ACTVCODE", "TASKPRED", "TASKRSRC", "TASKACTV",
+                   "UDFVALUE"]
 DateStr = Annotated[str, Field(pattern=DATE_PATTERN, description="YYYY-MM-DD")]
 DateTimeStr = Annotated[str, Field(pattern=DATETIME_PATTERN, description="YYYY-MM-DD HH:MM")]
 Pct = Annotated[float, Field(ge=0, le=100)]
 NonNegDays = Annotated[float, Field(ge=0)]
+NonNegQty = Annotated[float, Field(ge=0, description="Units as P6 stores them (hours for labor).")]
 Depth = Annotated[int, Field(ge=0, description="Levels below the start node (0 = the node only).")]
 PathNo = Annotated[int, Field(ge=1, description="Float path number (1 = most critical).")]
 BaselineDates = Literal["current", "planned"]  # baseline finish: actual else early, or its planned finish
@@ -1459,8 +1461,9 @@ def _sched_diff(db_opts: dict, xer_opts: dict, db_code: Callable[[str], Optional
     out = []
     for k in sorted(set(db_opts) | set(xer_opts)):
         d, x = db_opts.get(k), xer_opts.get(k)
-        if k == "key_activity_for_multiple_longest_paths":
-            d, x = label(d, db_code, "database"), label(x, xer_code, "XER")
+        if k == "key_activity_for_multiple_longest_paths":  # present but empty (an XER cell) = none
+            d = label("" if d is None and k in db_opts else d, db_code, "database")
+            x = label("" if x is None and k in xer_opts else x, xer_code, "XER")
         if k == "levelprioritylist":
             readable = all(v is not None and _xer_lpl(v, ":") is not None for v in (d, x))
             rank, same = 4, (d == x if readable else None)
@@ -1543,10 +1546,11 @@ def _lpl_text(lpl: Sequence[tuple[str, str]]) -> str:
 
 def _xer_lpl(text: str, sep: str = ",") -> Optional[list[tuple[str, str]]]:
     """Level priority list text -> [(field, order)], None when unreadable. XER SCHEDOPTIONS writes
-    'priority_type,ASC_BY_FIELD/ASC' (field, then the order after the last '/'); this server shows
-    and takes 'field:ORDER', entries separated by ';'."""
+    'priority_type,ASC_BY_FIELD/ASC' followed by a line break per entry (field, then the order after
+    the last '/'); this server shows and takes 'field:ORDER', entries separated by ';' (line breaks
+    are read as separators too)."""
     out = []
-    for part in (p.strip() for p in str(text).split(";")):
+    for part in (p.strip() for p in re.split(r"[;\r\n]+", str(text))):
         if not part:
             continue
         field, s, rest = part.partition(sep)
@@ -1628,6 +1632,45 @@ def _xer_sched_values(x: dict, xp: dict, key_map: Callable[[str], Optional[int]]
         if w:
             warn.append(w)
     return vals, lpl, warn
+
+
+# SCHEDOPTIONS block written by p6_export_xer: the column layout of P6's own XER exports.
+SCHED_XER_COLS = ("schedoptions_id", "proj_id", "sched_outer_depend_type", "sched_open_critical_flag",
+                  "sched_lag_early_start_flag", "sched_retained_logic", "sched_setplantoforecast", "sched_float_type",
+                  "sched_calendar_on_relationship_lag", "sched_use_expect_end_flag", "sched_progress_override",
+                  "level_float_thrs_cnt", "level_outer_assign_flag", "level_outer_assign_priority",
+                  "level_over_alloc_pct", "level_within_float_flag", "level_keep_sched_date_flag",
+                  "level_all_rsrc_flag", "sched_use_project_end_date_for_float", "enable_multiple_longest_path_calc",
+                  "limit_multiple_longest_path_calc", "max_multiple_longest_path",
+                  "use_total_float_multiple_longest_paths", "key_activity_for_multiple_longest_paths",
+                  "LevelPriorityList")
+
+
+def _xer_sched_export(con, pid: int, tasks: set) -> tuple[Optional[list], list[str]]:
+    """(SCHEDOPTIONS values in SCHED_XER_COLS order, warnings) from the project's PROJPROP 'scheduling'
+    (the reverse of _xer_sched_values); None when the project has none or it is unreadable. The key
+    activity is the exported task_id (empty = none, also for an activity outside the project); the
+    level priority list is written as P6 does, 'field,ASC_BY_FIELD/ORDER' plus a line break per entry."""
+    tree = _props(con, pid, "scheduling")
+    if tree is None:
+        return None, ["SCHEDOPTIONS not exported: the project has no schedule options stored (PROJPROP "
+                      "scheduling); P6 applies its defaults on import."]
+    if tree.get("error"):
+        return None, [f"SCHEDOPTIONS not exported: {tree['error']}"]
+    opts = {k.lower(): v for k, v in tree["attrs"].items()}
+    warn = []
+    key = str(opts.get("key_activity_for_multiple_longest_paths") or "").strip()
+    known = key.isdigit() and int(key) in tasks
+    if key not in ("", "-99") and not known:
+        warn.append(f"SCHEDOPTIONS: key activity task_id {key} is not an activity of the project: written as none")
+    opts["key_activity_for_multiple_longest_paths"] = key if known else ""
+    node = _p6_find(tree, "LevelPriorityList")
+    opts["levelprioritylist"] = "".join(f"{f},ASC_BY_FIELD/{o}\n" for f, o in _lpl_of(node)) if node else None
+    extra = sorted(set(opts) - {c.lower() for c in SCHED_XER_COLS})
+    if extra:
+        warn.append(f"SCHEDOPTIONS: stored options with no XER column, not exported: {extra}")
+    opts["schedoptions_id"], opts["proj_id"] = 1, pid
+    return [opts.get(c.lower()) for c in SCHED_XER_COLS], warn
 
 
 def _set_props(con, pid: int, prop: str, values: Mapping[str, str], lpl: Optional[Sequence[tuple[str, str]]],
@@ -2117,11 +2160,11 @@ def _act_details(con, task_id: int) -> tuple[dict, list[str]]:
         role = ("ro.role_short_name", " LEFT JOIN ROLES ro ON ro.role_id = a.role_id" + al("ROLES", "ro"))
     specs = (
         ("assignments", ("TASKRSRC", "RSRC"),
-         f"SELECT r.rsrc_short_name, r.rsrc_name, r.rsrc_type, {role[0]} AS role, {unit[0]} AS unit, a.target_qty, "
+         f"SELECT a.taskrsrc_id, r.rsrc_short_name, r.rsrc_name, r.rsrc_type, {role[0]} AS role, {unit[0]} AS unit, a.target_qty, "
          "a.act_reg_qty, a.act_ot_qty, a.remain_qty, a.target_cost, a.act_reg_cost, a.act_ot_cost, a.remain_cost "
          "FROM TASKRSRC a LEFT JOIN RSRC r ON r.rsrc_id = a.rsrc_id" + al("RSRC", "r") + unit[1] + role[1]
          + " WHERE a.task_id = ?" + al("TASKRSRC", "a") + " ORDER BY r.rsrc_short_name, a.taskrsrc_id",
-         lambda r: {"resource": r["rsrc_short_name"], "name": r["rsrc_name"], "type": r["rsrc_type"], "role": r["role"],
+         lambda r: {"taskrsrc_id": r["taskrsrc_id"], "resource": r["rsrc_short_name"], "name": r["rsrc_name"], "type": r["rsrc_type"], "role": r["role"],
                     "unit": r["unit"], "target_qty": r["target_qty"], "actual_qty": _plus(r["act_reg_qty"], r["act_ot_qty"]),
                     "remain_qty": r["remain_qty"], "target_cost": r["target_cost"],
                     "actual_cost": _plus(r["act_reg_cost"], r["act_ot_cost"]), "remain_cost": r["remain_cost"]}),
@@ -5678,7 +5721,7 @@ LINK_KEYS = {"delete": set(LinkRef.__annotations__) | _ENDS | {"current_type"},
 
 def _items_arg(items: Any) -> list:
     if not isinstance(items, (list, tuple)):
-        raise ValueError("items: a list of links")
+        raise ValueError("items: a list of objects")
     if len(items) > MAX_BATCH:
         raise ValueError(f"At most {MAX_BATCH} items per call")
     return list(items)
@@ -5943,6 +5986,231 @@ def p6_update_activity(
                 "keys": {"task_id": t["task_id"], "task_code": task_code},
                 "before": {k: t[k] for k in changed}, "after": {k: sets[k] for k in changed}, "summary": plan[0]}]
         return _commit(con, plan, confirm, projects=(t["proj_id"],) if sched else (), log=log)
+
+
+# ----------------------------------------------------------------- resource assignment units
+
+FIXED_DRTN_TYPES = ("DT_FixedDrtn", "DT_FixedDUR2")  # P6 keeps the duration when units change: units/time follow
+ASG_QTY = (("budgeted_units", "target_qty"), ("actual_units", "act_reg_qty"), ("remaining_units", "remain_qty"))
+ASG_COST = {"target_qty": "target_cost", "act_reg_qty": "act_reg_cost", "remain_qty": "remain_cost"}
+ASG_RATE = {"target_qty": ("target_qty_per_hr", "target_drtn_hr_cnt"),
+            "remain_qty": ("remain_qty_per_hr", "remain_drtn_hr_cnt")}
+ASG_TASK = {"target_qty": "target", "act_reg_qty": "act", "remain_qty": "remain"}  # TASK.<x>_work_qty / <x>_equip_qty
+ASG_TASK_KIND = {"RT_Labor": "work", "RT_Equip": "equip"}  # material units are not rolled up to the activity
+
+
+class AsgEdit(TypedDict, total=False):
+    """An assignment (taskrsrc_id, or task_code with resource or role) and the units to set."""
+    task_code: str
+    resource: str
+    role: str
+    taskrsrc_id: int
+    budgeted_units: float
+    actual_units: float
+    remaining_units: float
+    at_completion_units: float
+
+
+AsgEdits = Annotated[list[AsgEdit], Field(min_length=1, description="Assignments to change.")]
+ASG_KEYS = set(AsgEdit.__annotations__)
+
+
+def _asg_find(con, project: str, it: Mapping) -> tuple[sqlite3.Row, sqlite3.Row, str]:
+    """(TASKRSRC row with rsrc_short_name and role_short_name, its activity, label) of an assignment item."""
+    al = functools.partial(_alive, con)
+    has_role = bool(_cols(con, "ROLES")) and "role_id" in _cols(con, "TASKRSRC")
+    sql = ("SELECT a.*, r.rsrc_short_name AS rsrc_short_name, "
+           + ("ro.role_short_name" if has_role else "NULL") + " AS role_short_name FROM TASKRSRC a "
+           "LEFT JOIN RSRC r ON r.rsrc_id = a.rsrc_id" + al("RSRC", "r")
+           + (" LEFT JOIN ROLES ro ON ro.role_id = a.role_id" + al("ROLES", "ro") if has_role else ""))
+    label = lambda a: (a["rsrc_short_name"] or f"role {a['role_short_name'] or '?'}") + f" (taskrsrc_id {a['taskrsrc_id']})"  # noqa: E731
+    tid = it.get("taskrsrc_id")
+    if tid is not None:
+        if isinstance(tid, bool) or not isinstance(tid, int):
+            raise ValueError(f"taskrsrc_id must be an integer, not {tid!r}")
+        a = con.execute(sql + " WHERE a.taskrsrc_id = ?" + al("TASKRSRC", "a"), (tid,)).fetchone()
+        if a is None:
+            raise ValueError(f"Assignment taskrsrc_id {tid} not found")
+        t = _task_by_id(con, a["task_id"])
+        if t["proj_id"] != _project_id(con, project) or it.get("task_code") not in (None, t["task_code"]):
+            raise ValueError(f"taskrsrc_id {tid} is an assignment of {t['proj_short_name']} {t['task_code']}, "
+                             f"not of {project} {it.get('task_code') or ''}".rstrip())
+        return a, t, label(a)
+    if not isinstance(it.get("task_code"), str) or not it["task_code"]:
+        raise ValueError("task_code (with resource or role) or taskrsrc_id is required")
+    t = _task(con, project, it["task_code"])
+    rows = con.execute(sql + " WHERE a.task_id = ?" + al("TASKRSRC", "a") + " ORDER BY a.taskrsrc_id",
+                       (t["task_id"],)).fetchall()
+    if not rows:
+        raise ValueError(f"{t['task_code']} has no resource assignment")
+    if not it.get("resource") and not it.get("role"):
+        raise ValueError(f"resource or role is required; assignments of {t['task_code']}: {[label(a) for a in rows]}")
+    hits = rows
+    for key, col in (("resource", "rsrc_short_name"), ("role", "role_short_name")):
+        if it.get(key):
+            want = str(it[key])
+            exact = [a for a in hits if a[col] == want]
+            hits = exact or [a for a in hits if (a[col] or "").casefold() == want.casefold()]
+    if len(hits) != 1:
+        raise ValueError(f"{'No' if not hits else 'Several'} assignment(s) of {t['task_code']} match "
+                         f"{ {k: it[k] for k in ('resource', 'role') if it.get(k)} }: "
+                         f"{[label(a) for a in (hits or rows)]}" + (" (pass taskrsrc_id)" if hits else ""))
+    return hits[0], t, label(hits[0])
+
+
+def _asg_update(con, project: str, it: Mapping) -> dict:
+    """Set the budgeted, actual and/or remaining (or at completion) units of one assignment, with P6's
+    recalculation: linked costs, units/time (fixed duration), remaining = budget for a not started
+    activity when the project links them, the activity's labor / nonlabor totals."""
+    bad = sorted(set(it) - ASG_KEYS)
+    if bad:
+        raise ValueError(f"unknown key(s) {bad}; allowed: {sorted(ASG_KEYS)}")
+    vals: dict[str, float] = {}
+    for k in ("budgeted_units", "actual_units", "remaining_units", "at_completion_units"):
+        if it.get(k) is not None:
+            f = None if isinstance(it[k], bool) else _num(it[k])
+            if f is None or f < 0:
+                raise ValueError(f"{k} must be a number, 0 or more (not {it[k]!r})")
+            vals[k] = f
+    if "remaining_units" in vals and "at_completion_units" in vals:
+        raise ValueError("Give remaining_units or at_completion_units (= actual + remaining), not both.")
+    if not vals:
+        raise _Refused("Nothing to change: give budgeted_units, actual_units, remaining_units or at_completion_units.")
+    a, t, label = _asg_find(con, project, it)
+    code, st = t["task_code"], t["status_code"]
+    dt = t["duration_type"] if "duration_type" in _cols(con, "TASK") else None
+    if dt is not None and dt not in FIXED_DRTN_TYPES:
+        raise ValueError(f"{code} has duration type {dt}: P6 would recompute its duration from the units, and this "
+                         "tool never changes durations. Only Fixed Duration types are handled; edit it in P6.")
+    acols = _cols(con, "TASKRSRC")
+    old = {c: float(a[c] or 0) for _, c in ASG_QTY}
+    ot = float(a["act_ot_qty"] or 0) if "act_ot_qty" in acols else 0.0
+    new = dict(old)
+    notes: list[str] = []
+    if "actual_units" in vals:
+        if st == "TK_NotStart" and vals["actual_units"] > 0:
+            raise ValueError(f"{code} is not started: set its actual start first (p6_update_activity), then actual units.")
+        if vals["actual_units"] < ot:
+            raise ValueError(f"actual_units {vals['actual_units']:g} is less than the overtime actual {ot:g}")
+        new["act_reg_qty"] = vals["actual_units"] - ot
+    actual = new["act_reg_qty"] + ot
+    if "at_completion_units" in vals:
+        if vals["at_completion_units"] < actual:
+            raise ValueError(f"at_completion_units {vals['at_completion_units']:g} is less than the actual units {actual:g}")
+        new["remain_qty"] = vals["at_completion_units"] - actual
+    if "remaining_units" in vals:
+        new["remain_qty"] = vals["remaining_units"]
+    if st == "TK_Complete" and new["remain_qty"] > 0:
+        raise ValueError(f"{code} is completed: its remaining units stay 0 (at completion = actual {actual:g}).")
+    if "budgeted_units" in vals:
+        new["target_qty"] = vals["budgeted_units"]
+    link = None
+    if st == "TK_NotStart" and "rem_target_link_flag" in _cols(con, "PROJECT"):
+        link = con.execute("SELECT rem_target_link_flag FROM PROJECT WHERE proj_id = ?", (t["proj_id"],)).fetchone()[0]
+    if link == "Y":  # P6 option "Link Budget and At Completion for not started activities"
+        given_rem = "remaining_units" in vals or "at_completion_units" in vals
+        if "budgeted_units" in vals and given_rem and abs(new["remain_qty"] - new["target_qty"]) > 1e-9:
+            raise ValueError(f"{code} is not started and its project links budget and at completion units: give one "
+                             f"value (budget {new['target_qty']:g} and at completion {new['remain_qty']:g} differ).")
+        if "budgeted_units" in vals and not given_rem:
+            new["remain_qty"] = new["target_qty"]
+            notes.append("remaining follows the budget (not started, budget and at completion linked)")
+        elif given_rem and "budgeted_units" not in vals:
+            new["target_qty"] = new["remain_qty"]
+            notes.append("budget follows at completion (not started, budget and at completion linked)")
+    changed = [c for _, c in ASG_QTY if abs(new[c] - old[c]) > 1e-9]
+    if not changed:
+        raise _Refused(f"Nothing to change: {code} {label} already has these units.")
+    sets: dict[str, Any] = {c: new[c] for c in changed}
+    price = a["cost_per_qty"] if "cost_per_qty" in acols else None
+    linked = "cost_qty_link_flag" in acols and a["cost_qty_link_flag"] == "Y" and price is not None
+    if linked:
+        sets.update({ASG_COST[c]: new[c] * float(price) for c in changed if ASG_COST[c] in acols})
+    elif any(ASG_COST[c] in acols for c in changed):
+        notes.append("costs unchanged (cost not linked to units on this assignment)")
+    for c in changed:
+        rate, drtn = ASG_RATE.get(c, (None, None))
+        if rate in acols:  # fixed duration: the units/time absorb the change (resource calendar hours kept)
+            hrs = float(t[drtn] or 0)
+            sets[rate] = (float(a[rate]) * new[c] / old[c] if old[c] > 0 and a[rate] is not None
+                          else new[c] / hrs if hrs > 0 else 0.0)
+    kind = ASG_TASK_KIND.get(a["rsrc_type"]) if "rsrc_type" in acols else None
+    tsets = {}
+    for c in changed:
+        col = f"{ASG_TASK[c]}_{kind}_qty"
+        if kind and col in _cols(con, "TASK"):
+            tsets[col] = float(t[col] or 0) + new[c] - old[c]
+    if not kind:
+        notes.append(f"resource type {a['rsrc_type']}: not rolled up to the activity's labor or nonlabor units")
+    now = _now_str(con)
+    full = {**sets, **_stamp_cols(con, "TASKRSRC", now, create=False)}
+    con.execute(f"UPDATE TASKRSRC SET {', '.join(k + '=?' for k in full)} WHERE taskrsrc_id=?",
+                [*full.values(), a["taskrsrc_id"]])
+    if tsets:
+        full = {**tsets, **_stamp_cols(con, "TASK", now, create=False)}
+        con.execute(f"UPDATE TASK SET {', '.join(k + '=?' for k in full)} WHERE task_id=?", [*full.values(), t["task_id"]])
+    names = {"target_qty": "budget", "act_reg_qty": "actual", "remain_qty": "remaining"}
+    fmt = lambda v: f"{v:.6g}"  # noqa: E731
+    parts = [f"{names[c]} {fmt(old[c] + (ot if c == 'act_reg_qty' else 0))} -> {fmt(new[c] + (ot if c == 'act_reg_qty' else 0))}"
+             for c in changed]
+    parts.append(f"at completion {fmt(old['act_reg_qty'] + ot + old['remain_qty'])} -> {fmt(actual + new['remain_qty'])}")
+    costs = [f"{ASG_COST[c].replace('_', ' ')} {fmt(float(a[ASG_COST[c]] or 0))} -> {fmt(sets[ASG_COST[c]])}"
+             for c in changed if ASG_COST[c] in sets]
+    if costs:
+        parts.append(f"{', '.join(costs)} ({fmt(float(price))}/unit)")
+    plan = f"{code} {label}: " + ", ".join(parts) + "".join(f"; {n}" for n in notes)
+    view = lambda q: {"budgeted_units": q["target_qty"], "actual_units": q["act_reg_qty"] + ot,  # noqa: E731
+                      "remaining_units": q["remain_qty"], "at_completion_units": q["act_reg_qty"] + ot + q["remain_qty"]}
+    log = [{"operation": "update_assignment", "proj_id": t["proj_id"], "table": "TASKRSRC",
+            "keys": {"taskrsrc_id": a["taskrsrc_id"], "task_id": t["task_id"], "task_code": code,
+                     "resource": a["rsrc_short_name"], "role": a["role_short_name"]},
+            "before": {**{k: a[k] for k in sets}, **{f"TASK.{k}": t[k] for k in tsets}},
+            "after": {**sets, **{f"TASK.{k}": v for k, v in tsets.items()}}, "summary": plan}]
+    return {"plan": plan, "projects": [], "log": log,
+            "assignment": {"taskrsrc_id": a["taskrsrc_id"], "task_code": code, "resource": a["rsrc_short_name"],
+                           "role": a["role_short_name"], "before": view(old), "after": view(new)}}
+
+
+@_tool(read_only=False, destructive=True)
+def p6_update_assignment(
+    project: ProjectId, task_code: Optional[ActivityId] = None, resource: Optional[str] = None,
+    role: Optional[str] = None, taskrsrc_id: Optional[int] = None,
+    budgeted_units: Optional[NonNegQty] = None, actual_units: Optional[NonNegQty] = None,
+    remaining_units: Optional[NonNegQty] = None, at_completion_units: Optional[NonNegQty] = None,
+    confirm: bool = False,
+) -> dict:
+    """Set the units of one resource assignment, as P6 recalculates them. Pick it by task_code plus
+    resource (Resource ID) or role, or by taskrsrc_id (p6_get_activity assignments). at_completion_units
+    = actual + remaining (sets remaining; not with remaining_units). Rules: actual units need a started
+    activity, a completed one keeps 0 remaining; a not started activity whose project links budget and
+    at completion keeps them equal (one value moves both); costs = units x price/unit when the cost is
+    linked to units; units/time follow (Fixed Duration types only: durations never change); the
+    activity's labor / nonlabor unit totals follow. Dates are not affected. Dry run unless confirm=True."""
+    return _single_link(_asg_update, project, {k: v for k, v in (
+        ("task_code", task_code), ("resource", resource), ("role", role), ("taskrsrc_id", taskrsrc_id),
+        ("budgeted_units", budgeted_units), ("actual_units", actual_units), ("remaining_units", remaining_units),
+        ("at_completion_units", at_completion_units)) if v is not None}, confirm)
+
+
+@_tool(read_only=False, destructive=True)
+def p6_update_assignments(project: ProjectId, items: AsgEdits, confirm: bool = False) -> dict:
+    """Set the units of many assignments in one transaction (all or nothing; dry run unless
+    confirm=True). Item: {task_code, resource, role, taskrsrc_id, budgeted_units, actual_units,
+    remaining_units, at_completion_units}, as p6_update_assignment. items: one report per item
+    (assignment before / after, or the error). One edit log entry per assignment."""
+    items = _items_arg(items)
+    with _write_session(confirm) as (con, backup):
+        _project_id(con, project)
+
+        def apply_one(i: int, it) -> dict:
+            if not isinstance(it, Mapping):
+                raise ValueError("an item must be an object")
+            return _asg_update(con, project, it)
+
+        b = _batch(con, items, apply_one)
+        for rep, it in zip(b["items"], items):
+            rep["item"] = it
+        return _batch_commit(con, b, confirm, f"Update units of {len(items)} assignment(s)", backup)
 
 
 # ----------------------------------------------------------------- delete one activity
@@ -6880,8 +7148,11 @@ def p6_delete_project(project: ProjectList, include_baselines: bool = True, allo
 
 # ----------------------------------------------------------------- XER import / export
 
-# Tables handled, in dependency order (this is also the order P6 writes them).
-XER_TABLES = list(get_args(XerTable))
+# Tables exported, in dependency order (this is also the order P6 writes them). SCHEDOPTIONS is not a
+# table of the database: export builds it from PROJPROP 'scheduling', import writes it back there.
+XER_EXPORT_TABLES = list(get_args(XerTable))
+# Tables imported row by row.
+XER_TABLES = [t for t in XER_EXPORT_TABLES if t != "SCHEDOPTIONS"]
 # Primary key of each table that receives new ids from NEXTKEY.
 XER_PK = {"CURRTYPE": "curr_id", "FINTMPL": "fintmpl_id", "OBS": "obs_id", "UDFTYPE": "udf_type_id",
           "PROJECT": "proj_id", "CALENDAR": "clndr_id", "PROJWBS": "wbs_id", "RSRC": "rsrc_id",
@@ -7722,15 +7993,16 @@ def p6_export_xer(project: ProjectId, path: str, tables: Optional[list[XerTable]
     """Export one project to an XER file (read only on the database). An existing file is refused
     unless overwrite=True.
     tables: which XER tables to write, any of
-      CURRTYPE, FINTMPL, OBS, UDFTYPE, PROJECT, CALENDAR, PROJWBS, RSRC, ACTVTYPE, RSRCRATE,
-      TASK, ACTVCODE, TASKPRED, TASKRSRC, TASKACTV, UDFVALUE (default: all).
+      CURRTYPE, FINTMPL, OBS, UDFTYPE, PROJECT, CALENDAR, SCHEDOPTIONS, PROJWBS, RSRC, ACTVTYPE,
+      RSRCRATE, TASK, ACTVCODE, TASKPRED, TASKRSRC, TASKACTV, UDFVALUE (default: all).
     Global data is limited to what the project uses (calendars, resources, codes, UDF types, OBS).
+    SCHEDOPTIONS carries the project's schedule options (skipped with a warning when none are stored).
     xer_version: version written in the header (default: this database's P6 version); lower it
     when the file must be imported into an older P6."""
-    tables = [t.upper() for t in (tables or XER_TABLES)]
-    bad = [t for t in tables if t not in XER_TABLES]
+    tables = [t.upper() for t in (tables or XER_EXPORT_TABLES)]
+    bad = [t for t in tables if t not in XER_EXPORT_TABLES]
     if bad:
-        raise ValueError(f"Unknown tables {bad}; choose from {XER_TABLES}")
+        raise ValueError(f"Unknown tables {bad}; choose from {XER_EXPORT_TABLES}")
     path = _export_target(path)
     if os.path.exists(path) and not overwrite:
         raise ValueError(f"{path} already exists: pass overwrite=True to replace it, or choose another path.")
@@ -7820,6 +8092,14 @@ def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[s
                         base_curr[0] if base_curr else "USD"])]
     counts, lossy, warn = {}, {}, []
     for t in tables:
+        if t == "SCHEDOPTIONS":
+            vals, w = _xer_sched_export(con, pid, tasks)
+            warn += w
+            if vals is not None:
+                counts[t] = 1
+                lines += [f"%T\t{t}", "%F\t" + "\t".join(SCHED_XER_COLS),
+                          "%R\t" + "\t".join(_xer_encode(v) for v in vals)]
+            continue
         cols = [r[1].lower() for r in con.execute(f"PRAGMA table_info({t})")
                 if r[1].lower() not in ("delete_session_id", "delete_date")]
         if not cols:

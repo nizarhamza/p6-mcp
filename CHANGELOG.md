@@ -3,6 +3,22 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-10-20
+
+### Added
+
+- `p6_update_assignment` and `p6_update_assignments` (batch, all or nothing): set the budgeted, actual,
+  remaining or at completion units of resource assignments. P6's own rules are applied: costs are
+  recomputed from the price per unit when the cost is linked to the units, units/time follow (Fixed
+  Duration activities only: durations never change), a not started activity keeps budget and remaining
+  equal when the project links them, and the activity's labor and nonlabor unit totals follow. Actual
+  units need a started activity; a completed activity keeps 0 remaining units. Write tools: off unless
+  writes are allowed, two-step confirmation as for the other edits.
+- `p6_get_activity` lists the `taskrsrc_id` of each assignment.
+- `p6_export_xer` writes a SCHEDOPTIONS block from the project's stored schedule options (as P6's own
+  exports do), so a project exported and imported again keeps its options; `p6_schedule_options` shows 0
+  differences between a project and its export.
+
 ## [1.0.1] - 2026-10-20
 
 Bug fixes from a full review of the server.
@@ -58,4 +74,6 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[1.1.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.1.0
+[1.0.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.0.1
 [1.0.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.0.0

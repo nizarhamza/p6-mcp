@@ -26,8 +26,8 @@ server computes the answers; the model explains them.
   run in memory, never written.
 - **XER files**: inspect, import (new project, baseline, update), export, or analyse XER files alone in
   read-only XER mode, without a P6 database or P6 installed.
-- **Edits** (off by default): durations, constraints, actual dates, progress, relationships, schedule
-  options, deletes, EPS, backups and restore.
+- **Edits** (off by default): durations, constraints, actual dates, progress, resource assignment
+  units, relationships, schedule options, deletes, EPS, backups and restore.
 
 ## Install
 
@@ -81,7 +81,7 @@ From the command line (the installer uses the same commands):
 
 ![Settings: tools and safety](docs/images/settings-tools.png)
 
-- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 46).
+- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 48).
 - **Writes are off by default.** With the Full profile and "Allow write operations", every write takes
   two calls: a dry run that shows the plan and returns a single-use confirmation token, then, after your
   explicit yes, the same call with that token. Deleting a project or an activity and restoring a backup

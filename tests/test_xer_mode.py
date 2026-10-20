@@ -15,9 +15,15 @@ SCHED = ("%T\tSCHEDOPTIONS\n%F\tschedoptions_id\tproj_id\tsched_calendar_on_rela
 
 
 def add_schedoptions(path):
-    text = open(path, encoding="cp1252").read()
-    head, end = text.rsplit("%E", 1)
-    open(path, "w", encoding="cp1252", newline="").write(head + SCHED.replace("\n", "\r\n") + "%E" + end)
+    """Replace the SCHEDOPTIONS block the export wrote with SCHED (a lag rule the database does not have)."""
+    keep, skip = [], False
+    for line in open(path, encoding="cp1252").read().split("\n"):
+        if line.startswith(("%T\t", "%E")):
+            skip = line == "%T\tSCHEDOPTIONS"
+        if not skip:
+            keep.append(line)
+    head, end = "\n".join(keep).rsplit("%E", 1)
+    open(path, "w", encoding="cp1252", newline="").write((head + SCHED + "%E" + end).replace("\n", "\r\n"))
 
 
 @pytest.fixture
@@ -25,6 +31,7 @@ def xers(p6, tmp_path):
     """Two updates of DEMO-A: the baseline state, then 20 working days later with progress."""
     first = str(tmp_path / "demo_update_1.xer")
     p6.call("p6_export_xer", project="DEMO-A", path=first)
+    assert open(first, encoding="cp1252").read().count("%T\tSCHEDOPTIONS") <= 1  # the export's own block, once
     con = sqlite3.connect(p6.db)
     con.execute("UPDATE TASK SET remain_drtn_hr_cnt = 40, phys_complete_pct = 75, early_end_date = "
                 "'2026-03-06 17:00:00' WHERE task_code = 'A1010'")

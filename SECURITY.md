@@ -8,6 +8,7 @@ you allow it, its write tools change that database **directly, without P6's own 
 | Tool | Changes |
 |---|---|
 | `p6_update_activity` | name, original and remaining durations, constraints, actual dates, physical % of one activity |
+| `p6_update_assignment(s)` | budgeted, actual and remaining units of resource assignments, with the costs, units/time and activity unit totals P6 derives from them |
 | `p6_add_relationship(s)`, `p6_update_relationship(s)`, `p6_delete_relationship(s)` | relationships (type, lag); deletes are hard deletes, as in P6 |
 | `p6_delete_activity` | one activity and the rows that belong to it (hard delete) |
 | `p6_delete_project` | whole projects (and their baselines), as a P6 delete does |
