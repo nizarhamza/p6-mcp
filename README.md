@@ -100,8 +100,8 @@ for the list of what the write tools can change.
 
 ## Privacy
 
-P6 MCP runs **only on your PC**: no cloud component, no telemetry. Its only network request is the
-optional update check (GitHub releases), which you can turn off under **Logs and updates**.
+P6 MCP runs **only on your PC**: no cloud component, no telemetry. Its only network requests are the
+updates (GitHub releases), which you can turn off under **Logs and updates**.
 
 **The data returned by the tools goes to the AI model your MCP client uses**, which may be a cloud
 service. For confidential schedules, use a local model (for example in LM Studio).

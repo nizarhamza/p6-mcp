@@ -121,13 +121,24 @@ stay outside this repository.
   rewrites `/D...` arguments into paths. Test an install with a fake profile in APPDATA / LOCALAPPDATA /
   USERPROFILE so the installer never registers the real clients.
 
-- `p6mcp/updates.py`: the only network call, `check()` reads the latest published release of
-  `nizarhamza/p6-mcp` from the GitHub API (never downloads); Settings `LogsPage` (log level, folders, update
-  check, at launch only from the tray app when `update_check`) and `AboutPage` (`about_pages.py`). Tests
-  replace `p6mcp.updates.check`: never call the network in tests.
+- `p6mcp/updates.py`: the only network calls. `check()` reads the latest published release of
+  `nizarhamza/p6-mcp` (tag, page, assets); `download()` fetches `SHA256SUMS.txt` and the
+  `P6MCP-Setup-<v>.exe` asset (only URLs under `DOWNLOAD_PREFIX`) into `%LOCALAPPDATA%\P6MCP\updates` and
+  deletes a file whose SHA256 does not match; `client_servers()` = `p6mcp-server.exe` processes that are
+  not descendants of this process (toolhelp snapshot: servers of MCP clients, not the tray's HTTP child);
+  `launch_install()` starts `cmd /c ping (3 s) & setup /VERYSILENT ... /AUTOUPDATE=1` detached, so the
+  tray can quit and release the AppMutex first; the installer's `IsAutoUpdate` then skips the client
+  registrations and starts the tray again (`--minimized`). `can_self_update()`: frozen next to
+  `unins000.exe` only (not the portable zip or a source run). `settings_app/updater.py` `Updater`
+  (owned by the tray, passed to `SettingsWindow(updater=)`): with config `auto_update` (default True; an
+  old `update_check: false` turns it off) it checks 1 min after start and every 6 h, downloads, then
+  installs when no client server runs, else polls every minute (state waiting); the Update button
+  (`LogsPage.update_now`) asks to close the clients' servers (`stop_servers`), wait, or cancel. With
+  `auto_update` on the tray stays after the window closes. Tests replace `p6mcp.updates.*`: never call
+  the network or start an installer in tests.
 - Public repository: https://github.com/nizarhamza/p6-mcp (Apache 2.0, Copyright 2026 Nizar Hamza; LICENSE,
   NOTICE, SECURITY.md, CHANGELOG.md, issue templates; README screenshots in `docs/images`, rendered from the
-  synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release; 1.0.1 = fixes of the 2026-10-20 server review; 1.1.0 = assignment units tools and the XER export of schedule options; 1.2.0 = UDF tools (list, filter and columns, set and clear activity values).
+  synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release; 1.0.1 = fixes of the 2026-10-20 server review; 1.1.0 = assignment units tools and the XER export of schedule options; 1.2.0 = UDF tools (list, filter and columns, set and clear activity values); 1.3.0 = automatic updates.
 
 ## Running
 

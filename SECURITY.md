@@ -36,7 +36,9 @@ Planned, early and late dates and float are never written: P6 recalculates them 
   Credential Manager) on every request; Host and Origin headers are checked against DNS rebinding.
 - Registering with an MCP client edits only the `p6mcp` entry of that client's configuration file,
   after a timestamped backup, and refuses a file it cannot parse.
-- The only network request is the optional update check (GitHub releases), which you can turn off.
+- The only network requests are the updates (GitHub releases of this repository), which you can turn off.
+  An update is installed only after its SHA256 matches the release's `SHA256SUMS.txt`; the installer is
+  not code signed yet.
 
 Remember that the data tools return goes to the AI model your MCP client uses. For confidential
 schedules, use a local model.

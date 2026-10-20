@@ -56,7 +56,8 @@ DEFAULTS: dict[str, Any] = {
     "language": "auto",
     "run_at_startup": False,
     "start_minimized": True,
-    "update_check": True,
+    "update_check": True,         # legacy key (<= 1.2.0): its False also turns auto_update off
+    "auto_update": True,          # check, download and install new releases (tray app)
     "clients_ignored": [],        # client ids whose registration offer the user declined for good
 }
 
@@ -133,6 +134,8 @@ def validate(d: dict) -> dict:
     have written them) but ignored."""
     out = copy.deepcopy(DEFAULTS)
     out.update(d)
+    if "auto_update" not in d and d.get("update_check") is False:  # a user who turned the old check off
+        out["auto_update"] = False
     errs = []
 
     def enum(key, allowed):
@@ -149,7 +152,7 @@ def validate(d: dict) -> dict:
     if not isinstance(out["xer_confirmed"], bool):
         errs.append("xer_confirmed must be true or false")
     for key in ("allow_writes", "backup_before_write", "block_when_p6_running", "run_at_startup",
-                "start_minimized", "update_check"):
+                "start_minimized", "update_check", "auto_update"):
         if not isinstance(out[key], bool):
             errs.append(f"{key} must be true or false, got {out[key]!r}")
     if not isinstance(out["backup_retention"], int) or isinstance(out["backup_retention"], bool) \

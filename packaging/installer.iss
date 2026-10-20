@@ -74,13 +74,15 @@ Name: "{group}\{cm:UninstallProgram,P6 MCP}"; Filename: "{uninstallexe}"
 
 [Run]
 Filename: "{app}\p6mcp-server.exe"; Parameters: "setup startup on"; Flags: runhidden; Tasks: startup
-Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register claude_desktop"; Description: "{cm:RegisterWith,Claude Desktop}"; Flags: postinstall runhidden; Check: ClientDetected('claude_desktop')
-Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register cursor"; Description: "{cm:RegisterWith,Cursor}"; Flags: postinstall runhidden; Check: ClientDetected('cursor')
-Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register vscode"; Description: "{cm:RegisterWith,VS Code}"; Flags: postinstall runhidden; Check: ClientDetected('vscode')
-Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register vscode_insiders"; Description: "{cm:RegisterWith,VS Code Insiders}"; Flags: postinstall runhidden; Check: ClientDetected('vscode_insiders')
-Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register lmstudio"; Description: "{cm:RegisterWith,LM Studio}"; Flags: postinstall runhidden; Check: ClientDetected('lmstudio')
-Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register cline"; Description: "{cm:RegisterWith,Cline}"; Flags: postinstall runhidden; Check: ClientDetected('cline')
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register claude_desktop"; Description: "{cm:RegisterWith,Claude Desktop}"; Flags: postinstall runhidden; Check: ClientDetected('claude_desktop') and not IsAutoUpdate
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register cursor"; Description: "{cm:RegisterWith,Cursor}"; Flags: postinstall runhidden; Check: ClientDetected('cursor') and not IsAutoUpdate
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register vscode"; Description: "{cm:RegisterWith,VS Code}"; Flags: postinstall runhidden; Check: ClientDetected('vscode') and not IsAutoUpdate
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register vscode_insiders"; Description: "{cm:RegisterWith,VS Code Insiders}"; Flags: postinstall runhidden; Check: ClientDetected('vscode_insiders') and not IsAutoUpdate
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register lmstudio"; Description: "{cm:RegisterWith,LM Studio}"; Flags: postinstall runhidden; Check: ClientDetected('lmstudio') and not IsAutoUpdate
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register cline"; Description: "{cm:RegisterWith,Cline}"; Flags: postinstall runhidden; Check: ClientDetected('cline') and not IsAutoUpdate
 Filename: "{app}\p6mcp-settings.exe"; Description: "{cm:OpenSettings}"; Flags: postinstall nowait skipifsilent
+; an automatic update (/AUTOUPDATE=1, run by the tray app after it quit): start the tray app again
+Filename: "{app}\p6mcp-settings.exe"; Parameters: "--minimized"; Flags: nowait; Check: IsAutoUpdate
 
 [UninstallRun]
 ; remove only the p6mcp entries, and the startup entry; settings, backups and logs are kept
@@ -90,6 +92,12 @@ Filename: "{app}\p6mcp-server.exe"; Parameters: "setup startup off"; Flags: runh
 [Code]
 var
   Detected: TStringList;
+
+function IsAutoUpdate: Boolean;
+begin
+  { the tray app's silent update: client registrations are left as the user set them }
+  Result := ExpandConstant('{param:AUTOUPDATE|0}') = '1';
+end;
 
 function ClientDetected(Id: String): Boolean;
 var

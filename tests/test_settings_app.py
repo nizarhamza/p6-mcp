@@ -373,7 +373,7 @@ def test_logs_and_about_pages(qtbot, win, monkeypatch):
     logs.level.setCurrentIndex(logs.level.findData("DEBUG"))
     assert win.data["log_level"] == "DEBUG"
     logs.auto.click()
-    assert win.data["update_check"] is False
+    assert win.data["auto_update"] is False
     logs.check()
     qtbot.waitUntil(lambda: logs.job is None, timeout=10000)
     assert "latest version" in logs.state.text() and not logs.open_btn.isVisibleTo(logs)

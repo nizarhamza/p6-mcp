@@ -23,11 +23,12 @@ CLIENTS_PAGE = [cls for _k, cls in PAGES].index(ClientsPage)
 
 
 class SettingsWindow(QMainWindow):
-    def __init__(self, supervisor=None, on_close=None, auto_update_check: bool = False):
+    def __init__(self, supervisor=None, on_close=None, auto_update_check: bool = False, updater=None):
         """supervisor: the tray app's HTTP server supervisor (None: status read from the status file).
-        on_close: called when a close is accepted; returning True hides the window instead (tray)."""
+        on_close: called when a close is accepted; returning True hides the window instead (tray).
+        updater: the tray app's Updater (automatic updates and the Update button)."""
         super().__init__()
-        self.supervisor, self.on_close = supervisor, on_close
+        self.supervisor, self.on_close, self.updater = supervisor, on_close, updater
         self.data, self.load_error = settings_logic.load_for_edit()
         self.saved: Optional[dict] = None if self.load_error else copy.deepcopy(self.data)
         self.restart_keys: list[str] = []
@@ -35,7 +36,8 @@ class SettingsWindow(QMainWindow):
         self.client_statuses: list = []  # filled by the Clients page scan (at every launch)
         i18n.set_language(self.data.get("language", "auto"))
         self.build()
-        if self.data.get("update_check", True) and auto_update_check:  # the only network call, can be off
+        # the only network call, can be off; with the tray's updater the tray also checks on its own schedule
+        if self.data.get("auto_update", True) and auto_update_check and (updater is None or updater.info is None):
             self.page(LogsPage).check()
 
     # -- layout (rebuilt when the language changes)
@@ -137,11 +139,14 @@ class SettingsWindow(QMainWindow):
             self.banner_btn.setText(tr(key))
 
     def _update(self) -> Optional[dict]:
-        r = self.page(LogsPage).result if self.pages else None
-        return r if r and r.get("newer") else None
+        return self.page(LogsPage).newer_release() if self.pages else None
 
     def _open_update(self) -> None:
-        self.page(LogsPage)._open_release()
+        page = self.page(LogsPage)
+        if self.updater is not None and self.updater.can_install:
+            page.update_now()
+        else:
+            page._open_release()
 
     def open_clients(self) -> None:
         self.nav.setCurrentRow(CLIENTS_PAGE)
@@ -162,7 +167,8 @@ class SettingsWindow(QMainWindow):
                 self.data.get("active_database") and settings_logic.find(self.data, self.data["active_database"])):
             pill(self.banner, "warn", tr("app.no_database"))
         elif self._update() is not None:
-            self._set_banner_button("upd.open", self._open_update)
+            self._set_banner_button("upd.now" if self.updater is not None and self.updater.can_install else "upd.open",
+                                    self._open_update)
             pill(self.banner, "info", tr("upd.newer", latest=self._update()["latest"], current=__version__))
         elif bad:
             self._set_banner_button("app.clients.open", self.open_clients)

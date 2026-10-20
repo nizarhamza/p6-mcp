@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from p6mcp import config, runtime, supervisor
 from p6mcp.i18n import tr
+from p6mcp.settings_app.updater import Updater
 
 TICK_MS = 2000
 MUTEX = "P6MCP-Tray"  # the installer's AppMutex: setup asks to close the app while it runs
@@ -113,6 +114,9 @@ class TrayApp(QObject):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
         self.timer.start(TICK_MS)
+        self.updater = Updater(self._quit_for_update, self)
+        if self.tray is not None:
+            self.updater.start()
         self.tick()
 
     # -- status
@@ -152,13 +156,14 @@ class TrayApp(QObject):
         if self.tray is None:
             return False
         st = config.load()
-        return st.transport == "http" or bool(st.raw.get("run_at_startup"))
+        return (st.transport == "http" or bool(st.raw.get("run_at_startup"))
+                or bool(st.raw.get("auto_update", True)))  # automatic updates run from the tray
 
     def show_window(self) -> None:
         if self.window is None:
             from p6mcp.settings_app.window import SettingsWindow
             self.window = SettingsWindow(supervisor=self.supervisor, on_close=self._window_closed,
-                                         auto_update_check=True)
+                                         auto_update_check=True, updater=self.updater)
             self.window.server_state(self.supervisor.state)
         self.window.show()
         self.window.setWindowState(self.window.windowState() & ~Qt.WindowState.WindowMinimized)
@@ -190,6 +195,19 @@ class TrayApp(QObject):
         """Tray menu Quit: asks about unsaved settings first."""
         if self.window is not None and self.window.isVisible() and not self.window.close_for_quit():
             return
+        self._shutdown()
+
+    def _quit_for_update(self, version: Optional[str]) -> None:
+        """The installer replaces this app's files: quit (releasing the AppMutex); it starts the app again."""
+        if self.tray is not None:
+            self.tray.showMessage(tr("app.title"), tr("upd.installing", latest=version or "?"),
+                                  QSystemTrayIcon.MessageIcon.Information, 4000)
+        if self.window is not None:
+            self.window.hide()
+        if self._mutex:
+            import ctypes
+            ctypes.windll.kernel32.CloseHandle(self._mutex)
+            self._mutex = None
         self._shutdown()
 
     def _shutdown(self) -> None:

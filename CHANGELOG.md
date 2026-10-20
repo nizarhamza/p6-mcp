@@ -3,6 +3,24 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-10-20
+
+### Added
+
+- Automatic updates (Logs and updates > "Update P6 MCP automatically", on by default). The tray app
+  checks GitHub a minute after it starts and every 6 hours, downloads the new installer, checks its
+  SHA256 against the release's `SHA256SUMS.txt`, and installs it silently as soon as no MCP client is
+  using P6 MCP; P6 MCP then restarts by itself. Your MCP client settings are left as they are.
+- An Update button (Logs and updates, and the banner) installs a new version at once. When MCP clients
+  are using P6 MCP it asks whether to close P6 MCP in them now or to update when they close.
+
+### Changed
+
+- With automatic updates on, P6 MCP stays in the notification area when the Settings window closes.
+- Turning off the old "check when Settings opens" option also turns automatic updates off.
+
+Versions before 1.3.0 cannot update themselves: install 1.3.0 once from the Releases page.
+
 ## [1.2.0] - 2026-10-20
 
 ### Added
