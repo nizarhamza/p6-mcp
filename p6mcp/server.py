@@ -52,14 +52,15 @@ import json
 import math
 import os
 import re
-import shutil
 import sqlite3
 import statistics
 import uuid
 import subprocess
 import sys
+import urllib.parse
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta
 from time import monotonic
 from typing import (Annotated, Any, Callable, Iterable, Literal, Mapping, Optional, Sequence, TypedDict,
@@ -469,6 +470,7 @@ def _gated(fn: Callable) -> Callable:
     call.__signature__ = ev.replace(parameters=ps)
     call.__doc__ = (fn.__doc__ or "").rstrip() + WRITE_DOC + (DESTRUCTIVE_DOC if destructive else "")
     return call
+_ro_cons: ContextVar[Optional[list]] = ContextVar("_ro_cons", default=None)  # read connections of the running tool
 
 
 def _tool(read_only: bool = True, destructive: bool = False, idempotent: bool = True):
@@ -480,9 +482,29 @@ def _tool(read_only: bool = True, destructive: bool = False, idempotent: bool = 
     hints = {"readOnlyHint": read_only, "destructiveHint": destructive and not read_only,
              "idempotentHint": idempotent, "openWorldHint": False}
 
-    def deco(fn):
-        name = fn.__name__
+    def deco(tool_fn):
+        name = tool_fn.__name__
         TOOL_HINTS[name] = hints
+
+        @functools.wraps(tool_fn)
+        def fn(*a, **k):  # closes the read-only connections the call opened (nested tool calls close their own)
+            opened = _ro_cons.get()
+            token = None
+            if opened is None:
+                opened = []
+                token = _ro_cons.set(opened)
+            mark = len(opened)
+            try:
+                return tool_fn(*a, **k)
+            finally:
+                for c in opened[mark:]:
+                    try:
+                        c.close()
+                    except sqlite3.Error:
+                        pass
+                del opened[mark:]
+                if token is not None:
+                    _ro_cons.reset(token)
         gated = REGISTERED[name] = _gated(fn)
         if not _policy.listed(name, STARTUP.tool_profile, STARTUP.allow_writes):
             return fn
@@ -515,13 +537,20 @@ def _connect(readonly: bool = True) -> sqlite3.Connection:
         raise RuntimeError(f"The configured database was not found: {DB_PATH}. Open P6 MCP Settings to select "
                            "another one.")
     if readonly:
-        uri = "file:" + DB_PATH.replace("\\", "/") + "?mode=ro"
-        con = sqlite3.connect(uri, uri=True, timeout=5)
+        con = sqlite3.connect(_ro_uri(DB_PATH), uri=True, timeout=5)
         con.execute("PRAGMA query_only = ON")  # second lock besides mode=ro: no statement may write
+        opened = _ro_cons.get()
+        if opened is not None:  # inside a tool call: closed when the tool returns
+            opened.append(con)
     else:
         con = sqlite3.connect(DB_PATH, timeout=5)
     con.row_factory = sqlite3.Row
     return con
+
+
+def _ro_uri(path: str) -> str:
+    """Read-only SQLite URI of a file path ('#', '%', '?' and spaces escaped)."""
+    return "file:" + urllib.parse.quote(path.replace("\\", "/"), safe="/:") + "?mode=ro"
 
 
 def _cols(con: sqlite3.Connection, table: str) -> set[str]:
@@ -606,12 +635,13 @@ def _backup(kind: str = "") -> str:
     while os.path.exists(dest):
         n += 1
         dest = os.path.join(folder, f"{base}_{n}.db")
-    src = _connect(readonly=True)
-    dst = sqlite3.connect(dest)
-    with dst:
-        src.backup(dst)  # consistent copy even if the file is busy
-    src.close()
-    dst.close()
+    try:
+        with closing(_connect(readonly=True)) as src, closing(sqlite3.connect(dest)) as dst:
+            src.backup(dst)  # consistent copy even if the file is busy
+    except BaseException:
+        if os.path.exists(dest):  # a partial copy must not look like a usable backup
+            os.remove(dest)
+        raise
     _backup_done, _last_backup = True, dest
     if not kind:
         _last_pruned = _prune_backups(SETTINGS.backup_retention, protect=[dest])
@@ -681,7 +711,7 @@ def _log_entries() -> list[dict]:
 
 def _undone_fn(entries: Sequence[dict]) -> Callable[[dict], bool]:
     """True for an entry made after a backup that a later p6_restore_backup copied back in."""
-    wins = [(e["backup_taken_at"], e["ts"]) for e in entries
+    wins = [(e.get("backup_copied_at") or e["backup_taken_at"], e["ts"]) for e in entries
             if e.get("operation") == "restore_backup" and e.get("backup_taken_at")]
     return lambda e: e.get("operation") != "restore_backup" and any(a < e["ts"] < b for a, b in wins)
 
@@ -715,16 +745,12 @@ def _guard_write() -> Optional[str]:
 
 
 def _next_key(con: sqlite3.Connection, table: str, id_col: str) -> int:
-    """Reserve the next ID from NEXTKEY, never below MAX(id)+1."""
+    """Reserve the next ID from NEXTKEY (key <table>_<id_col>, case ignored), never below MAX(id)+1.
+    No loose match: a suffix match could pick, and then lower, another table's counter."""
     row = con.execute(
         "SELECT key_name, key_seq_num FROM NEXTKEY WHERE lower(key_name) = lower(?)",
         (f"{table}_{id_col}",),
     ).fetchone()
-    if row is None:
-        row = con.execute(
-            "SELECT key_name, key_seq_num FROM NEXTKEY WHERE lower(key_name) LIKE lower(?)",
-            (f"%{id_col}",),
-        ).fetchone()
     if row is None:
         raise RuntimeError(f"No NEXTKEY entry found for {table}.{id_col}; run p6_diagnose.")
     max_id = con.execute(f"SELECT COALESCE(MAX({id_col}),0) FROM {table}").fetchone()[0]
@@ -1353,6 +1379,27 @@ def _lag_hpd(con, pred, succ, proj_id: Optional[int] = None, rule: Optional[str]
     return float(h or 8), LAG_RULES[rule]
 
 
+def _lag_cal_of(rule: str, p_cal, s_cal, proj_cal) -> Optional[_Cal]:
+    """Calendar a lag is counted on under the lag rule (None: 24-hour days; default: the predecessor's)."""
+    return {"rcal_Successor": s_cal, "rcal_24Hour": None, "rcal_ProjDefault": proj_cal}.get(rule, p_cal)
+
+
+def _lag_hpd_of(rule: str, p_hpd, s_hpd, proj_cal) -> float:
+    """Hours per lag day under the lag rule, from loaded calendars (_lag_hpd reads the database)."""
+    return {"rcal_Successor": s_hpd, "rcal_24Hour": 24.0,
+            "rcal_ProjDefault": proj_cal.hpd if proj_cal else 8.0}.get(rule, p_hpd) or 8.0
+
+
+def _lag_left(lag: float, ref: Optional[datetime], dd: Optional[datetime], lc: Optional[_Cal]) -> float:
+    """A positive lag minus the part elapsed between the predecessor's actual date ref and the data
+    date dd (on the lag calendar lc, else in elapsed hours), as F9 does when the lag counts from the
+    actual dates (sched_lag_early_start_flag not 'N')."""
+    if lag <= 0 or dd is None or ref is None or ref >= dd:
+        return lag
+    return max(0.0, lag - (lc.work_hours(ref, dd) if lc is not None and not lc.error
+                           else (dd - ref).total_seconds() / 3600))
+
+
 def _lag_hpd_sql(con, pid: int) -> tuple[str, str]:
     """(SQL hours per lag day, basis) under the lag rule of pid, for links with the predecessor's
     calendar as cp and the successor's as cs."""
@@ -1374,14 +1421,18 @@ def _xer_project(x: dict, xer_project: Optional[str]) -> dict:
 def _xer_sched(x: dict, xp: dict) -> dict[str, Optional[str]]:
     """SCHEDOPTIONS of XER project xp (or the only row, when it has no proj_id) without its ids; {}
     when absent. Another project's row is never used."""
-    rows = x.get("SCHEDOPTIONS", [])
-    row = next((r for r in rows if r.get("proj_id") == xp["proj_id"]),
-               rows[0] if len(rows) == 1 and rows[0].get("proj_id") is None else None)
-    out = {k: v for k, v in (row or {}).items() if k not in ("schedoptions_id", "proj_id")}
+    out = {k: v for k, v in _xer_sched_row(x, xp).items() if k not in ("schedoptions_id", "proj_id")}
     if out.get("levelprioritylist"):
         lpl = _xer_lpl(out["levelprioritylist"])
         out["levelprioritylist"] = out["levelprioritylist"].strip() if lpl is None else _lpl_text(lpl)
     return out
+
+
+def _xer_sched_row(x: dict, xp: dict) -> dict:
+    """The SCHEDOPTIONS row of XER project xp, or the only row when it has no proj_id; {} otherwise."""
+    rows = x.get("SCHEDOPTIONS", [])
+    return next((r for r in rows if r.get("proj_id") == xp["proj_id"]),
+                rows[0] if len(rows) == 1 and rows[0].get("proj_id") is None else None) or {}
 
 
 def _opt_eq(a, b) -> bool:
@@ -1542,11 +1593,10 @@ def _key_task(con, pid: int, code: Any) -> str:
     c = "" if code is None else str(code).strip()
     if c.lower() in ("", "-99", "none", "(none)"):
         return "-99"
-    r = con.execute("SELECT task_id FROM TASK WHERE proj_id = ? AND task_code = ?" + _alive(con, "TASK"),
-                    (pid, c)).fetchone()
-    if r is None:
+    tid = _task_id_by_code(con, pid, c)
+    if tid is None:
         raise ValueError(f"key activity: Activity ID {c!r} not found in the project")
-    return str(r[0])
+    return str(tid)
 
 
 def _xer_sched_values(x: dict, xp: dict, key_map: Callable[[str], Optional[int]]
@@ -1554,9 +1604,7 @@ def _xer_sched_values(x: dict, xp: dict, key_map: Callable[[str], Optional[int]]
     """XER SCHEDOPTIONS of project xp -> (PROJPROP 'scheduling' values, level priority list, warnings).
     key_map turns the XER key activity task_id into the database task_id (None when it has no match:
     -99 is written, with a warning). Option names are kept as the XER spells them (lower case)."""
-    rows = x.get("SCHEDOPTIONS", [])
-    row = next((r for r in rows if r.get("proj_id") == xp["proj_id"]),
-               rows[0] if len(rows) == 1 and rows[0].get("proj_id") is None else None) or {}
+    row = _xer_sched_row(x, xp)
     vals, warn, lpl = {}, [], None
     for k, v in row.items():
         if k in ("schedoptions_id", "proj_id"):
@@ -1653,10 +1701,10 @@ def _name_sep(con, pid: int) -> str:
     return "."
 
 
-def _wbs_tree(con, pid: int) -> list[dict]:
+def _wbs_tree(con, pid: int, sep: Optional[str] = None) -> list[dict]:
     """WBS nodes reachable from the project node (proj_node_flag 'Y'), in P6 order: pre-order,
     siblings by seq_num then wbs_id. Keys: wbs_id, parent_wbs_id, depth (project node 0), wbs_code
-    (short names joined with _name_sep), wbs_short_name, wbs_name."""
+    (short names joined with sep, default _name_sep), wbs_short_name, wbs_name."""
     seg = "printf('%010d.%010d', COALESCE({0}.seq_num, 0) + 1000000000, {0}.wbs_id)"  # fixed width: sorts as text
     sql = (f"WITH RECURSIVE pw AS {MAT_SQL}(SELECT wbs_id, parent_wbs_id, seq_num, proj_node_flag, wbs_short_name, "
            "wbs_name FROM PROJWBS WHERE proj_id = :pid" + _alive(con, "PROJWBS") + "), "
@@ -1668,7 +1716,7 @@ def _wbs_tree(con, pid: int) -> list[dict]:
            "SELECT t.wbs_id AS wbs_id, p.parent_wbs_id AS parent_wbs_id, t.depth AS depth, t.wbs_code AS wbs_code, "
            "p.wbs_short_name AS wbs_short_name, p.wbs_name AS wbs_name FROM tree t JOIN pw p ON p.wbs_id = t.wbs_id "
            "ORDER BY t.sort_key")
-    return [_dict(r) for r in con.execute(sql, {"pid": pid, "sep": _name_sep(con, pid)})]
+    return [_dict(r) for r in con.execute(sql, {"pid": pid, "sep": sep or _name_sep(con, pid)})]
 
 
 AGG_MIN, AGG_MAX = ("tf_min", "start"), ("tf_max", "finish")  # the other _act_agg_sql keys add up
@@ -1861,7 +1909,8 @@ def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Opt
     pid = _project_id(con, project)
     con.execute("BEGIN")  # tree, rollups and the stored count from one snapshot
     try:
-        nodes = _wbs_tree(con, pid)
+        sep = _name_sep(con, pid)
+        nodes = _wbs_tree(con, pid, sep)
         if not nodes:
             raise ValueError(f"Project {project} has no project WBS node.")
         own: dict[int, dict] = {}
@@ -1872,7 +1921,6 @@ def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Opt
                 (pid,))}
         stored = con.execute("SELECT COUNT(*) FROM PROJWBS WHERE proj_id = ?" + _alive(con, "PROJWBS"),
                              (pid,)).fetchone()[0]
-        sep = _name_sep(con, pid)
     finally:
         con.rollback()
     i = 0
@@ -2662,7 +2710,9 @@ def _key_dates(net: _Net, thr: Optional[float]) -> tuple[dict, list[dict]]:
                 "cstr_label": _cstr_label(ty), "cstr_date": _fmt_dt(dt)}
     def span(d, ty, dt) -> tuple[datetime, datetime]:
         if ty in CSTR_FINISH:
-            return (dt if d["cal"] is None or d["cal"].error else d["cal"].subtract_work_hours(dt, _hc_dur(d))), dt
+            if d["cal"] is None or d["cal"].error:
+                return dt - timedelta(hours=_hc_dur(d)), dt
+            return d["cal"].subtract_work_hours(dt, _hc_dur(d)), dt
         return dt, add(d["cal"], dt, _hc_dur(d))
     for d, ty, dt in cons:
         start, fin = span(d, ty, dt)
@@ -2704,10 +2754,14 @@ def _key_dates(net: _Net, thr: Optional[float]) -> tuple[dict, list[dict]]:
                      "detail": "the last F9 finishes the project after its must finish date"})
     rows.sort(key=lambda r: (r["task_code"], r["issue"], r.get("other") or ""))
     n_items = len({r["task_code"] for r in rows})
-    chk = _chk(len(rows), len(cons) + (1 if net.must else 0), thr, "max",
+    # count = issue rows (what check='key_dates' pages); pct = constraints (plus the must finish) with an issue
+    hit = len({(r["task_code"], r.get("cstr_type")) for r in rows})
+    denom = len(cons) + (1 if net.must else 0)
+    chk = _chk(len(rows), denom, thr, "max",
                [f"{r['task_code']} {r['issue']}" + (f" ({r['other']})" if r.get("other") else "") for r in rows[:15]],
                activities=n_items, finish_milestone=fm and fm["task_code"], must_finish=net.prj["plan_end_date"],
                note="information only; items: check='key_dates'")
+    chk["pct"] = round(100 * hit / denom, 2) if denom else None
     return chk, rows
 
 
@@ -2755,7 +2809,7 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
     delayed 100 working days must move the project finish as much; not run when the engine does not
     match the F9, see p6_cpm_validate), cpli, bei; each {count, denominator, pct, threshold,
     pass, sample (15)}; then key_dates (information only: constraint dates against the must finish
-    date, the work after them and each other). Open = not completed; LOE and WBS summary activities
+    date, the work after them and each other; count = issues, pct = constraints with an issue). Open = not completed; LOE and WBS summary activities
     are left out, also as either end of a link; relationship checks count links whose successor is
     open. pct must stay at most the threshold, except fs_links (at least), cpli and bei (value at
     least), compared before rounding; pass is None when not evaluated. Thresholds: the project's Check
@@ -2785,9 +2839,9 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
     offset, limit = _check_page(offset, limit)
     con = _connect()
     pid = _project_id(con, project)
+    con.execute("BEGIN")  # settings and every check from one snapshot
     cfg = _dcma_settings(con, pid, dict(thresholds or {}), high_float_days)
     bid = _baseline_pid(con, pid, baseline)
-    con.execute("BEGIN")  # every check from one snapshot
     try:
         checks, n_open, n_links, ends, items = _dcma(con, pid, bid, cfg, baseline_dates, duration_basis)
         if check in (None, "key_dates"):  # a drill-down of another check does not need the network
@@ -2871,7 +2925,8 @@ def _hc_pick(project: str, ref: str, snaps: list[dict], name: str) -> dict:
 def p6_health_check_compare(project: ProjectId, before: str = "previous", after: str = "latest") -> dict:
     """Compare two health check snapshots of a project (each full p6_health_check run saves one):
     before / after = 'latest', 'previous' (the one before latest) or a snapshot id (any database), or
-    after='current' to run the health check now. totals: open activities, relationships, links with an
+    after='current' to run the health check now (before 'latest' or 'previous' is then the latest snapshot
+    saved before that run). totals: open activities, relationships, links with an
     open successor, non-FS links {before, after, delta}. checks: per check count, pct and value
     {before, after, delta}, pass {before, after}, and the items that entered and left it (activity IDs or
     links 'pred -> succ type', first 50 of each, with entered_count / left_count). changed: checks whose
@@ -2880,9 +2935,11 @@ def p6_health_check_compare(project: ProjectId, before: str = "previous", after:
     con = _connect()
     _project_id(con, project)
     con.close()
-    if after == "current":
-        p6_health_check(project)
-        after = "latest"
+    if after == "current":  # before 'latest' or 'previous' = the latest snapshot saved before this run
+        snap = p6_health_check(project).get("snapshot") or {}
+        if "id" not in snap:
+            raise ValueError(f"after='current': {snap.get('error', 'the health check snapshot was not saved')}")
+        after, before = snap["id"], "previous" if before == "latest" else before
     snaps = _hc_snapshots(project)
     a, b = _hc_pick(project, before, snaps, "before"), _hc_pick(project, after, snaps, "after")
     meta = lambda s: {k: s.get(k) for k in ("id", "ts", "db", "last_schedule_date", "data_date", "stale")}  # noqa: E731
@@ -3029,6 +3086,7 @@ def p6_progress_check(project: ProjectId, sample_size: SampleSize = 15) -> dict:
     cols, al = _cols(con, "TASK"), functools.partial(_alive, con)
     links = ("FROM TASKPRED r JOIN TASK t ON t.task_id = r.task_id JOIN TASK p ON p.task_id = r.pred_task_id "
              "LEFT JOIN PROJECT pp ON pp.proj_id = p.proj_id WHERE t.proj_id = :pid"
+             f" AND t.task_type NOT IN {SUMMARY_TYPES} AND p.task_type NOT IN {SUMMARY_TYPES}"  # no link ends
              + al("TASKPRED", "r") + al("TASK", "t") + al("TASK", "p"))
     acts = "FROM TASK t WHERE t.proj_id = :pid" + al("TASK", "t")
     con.execute("BEGIN")
@@ -3164,11 +3222,10 @@ class _Net:
 
     def lag_cal(self, p: dict, s: dict) -> Optional[_Cal]:
         """Calendar of the lag (None: 24-hour days)."""
-        return {"rcal_Successor": s["cal"], "rcal_24Hour": None, "rcal_ProjDefault": self.pcal}.get(self.rule, p["cal"])
+        return _lag_cal_of(self.rule, p["cal"], s["cal"], self.pcal)
 
     def lag_hpd(self, p: dict, s: dict) -> float:
-        return {"rcal_Successor": s["hpd"], "rcal_24Hour": 24.0,
-                "rcal_ProjDefault": self.pcal.hpd if self.pcal else 8.0}.get(self.rule, p["hpd"]) or 8.0
+        return _lag_hpd_of(self.rule, p["hpd"], s["hpd"], self.pcal)
 
     def gap(self, lk: dict, late: bool = False) -> Optional[float]:
         """Gap of a link in hours on early (late=False) or late dates; None when a date or calendar is missing."""
@@ -3181,10 +3238,8 @@ class _Net:
         if a is None or b is None or cal is None or cal.error or (lc is not None and lc.error):
             return None
         lag = lk["lag"]
-        if lag > 0 and self.lag_from_early and self.dd:
-            ref = p["as_"] if LINK_FROM[lk["type"]] == "s" else p["af"]
-            if ref is not None and ref < self.dd:
-                lag = max(0.0, lag - (lc.work_hours(ref, self.dd) if lc else (self.dd - ref).total_seconds() / 3600))
+        if self.lag_from_early:
+            lag = _lag_left(lag, p["as_"] if LINK_FROM[lk["type"]] == "s" else p["af"], self.dd, lc)
         if lc is None:
             anchor = a + timedelta(hours=lag)
         else:
@@ -3356,7 +3411,8 @@ def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annota
     every controlling successor, until the source. origin: type activity_constraint (a constraint
     bounding late dates: start/finish on, on or before, mandatory), project_must_finish
     (PROJECT.plan_end_date), open_end (no controlling successor: project finish), unexplained, or mixed
-    (several sources, all in sources), with date, activity and constraint; explanation says it in
+    (several sources, all in sources), or none (max_depth reached before any source), with date,
+    activity and constraint; explanation says it in
     words. own_constraint: the activity's own constraint and whether it controls. Page of chain rows by
     level (0 = the activity): late dates, total_float_d, and the controlled_by link (successor, type,
     lag_d, gap). Read only."""
@@ -3397,7 +3453,7 @@ def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annota
         rows.append(row)
     rows.sort(key=lambda r: (r["level"], r["task_code"]))
     kinds = sorted({s["type"] for s in sources})
-    origin = {"type": kinds[0] if len(kinds) == 1 else "mixed", "sources": sources}
+    origin = {"type": kinds[0] if len(kinds) == 1 else "mixed" if kinds else "none", "sources": sources}
     if len(sources) == 1:
         origin.update({k: v for k, v in sources[0].items() if k != "type"})
     own = [{"cstr_type": ty, "cstr_label": _cstr_label(ty), "cstr_date": dt,
@@ -3668,11 +3724,10 @@ class _Cpm:
 
     # ------------------------------------------------------------------ helpers
     def lag_cal(self, p_cal, s_cal) -> Optional[_Cal]:
-        return {"rcal_Successor": s_cal, "rcal_24Hour": None, "rcal_ProjDefault": self.pcal}.get(self.rule, p_cal)
+        return _lag_cal_of(self.rule, p_cal, s_cal, self.pcal)
 
     def lag_hpd(self, p: dict, s: dict) -> float:
-        return {"rcal_Successor": s["hpd"], "rcal_24Hour": 24.0,
-                "rcal_ProjDefault": self.pcal.hpd if self.pcal else 8.0}.get(self.rule, p["hpd"]) or 8.0
+        return _lag_hpd_of(self.rule, p["hpd"], s["hpd"], self.pcal)
 
     @staticmethod
     def shift(cal: Optional[_Cal], dt: datetime, h: float) -> datetime:
@@ -3681,13 +3736,22 @@ class _Cpm:
         return cal.add_work_hours(dt, h) if h >= 0 else cal.subtract_work_hours(dt, -h)
 
     def eff_lag(self, lk: dict, p: dict, lc: Optional[_Cal]) -> float:
-        lag = lk["lag"]
-        if lag > 0 and self.dd and self.opts.get("sched_lag_early_start_flag", "Y") != "N":
-            ref = p.get("act_start_date") if lk["type"] in ("PR_SS", "PR_SF") else p.get("act_end_date")
-            if ref is not None and ref < self.dd:
-                lag = max(0.0, lag - (lc.work_hours(ref, self.dd) if lc and not lc.error
-                                      else (self.dd - ref).total_seconds() / 3600))
-        return lag
+        if self.opts.get("sched_lag_early_start_flag", "Y") == "N":
+            return lk["lag"]
+        ref = p.get("act_start_date") if LINK_FROM[lk["type"]] == "s" else p.get("act_end_date")
+        return _lag_left(lk["lag"], ref, self.dd, lc)
+
+    def duration_fixed(self, d: dict) -> Optional[str]:
+        """Why a change of d's remaining duration cannot move its finish (None when it can)."""
+        if d["status_code"] == "TK_Complete":
+            return "completed"
+        if d["task_type"] in ("TT_Mile", "TT_FinMile"):
+            return "milestone"
+        if self.opts.get("sched_use_expect_end_flag") == "Y" and d.get("expect_end_date"):
+            return "expected finish date used by the schedule options"
+        if "CS_MANDFIN" in (d["cstr_type"], d["cstr_type2"]):
+            return "mandatory finish constraint"
+        return None
 
     def rem(self, d: dict, es: Optional[datetime] = None) -> float:
         if d["status_code"] == "TK_Complete" or d["task_type"] in ("TT_Mile", "TT_FinMile"):
@@ -3725,6 +3789,11 @@ class _Cpm:
         order, by_s, by_p = self.order()
         T, dd = self.t, self.dd
         retained = self.opts.get("sched_retained_logic", "Y") != "N"
+        ext_p, ext_s = {}, {}  # links to other projects by own activity
+        for lk in self.ext_pred:
+            ext_p.setdefault(lk["succ"], []).append(lk)
+        for lk in self.ext_succ:
+            ext_s.setdefault(lk["pred"], []).append(lk)
         res: dict[int, dict] = {}
         for n in order:
             d = T[n]
@@ -3738,8 +3807,8 @@ class _Cpm:
                 b = a if (p["status_code"] == "TK_Complete" and d["status_code"] == "TK_Complete") \
                     else self.shift(lc, a, self.eff_lag(lk, p, lc))
                 (sb if LINK_TO[lk["type"]] == "s" else fb).append(b)
-            for lk in self.ext_pred:
-                if lk["succ"] == n and (lk["es"] or lk["ef"]):
+            for lk in ext_p.get(n, ()):
+                if lk["es"] or lk["ef"]:
                     a = lk["ef"] if LINK_FROM[lk["type"]] == "f" else lk["es"]
                     if a is not None:
                         (sb if LINK_TO[lk["type"]] == "s" else fb).append(self.shift(self.lag_cal(lk["cal"], d["cal"]), a, lk["lag"]))
@@ -3768,10 +3837,10 @@ class _Cpm:
             fin = self.shift(cal, st, rem)
             if fb and max(fb) > fin:
                 fin = max(fb)
-                st = cal.subtract_work_hours(fin, rem) if (cal and rem) else fin
+                st = self.shift(cal, fin, -rem) if rem else fin
             if mand:
                 st, fin = (nws(mand[1]), self.shift(cal, nws(mand[1]), rem)) if mand[0] == "CS_MANDSTART" else \
-                    ((cal.subtract_work_hours(mand[1], rem) if cal and rem else mand[1]), mand[1])
+                    ((self.shift(cal, mand[1], -rem) if rem else mand[1]), mand[1])
             if d["task_type"] == "TT_Mile":
                 fin = st
             res[n] = {"es": st, "ef": fin}
@@ -3789,11 +3858,11 @@ class _Cpm:
                 a = rq["ls"] if LINK_TO[lk["type"]] == "s" else rq["lf"]
                 lc = self.lag_cal(d["cal"], q["cal"])
                 (lfb if LINK_FROM[lk["type"]] == "f" else lsb).append(self.shift(lc, a, -self.eff_lag(lk, d, lc)))
-            for lk in self.ext_succ:
-                if lk["pred"] == n:
-                    a = lk["ls"] if LINK_TO[lk["type"]] == "s" else lk["lf"]
-                    if a is not None:
-                        (lfb if LINK_FROM[lk["type"]] == "f" else lsb).append(self.shift(self.lag_cal(d["cal"], lk["cal"]), a, -lk["lag"]))
+            for lk in ext_s.get(n, ()):
+                a = lk["ls"] if LINK_TO[lk["type"]] == "s" else lk["lf"]
+                if a is not None:
+                    lc = self.lag_cal(d["cal"], lk["cal"])
+                    (lfb if LINK_FROM[lk["type"]] == "f" else lsb).append(self.shift(lc, a, -self.eff_lag(lk, d, lc)))
             if not lfb and not lsb:
                 lfb.append(open_lf)
             mand = None
@@ -3833,11 +3902,15 @@ class _Cpm:
         return res
 
     def _wbs_spans(self, res: dict) -> None:
-        """LOE and WBS summary activities span what they summarise (approximation): LOE from its
-        predecessors' start to its successors' finish, WBS summary over the activities of its WBS."""
+        """WBS summary activities span the activities of their own WBS node (approximation: child
+        nodes are not included, float is not recomputed). LOE activities keep their own dates."""
+        by_wbs: dict = {}
+        for i, x in self.t.items():
+            if x["task_type"] not in ("TT_LOE", "TT_WBS"):
+                by_wbs.setdefault(x["wbs_id"], []).append(res[i])
         for n, d in self.t.items():
             if d["task_type"] == "TT_WBS":
-                kids = [res[i] for i, x in self.t.items() if x["wbs_id"] == d["wbs_id"] and x["task_type"] not in ("TT_LOE", "TT_WBS")]
+                kids = by_wbs.get(d["wbs_id"])
                 if kids:
                     res[n].update(es=min(k["es"] for k in kids), ef=max(k["ef"] for k in kids),
                                   ls=min(k["ls"] for k in kids), lf=max(k["lf"] for k in kids))
@@ -4047,6 +4120,9 @@ def _whatif_apply(cpm: _Cpm, e: Mapping) -> str:
             ch.append(f"original {e['original_days']:g} d (remaining follows)")
         if not ch:
             raise ValueError("duration: give remaining_days (or original_days for a not started activity)")
+        fixed = cpm.duration_fixed(d)
+        if fixed:
+            ch.append(f"no effect on its dates ({fixed})")
         return f"{d['task_code']}: " + ", ".join(ch)
     name = e.get("constraint")
     if name not in CSTR_TYPES:
@@ -4162,7 +4238,7 @@ def _cpt(con, pid: int) -> dict:
         return {**out, "engine_match_rate": chk["match_rate"],
                 "note": f"not run: the CPM engine matches the last F9 on {chk['match_rate']} of open activities "
                         f"(needs {CPM_TRUST}); see p6_cpm_validate"}
-    cand = [d for d in base.t.values() if d["status_code"] != "TK_Complete" and d["task_type"] in ("TT_Task", "TT_Rsrc")
+    cand = [d for d in base.t.values() if d["task_type"] in ("TT_Task", "TT_Rsrc") and base.duration_fixed(d) is None
             and r0[d["task_id"]]["tf_h"] is not None]
     if not cand:
         return {**out, "note": "not run: no open task"}
@@ -4176,7 +4252,10 @@ def _cpt(con, pid: int) -> dict:
     f0, f1 = base.finish(r0)[1], trial.finish(r1)[1]
     act_shift = (r1[d["task_id"]]["ef"] - r0[d["task_id"]]["ef"]).total_seconds() / 86400
     fin_shift = (f1 - f0).total_seconds() / 86400
-    ok = act_shift > 0 and fin_shift >= 0.9 * act_shift
+    if act_shift <= 0:
+        return {**out, "activity": d["task_code"], "engine_match_rate": chk["match_rate"],
+                "note": f"not evaluated: delaying {d['task_code']} did not move its own finish"}
+    ok = fin_shift >= 0.9 * act_shift
     return {**out, "pass": ok, "activity": d["task_code"], "delay_d": 100,
             "activity_finish_shift_cd": round(act_shift, 2), "project_finish_shift_cd": round(fin_shift, 2),
             "engine_match_rate": chk["match_rate"]}
@@ -4205,7 +4284,11 @@ def _cmp_links(con) -> str:
                 "LEFT JOIN PROJECT pp ON pp.proj_id = pt.proj_id LEFT JOIN CALENDAR cp ON cp.clndr_id = pt.clndr_id "
                 f"LEFT JOIN CALENDAR cs ON cs.clndr_id = st.clndr_id WHERE st.proj_id = :{p}"
                 + _alive(con, "TASKPRED", "r") + _alive(con, "TASK", "st") + _alive(con, "TASK", "pt"))
-    return f"WITH la AS {MAT_SQL}({side('pid')}), lb AS {MAT_SQL}({side('oid')}) "
+
+    def one(p: str) -> str:  # a key linked twice counts once: the lowest id (bare columns follow MIN)
+        return (f"SELECT MIN(rid) AS rid, pred, succ, type, pred_project, lag_h, pred_hpd, succ_hpd FROM ({side(p)}) "
+                "GROUP BY pred, succ, type, pred_project")
+    return f"WITH la AS {MAT_SQL}({one('pid')}), lb AS {MAT_SQL}({one('oid')}) "
 
 
 LINK_KEY = "lb.pred = la.pred AND lb.succ = la.succ AND lb.type = la.type AND lb.pred_project IS la.pred_project"
@@ -4360,6 +4443,7 @@ def p6_group_summary(project: ProjectId, by: GroupBy = "status", code_type: Opti
             raise ValueError(f"{name} must be 1 or more")
     con = _connect()
     pid = _project_id(con, project)
+    con.execute("BEGIN")  # settings, aggregates and the WBS or code tree from one snapshot
     crit, args, definition = _critical_clause(con, pid, "project", None)[:3]
     info, join = None, ""
     if by == "code":
@@ -4371,7 +4455,6 @@ def p6_group_summary(project: ProjectId, by: GroupBy = "status", code_type: Opti
            f"{SUMMARY_TYPES} AND ({crit})) AS crit FROM TASK t LEFT JOIN CALENDAR c ON c.clndr_id = t.clndr_id{join} "
            "WHERE t.proj_id = ?" + _alive(con, "TASK", "t")
            + ("" if include_completed else " AND t.status_code <> 'TK_Complete'") + " GROUP BY k")
-    con.execute("BEGIN")  # aggregates and the WBS or code tree from one snapshot
     try:
         raw = {r["k"]: {k: r[k] for k in r.keys() if k != "k"} for r in con.execute(sql, [*args, pid])}
         nodes = _wbs_tree(con, pid) if by == "wbs" else []
@@ -4447,6 +4530,7 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
     row_fn = _act_row(fields)
     con = _connect()
     pid = _project_id(con, project)
+    con.execute("BEGIN")  # data date, code filter, page and counts from one snapshot
     dd = (con.execute("SELECT last_recalc_date FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()[0]
           if "last_recalc_date" in _cols(con, "PROJECT") else None)
     frm = frm or _db_dt(dd)
@@ -4470,7 +4554,6 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
 
     def row(r: sqlite3.Row) -> dict:
         return {**row_fn(r), "window": [k for k in cat if r[f"w_{k}"]]}
-    con.execute("BEGIN")  # page and counts from one snapshot
     try:
         res = _page(con, q, args, offset, limit, row)
         c = con.execute("SELECT " + ", ".join(f"SUM({x})" for x in cat.values()) + f" FROM ({inner}) t", args).fetchone()
@@ -4734,6 +4817,7 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
     schedule_state."""
     con = _connect()
     pid = _project_id(con, project)
+    con.execute("BEGIN")  # settings and every figure from one snapshot
     pc, tc, al = _cols(con, "PROJECT"), _cols(con, "TASK"), functools.partial(_alive, con)
     pf = ("proj_short_name", "clndr_id", "last_recalc_date", "plan_start_date", "plan_end_date", "scd_end_date",
           "last_schedule_date", "def_complete_pct_type")
@@ -4753,7 +4837,6 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
     links = ("FROM TASKPRED r JOIN TASK s ON s.task_id = r.task_id JOIN TASK p ON p.task_id = r.pred_task_id WHERE 1=1"
              + al("TASKPRED", "r") + al("TASK", "s") + al("TASK", "p"))
     one = lambda sql, args=(pid,): con.execute(sql, args).fetchone()[0]  # noqa: E731
-    con.execute("BEGIN")  # every figure from one snapshot
     try:
         p = con.execute("SELECT " + ", ".join(c if c in pc else f"NULL AS {c}" for c in pf) + " FROM PROJECT WHERE proj_id = ?",
                         (pid,)).fetchone()
@@ -4900,6 +4983,7 @@ def p6_float_analysis(project: ProjectId, edges_days: Optional[FloatEdges] = Non
     edges, notes = _float_edges(edges_days)
     con = _connect()
     pid = _project_id(con, project)
+    con.execute("BEGIN")  # settings and rows from one snapshot (closed with the connection)
     cflt, cargs, cinfo = _code_filter(con, pid, code_type, code_value, include_child_codes)
     crit, crit_args, definition = _critical_clause(con, pid, "project", None)[:3]
     inner = (_act_from(con) + f" AND t.status_code <> 'TK_Complete' AND t.task_type NOT IN {SUMMARY_TYPES}"
@@ -5641,7 +5725,7 @@ def _link_batch(project: str, items: list, kind: str, confirm: bool, fn: Callabl
     {'task_pred_id': n} deletes that link (it must touch the project)."""
     with _write_session(confirm) as (con, backup):
         pid = _project_id(con, project)
-        lost_pred, lost_succ, done = set(), set(), {}
+        lost_pred, lost_succ, done, removed = set(), set(), {}, []
 
         def apply_one(i: int, it) -> dict:
             if kind == "delete" and isinstance(it, Mapping) and set(it) == {"task_pred_id"}:
@@ -5659,9 +5743,23 @@ def _link_batch(project: str, items: list, kind: str, confirm: bool, fn: Callabl
                     raise ValueError(f"task_pred_id {tpid} links {pred['proj_short_name']} {pred['task_code']} -> "
                                      f"{succ['proj_short_name']} {succ['task_code']}: not a link of {project}")
                 x = _rel_delete_row(con, r, pred, succ)
+            elif kind == "delete":
+                keys = _item_keys(it, kind)
+                try:
+                    x = fn(con, project, keys)
+                except ValueError:  # the same link named twice (by id, then by pair): already gone, not an error
+                    pred, succ = _rel_ends(con, project, keys)
+                    ty = keys.get("type") or keys.get("current_type")
+                    prior = [j for p, s, t, j in removed if p == pred["task_id"] and s == succ["task_id"]
+                             and (ty is None or t == str(ty).upper())]
+                    if not prior:
+                        raise
+                    return {"plan": f"{pred['task_code']} -> {succ['task_code']}: already removed by item {prior[0]}",
+                            "projects": []}
             else:
                 x = fn(con, project, _item_keys(it, kind))
             if kind == "delete":
+                removed.append((x["_pred"], x["_succ"], x["type"], i))
                 done[x["task_pred_id"]] = i
                 lost_pred.add(x["_succ"])
                 lost_succ.add(x["_pred"])
@@ -5853,17 +5951,14 @@ def p6_update_activity(
 # table with a task_id, pred_task_id or taskrsrc_id column holds rows of the activity and loses them.
 ACT_DEL_CLEAR = (("PROJISSU", "task_id"),)
 ACT_DEL_ORDER = ("TASKACTV", "UDFVALUE", "TASKRSRC", "TASKPRED", "TASK")  # children first, as DEL_ORDER
-ACT_DEL_OWN = (("task_id", "_dt"), ("pred_task_id", "_dt"), ("taskrsrc_id", "_dr"))
+ACT_DEL_OWN = {"task_id": "_dt", "pred_task_id": "_dt", "taskrsrc_id": "_dr"}  # as DEL_OWN, activities only
+ACT_DEL_UDF = {"TASK": "_dt", "TASKRSRC": "_dr"}
 ACT_SNAPSHOT = ("task_code", "task_name", "task_type", "status_code", "wbs_id", "clndr_id", "target_drtn_hr_cnt",
                 "remain_drtn_hr_cnt", "cstr_type", "cstr_date", "act_start_date", "act_end_date", "phys_complete_pct")
 
 
 def _act_del_where(con, t: str) -> list[str]:
-    conds = [f"{c} IN (SELECT id FROM temp.{s})" for c, s in ACT_DEL_OWN if c in _cols(con, t)]
-    if t == "UDFVALUE" and _cols(con, "UDFTYPE"):
-        conds += [f"(fk_id IN (SELECT id FROM temp.{s}) AND udf_type_id IN (SELECT udf_type_id FROM UDFTYPE "
-                  f"WHERE table_name = '{tn}'))" for tn, s in (("TASK", "_dt"), ("TASKRSRC", "_dr"))]
-    return conds
+    return _owned_where(con, t, ACT_DEL_OWN, ACT_DEL_UDF)
 
 
 def _act_delete_rows(con, task_ids: Iterable[int]) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
@@ -5872,9 +5967,7 @@ def _act_delete_rows(con, task_ids: Iterable[int]) -> tuple[dict[str, int], dict
     their assignments and the assignments' rows (taskrsrc_id: period actuals, timesheet hours, codes),
     UDF values of both, and the read marks of their discussions. ACT_DEL_CLEAR rows stay with the link
     cleared. Returns (deleted per table, cleared per column, rows still naming them: must be empty)."""
-    for t in ("_dt", "_dr"):
-        con.execute(f"DROP TABLE IF EXISTS temp.{t}")
-        con.execute(f"CREATE TEMP TABLE {t} (id INTEGER PRIMARY KEY)")
+    _temp_id_sets(con, ("_dt", "_dr"))
     con.executemany("INSERT OR IGNORE INTO temp._dt VALUES (?)", [(int(i),) for i in task_ids])
     con.execute("INSERT OR IGNORE INTO temp._dr SELECT taskrsrc_id FROM TASKRSRC WHERE task_id IN (SELECT id FROM temp._dt)")
     cleared, counts = {}, {}
@@ -5928,6 +6021,11 @@ def p6_delete_activity(project: ProjectId, task_code: ActivityId, force: bool = 
         raise ValueError("Delete refused (nothing written). " + reasons[0])
     with _write_session(confirm) as (con, backup):
         t = _task(con, project, task_code)
+        actual = {k: t[k] for k in ("act_start_date", "act_end_date") if t[k]}  # again, under the write lock
+        if actual and not force and not reasons:
+            reasons = [f"{task_code} has actual dates {actual}: progress would be lost. Pass force=True to delete it anyway."]
+            if confirm:
+                raise ValueError("Delete refused (nothing written). " + reasons[0])
         tid, pid = t["task_id"], t["proj_id"]
         links = [_rel_row_fn(con, pid)(r) for r in con.execute(_rel_sql(con, "both"), {"tid": tid})]
         ends = con.execute("SELECT task_id, pred_task_id FROM TASKPRED WHERE (task_id = ? OR pred_task_id = ?)"
@@ -6142,7 +6240,7 @@ def _backup_file(name: str) -> str:
 
 def _projects_of(path: str) -> dict[str, tuple]:
     """Project ID -> (data date, last schedule date) of a database file (read only), EPS nodes left out."""
-    con = sqlite3.connect("file:" + path.replace("\\", "/") + "?mode=ro", uri=True, timeout=5)
+    con = sqlite3.connect(_ro_uri(path), uri=True, timeout=5)
     con.row_factory = sqlite3.Row
     try:
         tables = {r[0].upper() for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -6172,6 +6270,11 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
         raise RuntimeError(why)
     path = _backup_file(name)
     taken = _backup_taken_at(path)
+    # the copy's end in milliseconds (file time) when it matches the name: a commit made earlier in the same
+    # second as the backup is in it, a commit made after it is undone by the restore
+    mt = datetime.fromtimestamp(os.path.getmtime(path))
+    copied = (mt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+              if timedelta(0) <= mt - datetime.strptime(taken, "%Y-%m-%d %H:%M:%S") < timedelta(minutes=10) else taken)
     cur, old = _projects_of(DB_PATH), _projects_of(path)
     changed = sorted(p for p in set(cur) & set(old) if cur[p] != old[p])
     diff = {"only_in_backup": sorted(set(old) - set(cur))[:50], "only_in_database": sorted(set(cur) - set(old))[:50],
@@ -6199,7 +6302,7 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
     err = _guard_write()
     if err:
         raise RuntimeError(err)
-    src = sqlite3.connect("file:" + path.replace("\\", "/") + "?mode=ro", uri=True, timeout=5)
+    src = sqlite3.connect(_ro_uri(path), uri=True, timeout=5)
     try:
         bad = src.execute("PRAGMA quick_check(5)").fetchall()
         if [r[0] for r in bad] != ["ok"]:
@@ -6221,6 +6324,7 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
     entry = {"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(DB_PATH),
              "tool": "p6_restore_backup", "operation": "restore_backup", "project": None, "proj_id": None,
              "table": None, "keys": {"backup": name}, "before": None, "after": None, "backup_taken_at": taken,
+             "backup_copied_at": copied,
              "summary": plan[0], "change": plan[0][:160], "backup": safety, "stale": {}, "stale_projects": []}
     res = {"applied": True, "done": plan + [f"Safety backup: {safety}"], **base, "safety_backup": safety,
            "next": "Open P6 and check the projects (press F9 where the data needs it)."}
@@ -6271,7 +6375,10 @@ def p6_list_eps(offset: Offset = 0, limit: Limit = 200) -> dict:
 
 
 def _create_eps(con, eps_id: str, eps_name: str, parent_wbs: Optional[int], now: str) -> int:
-    """Insert an EPS node (PROJECT row with project_flag N plus its PROJWBS node); returns the node wbs_id."""
+    """Insert an EPS node (PROJECT row with project_flag N plus its PROJWBS node); returns the node wbs_id.
+    Refuses a name already used by a project, baseline or EPS node (tools look PROJECT up by name)."""
+    if con.execute("SELECT 1 FROM PROJECT WHERE proj_short_name = ?" + _alive(con, "PROJECT"), (eps_id,)).fetchone():
+        raise ValueError(f"{eps_id!r} is already used by a project or EPS node: choose another EPS ID.")
     root_obs = con.execute("SELECT obs_id FROM OBS WHERE parent_obs_id IS NULL"
                            + _alive(con, "OBS") + " ORDER BY seq_num, obs_id").fetchone()
     pid = _next_key(con, "PROJECT", "proj_id")
@@ -6294,6 +6401,8 @@ def p6_create_eps(eps_id: str, eps_name: str, parent_eps: Optional[str] = None,
     with _write_session(confirm) as (con, backup):
         if any(n["eps_id"] == eps_id for n in _eps_nodes(con)):
             return {"applied": False, "error": f"EPS {eps_id!r} already exists."}
+        if con.execute("SELECT 1 FROM PROJECT WHERE proj_short_name = ?" + _alive(con, "PROJECT"), (eps_id,)).fetchone():
+            return {"applied": False, "error": f"{eps_id!r} is already a Project ID: choose another EPS ID."}
         parent = _eps_wbs_id(con, parent_eps) if parent_eps else None
         _create_eps(con, eps_id, eps_name, parent, _now_str(con))
         plan = [f"Create EPS {eps_id} '{eps_name}'" + (f" under {parent_eps}" if parent_eps else " (top level)")]
@@ -6517,9 +6626,7 @@ def _orphans(con) -> dict[str, int]:
 
 def _del_sets(con, pids: Iterable[int]) -> None:
     """Temp tables of the ids a delete removes: projects, their activities, WBS, assignments, code types."""
-    for t in ("_dp", "_dt", "_dw", "_dr", "_dct"):
-        con.execute(f"DROP TABLE IF EXISTS temp.{t}")
-        con.execute(f"CREATE TEMP TABLE {t} (id INTEGER PRIMARY KEY)")
+    _temp_id_sets(con, ("_dp", "_dt", "_dw", "_dr", "_dct"))
     con.executemany("INSERT OR IGNORE INTO temp._dp VALUES (?)", [(int(p),) for p in pids])
     con.execute("INSERT OR IGNORE INTO temp._dt SELECT task_id FROM TASK WHERE proj_id IN (SELECT id FROM temp._dp)")
     con.execute("INSERT OR IGNORE INTO temp._dw SELECT wbs_id FROM PROJWBS WHERE proj_id IN (SELECT id FROM temp._dp)")
@@ -6530,14 +6637,27 @@ def _del_sets(con, pids: Iterable[int]) -> None:
                     "(SELECT id FROM temp._dp)")
 
 
-def _del_where(con, t: str) -> list[str]:
-    """Conditions (OR) that select the rows of table t belonging to the ids in the temp sets."""
-    conds = [f"{c} IN (SELECT id FROM temp.{s})" for c, s in DEL_OWN.items()
+def _temp_id_sets(con, names: Iterable[str]) -> None:
+    """Empty temp tables of ids (id INTEGER PRIMARY KEY) for a delete."""
+    for t in names:
+        con.execute(f"DROP TABLE IF EXISTS temp.{t}")
+        con.execute(f"CREATE TEMP TABLE {t} (id INTEGER PRIMARY KEY)")
+
+
+def _owned_where(con, t: str, own: Mapping[str, str], udf: Mapping[str, str]) -> list[str]:
+    """Conditions (OR) that select the rows of table t belonging to the ids in the temp sets: a column
+    of own (column -> temp set), or a UDFVALUE whose UDF type is on a table of udf (table -> temp set)."""
+    conds = [f"{c} IN (SELECT id FROM temp.{s})" for c, s in own.items()
              if c in _cols(con, t) and not (c == "actv_code_type_id" and t == "ACTVTYPE")]
     if t == "UDFVALUE" and _cols(con, "UDFTYPE"):
         conds += [f"(fk_id IN (SELECT id FROM temp.{s}) AND udf_type_id IN (SELECT udf_type_id FROM UDFTYPE "
-                  f"WHERE table_name = '{tn}'))" for tn, s in DEL_UDF.items()]
+                  f"WHERE table_name = '{tn}'))" for tn, s in udf.items()]
     return conds
+
+
+def _del_where(con, t: str) -> list[str]:
+    """Conditions (OR) that select the rows of table t belonging to the deleted projects' ids."""
+    return _owned_where(con, t, DEL_OWN, DEL_UDF)
 
 
 def _delete_rows(con, pids: Iterable[int]) -> tuple[dict[str, int], dict[str, int]]:
@@ -6570,10 +6690,13 @@ def _cross_links(con) -> dict:
          "JOIN PROJECT sp ON sp.proj_id = s.proj_id JOIN PROJECT pp ON pp.proj_id = p.proj_id WHERE "
          "(r.task_id IN (SELECT id FROM temp._dt)) <> (r.pred_task_id IN (SELECT id FROM temp._dt))")
     n = con.execute("SELECT COUNT(*) " + q).fetchone()[0]
+    kept = sorted({r[0] for r in con.execute(
+        "SELECT CASE WHEN r.task_id IN (SELECT id FROM temp._dt) THEN p.proj_id ELSE s.proj_id END " + q)})
     rows = con.execute("SELECT pp.proj_short_name AS pp, p.task_code AS pc, sp.proj_short_name AS sp, "
                        "s.task_code AS sc, r.pred_type AS ty " + q + " ORDER BY r.task_pred_id LIMIT 15").fetchall()
     return {"count": n, "sample": [f"{r['pp']} {r['pc']} -> {r['sp']} {r['sc']} {REL_TYPES_REV.get(r['ty'], r['ty'])}"
                                    for r in rows],
+            "other_proj_ids": kept,
             "note": "deleted with the project (P6 does the same); the other project needs F9"}
 
 
@@ -6744,7 +6867,7 @@ def p6_delete_project(project: ProjectList, include_baselines: bool = True, allo
         log = [{"operation": "delete_project", "proj_id": p["proj_id"], "project": p["project"], "table": "PROJECT",
                 "keys": {"proj_id": p["proj_id"]}, "before": {"activities": p.get("activities")}, "after": None,
                 "summary": plan[0][:300]} for p in targets]
-        res = _commit(con, plan, confirm, log=log)
+        res = _commit(con, plan, confirm, projects=cross["other_proj_ids"], log=log)
         res.update(extra)
         if not confirm:
             res.update(would_refuse=bool(reasons), refuse_reasons=reasons)
@@ -6807,12 +6930,15 @@ def _xer_encode(v: Any) -> str:
     if v is None:
         return ""
     if isinstance(v, bytes):
-        v = v.rstrip(b"\x00").decode("cp1252", errors="replace")
+        v = _blob_text(v)
     if isinstance(v, float):
-        return str(int(v)) if v.is_integer() else f"{v:.6f}".rstrip("0")
+        if not math.isfinite(v):
+            return ""
+        s = f"{v:.6f}".rstrip("0").rstrip(".")  # 6 decimals as before, never "7." or "-0"
+        return "0" if s in ("-0", "") else s
     v = str(v)
-    if re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d", v):
-        return v[:16]
+    if re.fullmatch(r"\d{4}-\d\d-\d\d[ T]\d\d:\d\d(:\d\d(\.\d+)?)?", v):
+        return v[:10] + " " + v[11:16]
     return v.replace("\r\n", "\n").replace("\n", _XER_NL).replace("\t", " ").replace('"', '""')
 
 
@@ -6821,7 +6947,8 @@ def _xer_read_meta(path: str) -> tuple[list[str], dict[str, list[dict]], dict]:
     (utf8_error_at = file offset of the first non UTF-8 byte). A repeated %T block adds to its
     table, %R lines before their %F are not read, and rows with more or fewer values than fields
     are counted (missing values read as empty, extra ones dropped)."""
-    raw = open(path, "rb").read()
+    with open(path, "rb") as fh:
+        raw = fh.read()
     bom = raw.startswith(b"\xef\xbb\xbf")
     body = raw[3:] if bom else raw
     meta: dict[str, Any] = {"bytes": len(raw), "bom": bom, "encoding": "utf-8", "utf8_error_at": None}
@@ -6869,8 +6996,13 @@ def _xer_read(path: str) -> tuple[list[str], dict[str, list[dict]]]:
 
 
 def _xer_only(x: dict, xpid) -> dict:
-    """Rows of XER project xpid plus global rows (no proj_id)."""
-    return {t: [r for r in rows if r.get("proj_id") in (None, xpid)] for t, rows in x.items()}
+    """Rows of XER project xpid plus global rows (no proj_id). ACTVCODE has no proj_id: only the
+    codes of a kept code type stay (another project's types are dropped, so are their codes)."""
+    out = {t: [r for r in rows if r.get("proj_id") in (None, xpid)] for t, rows in x.items()}
+    if "ACTVCODE" in out:
+        kept = {r.get("actv_code_type_id") for r in out.get("ACTVTYPE", [])}
+        out["ACTVCODE"] = [r for r in out["ACTVCODE"] if r.get("actv_code_type_id") in kept]
+    return out
 
 
 def _prefer(con, col: str) -> Optional[int]:
@@ -6891,7 +7023,9 @@ def _xer_preflight(header: list[str], x: dict, meta: dict, xer_project: Optional
     (XER fields the database lacks) and, with preview, db_preview (global items matched by name
     or created, as the import would)."""
     xp = _xer_project(x, xer_project)
+    all_codes = x.get("ACTVCODE", [])
     x = _xer_only(x, xp["proj_id"])
+    kept_codes = {id(r) for r in x.get("ACTVCODE", [])}
     out: dict[str, Any] = {"project": xp["proj_short_name"], "errors": [], "warnings": [], "info": [],
                            "unhandled_tables": {t: len(r) for t, r in x.items()
                                                 if t not in XER_TABLES and t != "SCHEDOPTIONS"},
@@ -6949,7 +7083,10 @@ def _xer_preflight(header: list[str], x: dict, meta: dict, xer_project: Optional
     add("warnings", "foreign_ids_cleared", [f"{k}: {n}" for k, n in cleared.items() if n],
         "ids of data an XER does not carry (roles, accounts, curves...) are cleared")
     add("warnings", "tables_not_imported", [f"{t}: {n} rows" for t, n in out["unhandled_tables"].items()])
-    add("info", "schedule_options", ["SCHEDOPTIONS"] if x.get("SCHEDOPTIONS") else [],
+    add("info", "activity_codes_other_types", [f"{c.get('short_name')} (type {c.get('actv_code_type_id')})"
+                                               for c in all_codes if id(c) not in kept_codes],
+        "codes of another project's code types or of a type not in the file: not imported")
+    add("info", "schedule_options",["SCHEDOPTIONS"] if x.get("SCHEDOPTIONS") else [],
         "written to the project's schedule options (PROJPROP scheduling) unless import_schedule_options=False "
         "(default off in baseline mode); compare with p6_schedule_options")
     add("info", "external_links", [f"{code.get(r.get('pred_task_id'), r.get('pred_task_id'))} -> "
@@ -7095,12 +7232,7 @@ def _import_target(con, mode: str, project: Optional[str], xp: dict) -> Optional
     name = project or (xp["proj_short_name"] if mode == "update" else None)
     if not name:
         raise ValueError("baseline mode needs project= (the project the baseline belongs to)")
-    r = con.execute("SELECT * FROM PROJECT WHERE proj_short_name = ?" + _alive(con, "PROJECT"), (name,)).fetchone()
-    if r is None:
-        raise ValueError(f"Project not found: {name}")
-    if (_dict(r).get("project_flag") or "Y") != "Y":
-        raise ValueError(f"{name} is an EPS node, not a project")
-    return _dict(r)
+    return _project_row(con, name)
 
 
 def _removable(remove_missing, mode: str) -> list[str]:
@@ -7402,12 +7534,17 @@ def p6_import_xer(
             else:
                 imp.idmap["TASK"][t["task_id"]] = imp.new_row("TASK", t)
 
-        # ---- relationships
+        # ---- relationships (one link per pair and type: a repeated XER row is skipped)
+        seen_links = set()
         for r in x.get("TASKPRED", []):
             succ, pred = imp.idmap["TASK"].get(r["task_id"]), imp.idmap["TASK"].get(r["pred_task_id"])
             if succ is None or pred is None:
                 imp.count("TASKPRED", "skipped_external")
                 continue
+            if (succ, pred, r.get("pred_type")) in seen_links:
+                imp.count("TASKPRED", "skipped_duplicate")
+                continue
+            seen_links.add((succ, pred, r.get("pred_type")))
             hit = None
             if mode == "update":
                 hit = con.execute("SELECT task_pred_id FROM TASKPRED WHERE task_id = ? AND pred_task_id = ? "
@@ -7567,7 +7704,8 @@ def _upsert(imp: _XerImport, table: str, row: dict, key: tuple) -> None:
     where = {k: row[k] for k in key}
     if imp.con.execute(f"SELECT 1 FROM {table} WHERE " + " AND ".join(k + "=?" for k in key),
                        list(where.values())).fetchone():
-        _update(imp.con, table, where, {**row, **_stamp_cols(imp.con, table, imp.now, create=False)})
+        revive = {c: None for c in ("delete_session_id", "delete_date") if c in _cols(imp.con, table)}  # a soft-deleted row comes back
+        _update(imp.con, table, where, {**row, **revive, **_stamp_cols(imp.con, table, imp.now, create=False)})
         imp.count(table, "updated")
     else:
         _insert(imp.con, table, {**row, **_stamp_cols(imp.con, table, imp.now, create=True)})
@@ -7593,11 +7731,27 @@ def p6_export_xer(project: ProjectId, path: str, tables: Optional[list[XerTable]
     bad = [t for t in tables if t not in XER_TABLES]
     if bad:
         raise ValueError(f"Unknown tables {bad}; choose from {XER_TABLES}")
+    path = _export_target(path)
     if os.path.exists(path) and not overwrite:
         raise ValueError(f"{path} already exists: pass overwrite=True to replace it, or choose another path.")
-    if DB_PATH and os.path.normcase(os.path.abspath(path)) == os.path.normcase(DB_PATH):
-        raise ValueError("path is the database itself")
-    con = _connect()
+    with closing(_connect()) as con:
+        return _export_xer(con, project, path, tables, xer_version)
+
+
+def _export_target(path: str) -> str:
+    """Absolute export path: a .xer file in an existing folder (never the database, a backup or a log)."""
+    if not path or not path.lower().endswith(".xer"):
+        raise ValueError(f"Export path must end with .xer: {path!r}")
+    path = os.path.abspath(path)
+    if not os.path.isdir(os.path.dirname(path)):
+        raise ValueError(f"Folder not found: {os.path.dirname(path)!r}")
+    if os.path.isdir(path):
+        raise ValueError(f"{path!r} is a folder")
+    return path
+
+
+def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[str],
+                xer_version: Optional[str]) -> dict:
     pid = _project_id(con, project)
     al = lambda t: _alive(con, t)  # noqa: E731
     one = lambda sql: {r[0] for r in con.execute(sql) if r[0] is not None}  # noqa: E731
@@ -7654,7 +7808,7 @@ def p6_export_xer(project: ProjectId, path: str, tables: Optional[list[XerTable]
     }
     if xer_version is None:
         try:
-            ver = con.execute("SELECT * FROM PREFER").fetchone()
+            ver = con.execute("SELECT * FROM PREFER").fetchone() or ()
             ver = next((str(v) for v in ver if isinstance(v, str) and re.fullmatch(r"\d\d\.\d+\.\d+", v)), "")
             xer_version = ".".join(ver.split(".")[:2]) or "24.12"
         except sqlite3.Error:
@@ -7664,21 +7818,37 @@ def p6_export_xer(project: ProjectId, path: str, tables: Optional[list[XerTable]
     lines = ["\t".join(["ERMHDR", xer_version, datetime.now().strftime("%Y-%m-%d"), "Project",
                         P6_USER, P6_USER, "dbxDatabaseNoName", "Project Management",
                         base_curr[0] if base_curr else "USD"])]
-    counts = {}
+    counts, lossy, warn = {}, {}, []
     for t in tables:
         cols = [r[1].lower() for r in con.execute(f"PRAGMA table_info({t})")
                 if r[1].lower() not in ("delete_session_id", "delete_date")]
+        if not cols:
+            warn.append(f"{t} is not in this database: not exported.")
+            continue
         alias = " v" if t == "UDFVALUE" else ""
         rows = con.execute(f"SELECT {', '.join(cols)} FROM {t}{alias} WHERE {where[t]}"
                            + _alive(con, t, alias.strip())).fetchall()
         counts[t] = len(rows)
         lines.append(f"%T\t{t}")
         lines.append("%F\t" + "\t".join(cols))
-        lines.extend("%R\t" + "\t".join(_xer_encode(v) for v in r) for r in rows)
+        key = cols.index("task_code") if "task_code" in cols else 0
+        for r in rows:
+            vals = [_xer_encode(v) for v in r]
+            if not all(_cp1252_ok(v) for v in vals):
+                lossy.setdefault(t, []).append(vals[key])
+            lines.append("%R\t" + "\t".join(vals))
     lines.append("%E")
-    with open(path, "w", encoding="cp1252", errors="replace", newline="") as fh:
-        fh.write("\r\n".join(lines) + "\r\n")
-    warn = []
+    tmp = path + ".tmp"
+    try:  # written beside the target, then swapped in: a failed export leaves the old file intact
+        with open(tmp, "w", encoding="cp1252", errors="replace", newline="") as fh:
+            fh.write("\r\n".join(lines) + "\r\n")
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    for t, keys in lossy.items():
+        warn.append(f"{t}: {len(keys)} row(s) with characters outside cp1252, written as '?' "
+                    f"(first: {', '.join(keys[:10])}).")
     deps = {"TASK": ["PROJWBS", "CALENDAR"], "TASKPRED": ["TASK"], "TASKRSRC": ["TASK", "RSRC"],
             "TASKACTV": ["TASK", "ACTVTYPE", "ACTVCODE"], "UDFVALUE": ["UDFTYPE"],
             "PROJWBS": ["PROJECT"], "RSRCRATE": ["RSRC"], "ACTVCODE": ["ACTVTYPE"]}
@@ -7687,6 +7857,14 @@ def p6_export_xer(project: ProjectId, path: str, tables: Optional[list[XerTable]
         if miss:
             warn.append(f"{t} exported without {miss}: P6 may not resolve those references on import.")
     return {"path": path, "xer_version": xer_version, "rows": counts, "warnings": warn}
+
+
+def _cp1252_ok(v: str) -> bool:
+    try:
+        v.encode("cp1252")
+        return True
+    except UnicodeEncodeError:
+        return False
 
 
 if __name__ == "__main__":

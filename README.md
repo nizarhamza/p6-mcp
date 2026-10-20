@@ -32,7 +32,7 @@ server computes the answers; the model explains them.
 ## Install
 
 1. Download `P6MCP-Setup-<version>.exe` from [Releases](https://github.com/nizarhamza/p6-mcp/releases)
-   and check it against `SHA256SUMS.txt` (`certutil -hashfile P6MCP-Setup-1.0.0.exe SHA256`).
+   and check it against `SHA256SUMS.txt` (`certutil -hashfile P6MCP-Setup-1.0.1.exe SHA256`).
 2. Run it. It installs for your Windows user only (no administrator rights, nothing else to install)
    and, on the last page, offers to register P6 MCP with every MCP client it finds. Untick the ones you
    do not want.

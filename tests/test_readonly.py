@@ -86,6 +86,9 @@ def test_export_refuses_to_overwrite(p6, tmp_path):
     with pytest.raises(ValueError, match="already exists"):
         p6.call("p6_export_xer", project="DEMO-A", path=str(out))
     assert p6.call("p6_export_xer", project="DEMO-A", path=str(out), overwrite=True)["rows"]["TASK"] == 7
-    with pytest.raises(ValueError, match="database itself"):
+    with pytest.raises(ValueError, match="must end with .xer"):  # the database, a backup or a log
         p6.call("p6_export_xer", project="DEMO-A", path=p6.db, overwrite=True)
     assert os.path.getsize(p6.db) > 0
+    with pytest.raises(ValueError, match="Folder not found"):
+        p6.call("p6_export_xer", project="DEMO-A", path=str(tmp_path / "none" / "x.xer"))
+    assert not list(tmp_path.glob("*.tmp"))  # the export goes through a temp file swapped in
