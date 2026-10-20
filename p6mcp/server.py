@@ -157,6 +157,12 @@ ACT_EXTRA = ("cstr_type2", "cstr_date2", "restart_date", "reend_date", "expect_e
 UDF_VALUE = {"FT_TEXT": "udf_text", "FT_STATICTYPE": "udf_text", "FT_START_DATE": "udf_date",
              "FT_END_DATE": "udf_date", "FT_INT": "udf_number", "FT_MONEY": "udf_number",
              "FT_FLOAT_2_DECIMALS": "udf_number", "FT_CODE": "udf_code"}  # UDF value column per logical type
+UDF_KINDS = {"FT_TEXT": "text", "FT_STATICTYPE": "indicator", "FT_START_DATE": "start_date",
+             "FT_END_DATE": "finish_date", "FT_INT": "integer", "FT_MONEY": "cost",
+             "FT_FLOAT_2_DECIMALS": "number", "FT_CODE": "code"}  # data type names shown to clients
+UDF_TEXT_MAX = 255  # UDFVALUE.udf_text length (P6 limit)
+UDF_INDICATOR = re.compile(r"UDF_G[0-4]", re.I)  # indicator values as P6 stores them (UDF_G0 to UDF_G4)
+UDF_PROJECT_TABLES = ("PROJECT", "PROJWBS", "TASK", "TASKRSRC")  # UDF subjects whose values belong to a project
 CAL_EPOCH = date(1899, 12, 30)  # P6 calendar exception dates are day serials from this date
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # Python weekday order
 CAL_SCAN_DAYS = 7320  # add_work_hours gives up after 20 years without working time
@@ -232,6 +238,23 @@ DryRun = Annotated[bool, Field(description="true (default): preview only, return
 ConfirmToken = Annotated[str, Field(description="confirmation_token returned by the dry run of this same call.")]
 ConfirmText = Annotated[str, Field(description="The exact confirmation_text_required given by the dry run.")]
 LegacyConfirm = Annotated[bool, Field(description="Deprecated alias of dry_run=false (still needs the token).")]
+UdfOp = Literal["eq", "ne", "lt", "le", "gt", "ge", "contains", "empty", "not_empty"]
+UdfValue = Annotated[Union[str, float], Field(description="Text, number, 'YYYY-MM-DD[ HH:MM]' date, indicator "
+                                                          "(UDF_G0 to UDF_G4) or code short name, per the UDF type.")]
+
+
+class _UdfFilterKeys(TypedDict):
+    udf: str
+
+
+class UdfFilter(_UdfFilterKeys, total=False):
+    """Activities whose UDF value matches: op (default eq) against value (not for empty / not_empty)."""
+    op: UdfOp
+    value: Union[str, float]
+
+
+UdfFilters = Annotated[list[UdfFilter], Field(description="UDF conditions, all must hold.")]
+UdfNames = Annotated[list[str], Field(description="UDF labels (as in P6 columns) to add to each row under 'udfs'.")]
 # Activity list row: the one list of field names (rows, fields= projection, MCP schema)
 ActField = Literal["task_code", "task_name", "status_code", "task_type", "wbs_name",
                    "early_start_date", "early_end_date", "late_start_date", "late_end_date",
@@ -2021,6 +2044,8 @@ def p6_query_activities(
     code_type: Optional[str] = None,
     code_value: Optional[str] = None,
     include_child_codes: bool = True,
+    udf_filter: Optional[UdfFilters] = None,
+    udfs: Optional[UdfNames] = None,
     fields: Optional[ActFields] = None,
     offset: Offset = 0,
     limit: Limit = 50,
@@ -2035,15 +2060,25 @@ def p6_query_activities(
     by path ('CON.MEC'), short name ('MEC': every match) or name, with its child codes unless
     include_child_codes=False; code_filter tells what was matched. fields= keeps task_code plus the
     fields named, e.g. ['task_name', 'early_start_date', 'early_end_date', 'total_float_d'], for
-    smaller pages."""
+    smaller pages. UDFs (user defined columns, p6_list_udfs): udf_filter = [{udf: label, op, value}],
+    all to hold; op eq (default), ne, lt, le, gt, ge, contains (text), empty, not_empty; a date alone
+    covers the whole day; udf_filter (info) tells what was used. udfs = labels added to each row as
+    udfs {label: value} (None when empty)."""
     if status is not None and status not in get_args(Status):
         raise ValueError(f"status must be one of {list(get_args(Status))}")
     row_fn = _act_row(fields)
+    if isinstance(udfs, str):
+        udfs = [udfs]
     con = _connect()
     pid = _project_id(con, project)
     cflt, cargs, cinfo = _code_filter(con, pid, code_type, code_value, include_child_codes)
-    q = _act_from(con) + cflt
-    args: list[Any] = [pid, *cargs]
+    uflt, uargs, uinfo = _udf_filter(con, udf_filter)
+    utypes = list({y["udf_type_id"]: y for y in (_udf_type(con, "TASK", u) for u in udfs or ())}.values())
+    if utypes:
+        base_fn = row_fn
+        row_fn = lambda r: {**base_fn(r), "_tid": r["task_id"]}  # noqa: E731
+    q = _act_from(con) + cflt + uflt
+    args: list[Any] = [pid, *cargs, *uargs]
     if name_contains:
         q += " AND t.task_name LIKE ?"; args.append(f"%{name_contains}%")
     if code_prefix:
@@ -2062,9 +2097,19 @@ def p6_query_activities(
         q += " AND COALESCE(t.act_end_date, t.early_end_date) <= ?"
         args.append(_bound(finish_before, "finish_before", end=True))
     q += " ORDER BY COALESCE(t.act_start_date, t.early_start_date), t.task_code, t.task_id"
-    res = _page(con, q, args, offset, limit, row_fn)
+    con.execute("BEGIN")  # the page and its UDF values from one snapshot
+    try:
+        res = _page(con, q, args, offset, limit, row_fn)
+        if utypes:
+            vals = _udf_values(con, "TASK", [r["_tid"] for r in res["rows"]], utypes)
+            for r in res["rows"]:
+                r["udfs"] = vals[r.pop("_tid")]
+    finally:
+        con.rollback()
     if cinfo:
         res["code_filter"] = cinfo
+    if uinfo:
+        res["udf_filter"] = uinfo
     return res
 
 
@@ -2140,6 +2185,136 @@ def _udf_row(r: sqlite3.Row) -> dict:
     value = r[UDF_VALUE[t]] if t in UDF_VALUE else next(
         (r[k] for k in ("udf_text", "udf_number", "udf_date", "udf_code") if r[k] is not None), None)
     return {"label": r["udf_type_label"], "type": t, "value": value}
+
+
+# ----------------------------------------------------------------- user defined fields (UDFs)
+
+def _udf_type(con, table: str, udf: Any) -> sqlite3.Row:
+    """UDFTYPE row of a subject table (TASK, PROJECT...) by label, the column title in P6: exact, else
+    case and outer spaces ignored. Several matches or none raise (close labels listed)."""
+    if not isinstance(udf, str) or not udf.strip():
+        raise ValueError("udf: the UDF label (its column title in P6) is required")
+    rows = con.execute("SELECT * FROM UDFTYPE WHERE table_name = ?" + _alive(con, "UDFTYPE")
+                       + " ORDER BY udf_type_id", (table,)).fetchall()
+    hit = [r for r in rows if r["udf_type_label"] == udf] or [
+        r for r in rows if (r["udf_type_label"] or "").strip().casefold() == udf.strip().casefold()]
+    if len(hit) == 1:
+        return hit[0]
+    if hit:
+        raise ValueError(f"Several {table} UDFs are labelled {udf!r} (udf_type_id {[r['udf_type_id'] for r in hit]})")
+    labels = [r["udf_type_label"] or "" for r in rows]
+    near = difflib.get_close_matches(udf.strip(), labels, n=8, cutoff=0.4) or labels[:20]
+    raise ValueError(f"No {table} UDF labelled {udf!r}. Close labels: {near} (p6_list_udfs lists them)")
+
+
+def _udf_col(con, ltype: str) -> str:
+    """SQL value of UDFVALUE alias v for a logical type: code short name, dates with a space."""
+    if ltype == "FT_CODE":
+        if not _cols(con, "UDFCODE") or "udf_code_id" not in _cols(con, "UDFVALUE"):
+            return "NULL"
+        return ("(SELECT uc.short_name FROM UDFCODE uc WHERE uc.udf_code_id = v.udf_code_id"
+                + _alive(con, "UDFCODE", "uc") + ")")
+    if ltype in ("FT_START_DATE", "FT_END_DATE"):
+        return "REPLACE(v.udf_date, 'T', ' ')"
+    return "v." + UDF_VALUE.get(ltype, "udf_text")
+
+
+def _udf_out(ltype: str, v: Any) -> Any:
+    """Stored value as shown: integers as int, dates with a space, the rest as stored."""
+    if v is None:
+        return None
+    if ltype == "FT_INT" and isinstance(v, float) and v.is_integer():
+        return int(v)
+    if ltype in ("FT_START_DATE", "FT_END_DATE") and isinstance(v, str):
+        return v.replace("T", " ")
+    return v
+
+
+UDF_CMP = {"eq": "=", "ne": "<>", "lt": "<", "le": "<=", "gt": ">", "ge": ">="}
+
+
+def _udf_filter(con, filters: Any) -> tuple[str, list, list[dict]]:
+    """(conditions on TASK t, args, udf_filter info) of activity UDF conditions, all to hold. Numbers
+    compare as numbers (eq / ne within 1e-9), dates as datetimes (a date alone is the whole day: eq
+    any time that day, lt before it, le up to its end), text, indicators and codes ignoring case;
+    contains = substring (text, indicator, code); empty = no value; ne needs a value (empty ones are
+    not 'different')."""
+    if not filters:
+        return "", [], []
+    if isinstance(filters, Mapping):
+        filters = [filters]
+    if not isinstance(filters, (list, tuple)):
+        raise ValueError("udf_filter: a list of {udf, op, value}")
+    sql, args, info = "", [], []
+    for f in filters:
+        if not isinstance(f, Mapping):
+            raise ValueError("udf_filter: a list of {udf, op, value}")
+        bad = sorted(set(f) - {"udf", "op", "value"})
+        if bad:
+            raise ValueError(f"udf_filter: unknown key(s) {bad}; allowed: ['op', 'udf', 'value']")
+        op = f.get("op") or "eq"
+        if op not in get_args(UdfOp):
+            raise ValueError(f"udf_filter op must be one of {list(get_args(UdfOp))}")
+        y = _udf_type(con, "TASK", f.get("udf"))
+        lt, label = y["logical_data_type"], y["udf_type_label"]
+        kind, col, v = UDF_KINDS.get(lt, "text"), _udf_col(con, lt), f.get("value")
+        sub = ("SELECT 1 FROM UDFVALUE v WHERE v.udf_type_id = ? AND v.fk_id = t.task_id"
+               + _alive(con, "UDFVALUE", "v"))
+        a: list[Any] = [y["udf_type_id"]]
+        if op in ("empty", "not_empty"):
+            if v is not None:
+                raise ValueError(f"udf_filter {label!r} {op} takes no value")
+            sql += f" AND {'NOT ' if op == 'empty' else ''}EXISTS ({sub} AND NULLIF({col}, '') IS NOT NULL)"
+        else:
+            if v is None or v == "":
+                raise ValueError(f"udf_filter {label!r} {op}: value is required (op 'empty' finds no value)")
+            if op == "contains":
+                if kind not in ("text", "indicator", "code"):
+                    raise ValueError(f"udf_filter {label!r}: contains is for text, indicator and code UDFs ({kind})")
+                cond = f"{col} LIKE ?"
+                a.append(f"%{v}%")
+            elif kind in ("number", "integer", "cost"):
+                x = None if isinstance(v, bool) else _num(v)
+                if x is None:
+                    raise ValueError(f"udf_filter {label!r} is a {kind} UDF: value must be a number, not {v!r}")
+                cond = {"eq": f"ABS({col} - ?) <= 1e-9", "ne": f"ABS({col} - ?) > 1e-9"}.get(op, f"{col} {UDF_CMP[op]} ?")
+                a.append(x)
+            elif kind in ("start_date", "finish_date"):
+                dt, has_time = _parse_dt(v, f"udf_filter {label!r}")
+                if has_time:
+                    cond = f"{col} {UDF_CMP[op]} ?"
+                    a.append(_fmt_dt(dt))
+                else:
+                    lo, hi = dt.strftime("%Y-%m-%d 00:00:00"), dt.strftime("%Y-%m-%d 23:59:59")
+                    cond, b = {"eq": (f"{col} BETWEEN ? AND ?", [lo, hi]), "ne": (f"{col} NOT BETWEEN ? AND ?", [lo, hi]),
+                               "lt": (f"{col} < ?", [lo]), "le": (f"{col} <= ?", [hi]),
+                               "gt": (f"{col} > ?", [hi]), "ge": (f"{col} >= ?", [lo])}[op]
+                    a += b
+            else:
+                cond = f"{col} {UDF_CMP[op]} ? COLLATE NOCASE"
+                a.append(str(v).strip())
+            sql += f" AND EXISTS ({sub} AND {cond})"
+        args += a
+        info.append({"udf": label, "data_type": kind, "op": op, "value": v})
+    return sql, args, info
+
+
+def _udf_values(con, table: str, ids: Sequence[int], types: Sequence[sqlite3.Row]) -> dict[int, dict[str, Any]]:
+    """{fk_id: {label: value}} of the given UDF types for rows ids of table (None when empty)."""
+    out = {i: {y["udf_type_label"]: None for y in types} for i in ids}
+    if not ids or not types:
+        return out
+    by_id = {y["udf_type_id"]: y for y in types}
+    code = ("(SELECT uc.short_name FROM UDFCODE uc WHERE uc.udf_code_id = v.udf_code_id" + _alive(con, "UDFCODE", "uc") + ")"
+            if _cols(con, "UDFCODE") and "udf_code_id" in _cols(con, "UDFVALUE") else "NULL")
+    for r in con.execute(f"SELECT v.fk_id, v.udf_type_id, v.udf_text, v.udf_number, v.udf_date, {code} AS udf_code "
+                         f"FROM UDFVALUE v WHERE v.udf_type_id IN {_ids_sql(by_id)} AND v.fk_id IN {_ids_sql(ids)}"
+                         + _alive(con, "UDFVALUE", "v")):
+        y = by_id[r["udf_type_id"]]
+        lt = y["logical_data_type"]
+        if r["fk_id"] in out:
+            out[r["fk_id"]][y["udf_type_label"]] = _udf_out(lt, r[UDF_VALUE.get(lt, "udf_text")])
+    return out
 
 
 def _memo_row(r: sqlite3.Row) -> dict:
@@ -2222,6 +2397,75 @@ def p6_get_activity(project: ProjectId, task_code: ActivityId) -> dict:
     out["lag_rule"] = _lag_info(con, t["proj_id"])
     out["schedule_state"] = _schedule_state(con, t["proj_id"])
     return out
+
+
+@_tool()
+def p6_list_udfs(table: str = "TASK", project: Optional[ProjectId] = None, name_contains: Optional[str] = None,
+                 offset: Offset = 0, limit: Limit = 100) -> dict:
+    """User defined fields (UDFs, the 'User Defined' columns of P6) of one subject, one page: {total,
+    offset, returned, next_offset, rows, table, project, used, subjects}. table: TASK (activities,
+    default), PROJECT, PROJWBS, TASKRSRC, RSRC... (subjects lists those that have UDFs). Row:
+    udf_type_id, label, data_type (text, indicator, start_date, finish_date, integer, number, cost,
+    code), p6_type, formula (P6 computes the value; never written), values (stored values, in project
+    when given), projects (projects holding values, without project), distinct (text, indicator and
+    code values), min / max (numbers and dates), sum (numbers), codes (code UDFs: codes defined).
+    used = UDFs with at least one value. Values: p6_query_activities(udfs=..., udf_filter=...)."""
+    con = _connect()
+    if not _cols(con, "UDFTYPE") or not _cols(con, "UDFVALUE"):
+        raise ValueError("This database has no UDFTYPE / UDFVALUE tables")
+    table = str(table or "TASK").strip().upper()
+    con.execute("BEGIN")  # page, used count and subjects from one snapshot
+    try:
+        subjects = [r[0] for r in con.execute("SELECT DISTINCT table_name FROM UDFTYPE WHERE table_name IS NOT NULL"
+                                              + _alive(con, "UDFTYPE") + " ORDER BY table_name")]
+        if table not in subjects:
+            raise ValueError(f"No UDF on table {table!r}; tables with UDFs: {subjects}")
+        vflt, vargs, pid = "", [], None
+        if project:
+            if table not in UDF_PROJECT_TABLES:
+                raise ValueError(f"project= applies to {list(UDF_PROJECT_TABLES)} UDFs, not {table} (global)")
+            pid = _project_id(con, project)
+            vflt, vargs = " AND v.proj_id = ?", [pid]
+        ycols = _cols(con, "UDFTYPE")
+        formula = "y.formula" if "formula" in ycols else "NULL"
+        codes = ("(SELECT COUNT(*) FROM UDFCODE uc WHERE uc.udf_type_id = y.udf_type_id" + _alive(con, "UDFCODE", "uc") + ")"
+                 if "udf_type_id" in _cols(con, "UDFCODE") else "NULL")
+        code_id = "v.udf_code_id" if "udf_code_id" in _cols(con, "UDFVALUE") else "NULL"
+        base = ("FROM UDFTYPE y LEFT JOIN UDFVALUE v ON v.udf_type_id = y.udf_type_id" + vflt + _alive(con, "UDFVALUE", "v")
+                + " WHERE y.table_name = ?" + _alive(con, "UDFTYPE", "y"))
+        nargs: list[Any] = [*vargs, table]
+        if name_contains:
+            base += " AND y.udf_type_label LIKE ?"
+            nargs.append(f"%{name_contains}%")
+        q = (f"SELECT y.udf_type_id, y.udf_type_label, y.logical_data_type, {formula} AS formula, "
+             f"COUNT(v.fk_id) AS n, COUNT(DISTINCT v.proj_id) AS projects, "
+             f"COUNT(DISTINCT COALESCE(v.udf_text, {code_id})) AS n_distinct, MIN(v.udf_number) AS mn, "
+             "MAX(v.udf_number) AS mx, SUM(v.udf_number) AS sm, MIN(REPLACE(v.udf_date, 'T', ' ')) AS dmin, "
+             f"MAX(REPLACE(v.udf_date, 'T', ' ')) AS dmax, {codes} AS codes "
+             + base + " GROUP BY y.udf_type_id ORDER BY y.udf_type_label, y.udf_type_id")
+
+        def row(r: sqlite3.Row) -> dict:
+            lt = r["logical_data_type"]
+            kind = UDF_KINDS.get(lt, lt)
+            num, dated = kind in ("integer", "number", "cost"), kind in ("start_date", "finish_date")
+            out = {"udf_type_id": r["udf_type_id"], "label": r["udf_type_label"], "data_type": kind, "p6_type": lt,
+                   "formula": r["formula"], "values": r["n"]}
+            if pid is None:
+                out["projects"] = r["projects"]
+            out.update(distinct=r["n_distinct"] if kind in ("text", "indicator", "code") else None,
+                       min=_udf_out(lt, r["mn"]) if num else r["dmin"] if dated else None,
+                       max=_udf_out(lt, r["mx"]) if num else r["dmax"] if dated else None,
+                       sum=_udf_out(lt, round(r["sm"], 6)) if num and r["sm"] is not None else None,
+                       codes=r["codes"] if kind == "code" else None)
+            return out
+
+        res = _page(con, q, nargs, offset, limit, row)
+        used = con.execute(f"SELECT COUNT(*) FROM (SELECT y.udf_type_id {base} GROUP BY y.udf_type_id "
+                           "HAVING COUNT(v.fk_id) > 0)", nargs).fetchone()[0]
+    finally:
+        con.rollback()
+    res.update(table=table, project=project, used=used, subjects=subjects)
+    return res
 
 
 @_tool()
@@ -6211,6 +6455,184 @@ def p6_update_assignments(project: ProjectId, items: AsgEdits, confirm: bool = F
         for rep, it in zip(b["items"], items):
             rep["item"] = it
         return _batch_commit(con, b, confirm, f"Update units of {len(items)} assignment(s)", backup)
+
+
+# ----------------------------------------------------------------- activity UDF values
+
+class _UdfEditKeys(TypedDict):
+    task_code: str
+    udf: str
+
+
+class UdfEdit(_UdfEditKeys, total=False):
+    """An activity UDF value to set (value) or remove (clear=True)."""
+    value: Union[str, float]
+    clear: bool
+
+
+UdfEdits = Annotated[list[UdfEdit], Field(min_length=1, description="Activity UDF values to set or clear.")]
+UDF_KEYS = set(UdfEdit.__required_keys__) | set(UdfEdit.__optional_keys__)
+
+
+def _udf_store(con, y: sqlite3.Row, value: Any) -> tuple[str, Any, Any, list[str]]:
+    """(UDFVALUE column, value to store, value as shown, notes) of a user value for UDF type y."""
+    lt, label = y["logical_data_type"], y["udf_type_label"]
+    kind = UDF_KINDS.get(lt)
+    if kind is None:
+        raise ValueError(f"{label!r}: UDF data type {lt} is not supported")
+    if kind == "text":
+        if not isinstance(value, str):
+            raise ValueError(f"{label!r} is a text UDF: give a string, not {value!r}")
+        if len(value) > UDF_TEXT_MAX:
+            raise ValueError(f"{label!r}: text longer than {UDF_TEXT_MAX} characters ({len(value)})")
+        return "udf_text", value, value, []
+    if kind == "indicator":
+        v = value.strip().upper() if isinstance(value, str) else None
+        if not v or not UDF_INDICATOR.fullmatch(v):
+            raise ValueError(f"{label!r} is an indicator UDF: give UDF_G0 to UDF_G4 as P6 stores the icons, not {value!r}")
+        return "udf_text", v, v, []
+    if kind in ("start_date", "finish_date"):
+        if not isinstance(value, str):
+            raise ValueError(f"{label!r} is a date UDF: give 'YYYY-MM-DD[ HH:MM]', not {value!r}")
+        s = _fmt_dt(_parse_dt(value, label)[0])
+        return "udf_date", s, s, []
+    if kind == "code":
+        if "udf_code_id" not in _cols(con, "UDFVALUE") or "udf_type_id" not in _cols(con, "UDFCODE"):
+            raise ValueError(f"{label!r} is a code UDF and this database has no UDFCODE table")
+        rows = con.execute("SELECT udf_code_id, short_name, udf_code_name FROM UDFCODE WHERE udf_type_id = ?"
+                           + _alive(con, "UDFCODE") + " ORDER BY udf_code_id", (y["udf_type_id"],)).fetchall()
+        v = str(value).strip()
+        hit = ([r for r in rows if r["short_name"] == v] or [r for r in rows if (r["short_name"] or "").casefold() == v.casefold()]
+               or [r for r in rows if (r["udf_code_name"] or "").casefold() == v.casefold()])
+        if len(hit) != 1:
+            raise ValueError(f"{label!r}: {'several codes match' if hit else 'no code'} {value!r}; codes: "
+                             f"{[r['short_name'] for r in (hit or rows)][:30]}")
+        return "udf_code_id", hit[0]["udf_code_id"], hit[0]["short_name"], []
+    f = None if isinstance(value, bool) else _num(value)
+    if f is None:
+        raise ValueError(f"{label!r} is a{'n' if kind == 'integer' else ''} {kind} UDF: give a number, not {value!r}")
+    if kind == "integer":
+        if not f.is_integer():
+            raise ValueError(f"{label!r} is an integer UDF: {value!r} is not a whole number")
+        return "udf_number", f, int(f), []
+    if kind == "number" and round(f, 2) != f:
+        return "udf_number", round(f, 2), round(f, 2), [f"rounded to 2 decimals as P6 stores it ({f!r})"]
+    return "udf_number", f, f, []
+
+
+def _udf_shown(con, y: sqlite3.Row, r: Optional[sqlite3.Row]) -> Any:
+    """Value of a UDFVALUE row as shown (code short name), None for no row."""
+    if r is None:
+        return None
+    lt = y["logical_data_type"]
+    if lt == "FT_CODE":
+        if r["udf_code_id"] is None or "udf_type_id" not in _cols(con, "UDFCODE"):
+            return None
+        c = con.execute("SELECT short_name FROM UDFCODE WHERE udf_code_id = ?", (r["udf_code_id"],)).fetchone()
+        return c[0] if c else f"udf_code_id {r['udf_code_id']}"
+    return _udf_out(lt, r[UDF_VALUE.get(lt, "udf_text")])
+
+
+def _udf_set(con, project: str, it: Mapping) -> dict:
+    """Set or clear one activity UDF value (UDFVALUE row of udf_type_id + task_id): insert, update (a
+    soft-deleted row is revived) or delete (hard, as P6; its trigger logs REFRDEL)."""
+    bad = sorted(set(it) - UDF_KEYS)
+    if bad:
+        raise ValueError(f"unknown key(s) {bad}; allowed: {sorted(UDF_KEYS)}")
+    if not isinstance(it.get("task_code"), str) or not it["task_code"]:
+        raise ValueError("task_code is required")
+    clear = it.get("clear", False)
+    if not isinstance(clear, bool):
+        raise ValueError("clear must be true or false")
+    value = it.get("value")
+    if clear and value is not None:
+        raise ValueError("Give value or clear=True, not both.")
+    if not clear and (value is None or value == ""):
+        raise ValueError("value is required (clear=True removes the value)")
+    t = _task(con, project, it["task_code"])
+    y = _udf_type(con, "TASK", it.get("udf"))
+    label, code, tid, uid = y["udf_type_label"], t["task_code"], t["task_id"], y["udf_type_id"]
+    if "formula" in _cols(con, "UDFTYPE") and y["formula"]:
+        raise ValueError(f"{label!r} is a formula UDF ({y['formula']}): P6 computes its value")
+    vcols = _cols(con, "UDFVALUE")
+    old = con.execute("SELECT * FROM UDFVALUE WHERE udf_type_id = ? AND fk_id = ?", (uid, tid)).fetchone()
+    dead = old is not None and "delete_session_id" in vcols and old["delete_session_id"] is not None
+    live = None if dead else old
+    before = _udf_shown(con, y, live)
+    keys = {"udf_type_id": uid, "fk_id": tid, "task_code": code, "udf": label}
+    now = _now_str(con)
+    if clear:
+        if live is None:
+            raise _Refused(f"Nothing to clear: {code} has no {label!r} value.")
+        col = "udf_code_id" if y["logical_data_type"] == "FT_CODE" else UDF_VALUE.get(y["logical_data_type"], "udf_text")
+        con.execute("DELETE FROM UDFVALUE WHERE udf_type_id = ? AND fk_id = ?", (uid, tid))
+        plan = f"{code} {label!r}: {before!r} -> cleared"
+        log = [{"operation": "clear_udf", "proj_id": t["proj_id"], "table": "UDFVALUE", "keys": keys,
+                "before": {col: live[col]}, "after": None, "summary": plan}]
+        after = None
+    else:
+        col, stored, after, notes = _udf_store(con, y, value)
+        if live is not None:
+            cur = live[col]
+            same = (cur is not None and abs(float(cur) - float(stored)) <= 1e-9 if col == "udf_number"
+                    else _db_dt(cur) == _db_dt(stored) if col == "udf_date" else cur == stored)
+            if same:
+                raise _Refused(f"Nothing to change: {code} {label!r} is already {after!r}.")
+        if old is not None:
+            sets = {col: stored, "proj_id": t["proj_id"], **_stamp_cols(con, "UDFVALUE", now, create=False)}
+            if dead:
+                sets.update({c: None for c in ("delete_session_id", "delete_date") if c in vcols})
+            con.execute(f"UPDATE UDFVALUE SET {', '.join(k + ' = ?' for k in sets)} WHERE udf_type_id = ? AND fk_id = ?",
+                        [*sets.values(), uid, tid])
+        else:
+            row = {"udf_type_id": uid, "fk_id": tid, "proj_id": t["proj_id"], col: stored,
+                   **_stamp_cols(con, "UDFVALUE", now, create=True)}
+            con.execute(f"INSERT INTO UDFVALUE ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
+        plan = f"{code} {label!r}: {before!r} -> {after!r}" + "".join(f"; {n}" for n in notes)
+        log = [{"operation": "update_udf", "proj_id": t["proj_id"], "table": "UDFVALUE", "keys": keys,
+                "before": None if live is None else {col: live[col]}, "after": {col: stored}, "summary": plan}]
+    return {"plan": plan, "projects": [], "log": log,
+            "udf": {"task_code": code, "udf": label, "data_type": UDF_KINDS.get(y["logical_data_type"]),
+                    "before": before, "after": after}}
+
+
+def _udf_next(res: dict) -> dict:
+    if res.get("applied"):
+        res["next"] = "Open P6 to see the values (UDFs do not move dates: no F9 needed)."
+    return res
+
+
+@_tool(read_only=False, destructive=True)
+def p6_update_udf(project: ProjectId, task_code: ActivityId, udf: str, value: Optional[UdfValue] = None,
+                  clear: bool = False, confirm: bool = False) -> dict:
+    """Set one activity UDF value (a 'User Defined' column of P6, labels in p6_list_udfs), or remove it
+    with clear=True. value per data type: text (255 characters max), number (2 decimals), integer,
+    cost, start_date / finish_date 'YYYY-MM-DD[ HH:MM]' (a date alone is stored at 00:00), indicator
+    UDF_G0..UDF_G4 (as P6 stores the icons), code (short name or name of a UDF code). Formula UDFs
+    are refused (P6 computes them). Dates and float are not affected (no F9 needed). Dry run unless
+    confirm=True."""
+    return _udf_next(_single_link(_udf_set, project, {"task_code": task_code, "udf": udf, "clear": bool(clear),
+                                                      **({"value": value} if value is not None else {})}, confirm))
+
+
+@_tool(read_only=False, destructive=True)
+def p6_update_udfs(project: ProjectId, items: UdfEdits, confirm: bool = False) -> dict:
+    """Set or clear many activity UDF values in one transaction (all or nothing; dry run unless
+    confirm=True). Item: {task_code, udf, value} or {task_code, udf, clear: true}, as p6_update_udf.
+    items: one report per item (udf before / after, or the error). One edit log entry per value."""
+    items = _items_arg(items)
+    with _write_session(confirm) as (con, backup):
+        _project_id(con, project)
+
+        def apply_one(i: int, it) -> dict:
+            if not isinstance(it, Mapping):
+                raise ValueError("an item must be an object")
+            return _udf_set(con, project, it)
+
+        b = _batch(con, items, apply_one)
+        for rep, it in zip(b["items"], items):
+            rep["item"] = it
+        return _udf_next(_batch_commit(con, b, confirm, f"Set {len(items)} activity UDF value(s) in {project}", backup))
 
 
 # ----------------------------------------------------------------- delete one activity

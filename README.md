@@ -21,13 +21,15 @@ server computes the answers; the model explains them.
 - **Health and progress**: DCMA 14-point check with the project's own P6 thresholds (and comparison over
   time), out-of-sequence progress, dangling and redundant logic, S-curves and earned value at the data
   date, resource and cost summaries, grouping by status, WBS or code.
+- **User defined fields (UDFs)**: list the UDF columns with their use, filter activities on UDF values
+  and show them as columns.
 - **Comparisons and what-if**: compare two updates or a baseline activity by activity and link by link;
   a CPM engine that reproduces P6's F9 on the projects it was checked against, for what-if scenarios
   run in memory, never written.
 - **XER files**: inspect, import (new project, baseline, update), export, or analyse XER files alone in
   read-only XER mode, without a P6 database or P6 installed.
 - **Edits** (off by default): durations, constraints, actual dates, progress, resource assignment
-  units, relationships, schedule options, deletes, EPS, backups and restore.
+  units, activity UDF values, relationships, schedule options, deletes, EPS, backups and restore.
 
 ## Install
 
@@ -81,7 +83,7 @@ From the command line (the installer uses the same commands):
 
 ![Settings: tools and safety](docs/images/settings-tools.png)
 
-- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 48).
+- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 51).
 - **Writes are off by default.** With the Full profile and "Allow write operations", every write takes
   two calls: a dry run that shows the plan and returns a single-use confirmation token, then, after your
   explicit yes, the same call with that token. Deleting a project or an activity and restoring a backup

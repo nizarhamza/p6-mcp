@@ -3,6 +3,21 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-10-20
+
+### Added
+
+- `p6_list_udfs`: the user defined fields (UDFs) of activities, projects, WBS, assignments and the other
+  subjects, with their data type, how many values they hold (in one project when given), and the sum,
+  min and max of number and date UDFs.
+- `p6_query_activities` takes `udf_filter` (conditions on UDF values: equal, not equal, before or after,
+  contains, empty or not; a date alone covers the whole day) and `udfs` (UDF values added to each row).
+- `p6_update_udf` and `p6_update_udfs` (batch, all or nothing): set or clear activity UDF values. Each
+  value is checked against the UDF type (text up to 255 characters, numbers stored with 2 decimals,
+  whole numbers, dates, indicators UDF_G0 to UDF_G4, codes by short name or name); formula UDFs are
+  refused. UDF values do not move dates, so no F9 is needed. Write tools: off unless writes are
+  allowed, two-step confirmation as for the other edits.
+
 ## [1.1.0] - 2026-10-20
 
 ### Added
