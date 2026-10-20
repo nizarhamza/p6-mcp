@@ -14,7 +14,7 @@ from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel, QPlainTextEdit,
                                QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from p6mcp import clients, credentials
+from p6mcp import clients, config, credentials, prompts
 from p6mcp.clients import files
 from p6mcp.i18n import tr
 from p6mcp.jsonc import JsoncError
@@ -67,6 +67,18 @@ class ClientsPage(QWidget):
         self.state = QLabel()
         self.state.setWordWrap(True)
         bl.addWidget(self.state)
+        self.cmd_state = QLabel()  # P6 commands (p6mcp.prompts) as the client's own command files
+        self.cmd_state.setWordWrap(True)
+        bl.addWidget(self.cmd_state)
+        crow = QHBoxLayout()
+        self.cmd_btn = QPushButton(tr("cl.cmd.install"))
+        self.cmd_btn.clicked.connect(self.install_commands)
+        self.cmd_remove_btn = QPushButton(tr("cl.cmd.remove"))
+        self.cmd_remove_btn.clicked.connect(self.remove_commands)
+        crow.addWidget(self.cmd_btn)
+        crow.addWidget(self.cmd_remove_btn)
+        crow.addStretch(1)
+        bl.addLayout(crow)
         lrow = QHBoxLayout()
         self.legacy = QLabel()
         self.legacy.setWordWrap(True)
@@ -193,12 +205,57 @@ class ClientsPage(QWidget):
                 else:
                     text += " " + tr("cl.detail.token_prompt", name=st.name)
             pill(self.state, STATE_LEVEL.get(st.state, "idle"), text)
+        self._show_commands(st, installed)
         others = st.others if st else []
         self.legacy.setVisible(bool(others))
         self.legacy_btn.setVisible(bool(others))
         if others:
             pill(self.legacy, "warn", tr("cl.legacy", name=st.name, keys=", ".join(others)))
             self.legacy_btn.setText(tr("cl.legacy.remove", key=others[0]))
+
+    # -- P6 commands
+    @staticmethod
+    def saved_tools() -> tuple[str, bool]:
+        """Tool profile and writes of the saved settings: the ones the server offers its tools under
+        (an unreadable file: the defaults, as the server)."""
+        try:
+            data = config.read_file()[0] or config.DEFAULTS
+        except config.ConfigError:
+            data = config.DEFAULTS
+        return data.get("tool_profile", "basic"), bool(data.get("allow_writes"))
+
+    def _show_commands(self, st, installed: bool) -> None:
+        ad = clients.get(st.client) if st else None
+        files_ok = bool(installed and ad and ad.command_style)
+        offered = prompts.offered(*self.saved_tools())
+        state = st.commands if st else clients.CMD_UNSUPPORTED
+        self.cmd_btn.setVisible(files_ok)
+        self.cmd_remove_btn.setVisible(files_ok)
+        self.cmd_btn.setEnabled(files_ok and bool(offered) and state != clients.CMD_INSTALLED)
+        self.cmd_btn.setText(tr("cl.cmd.update") if state == clients.CMD_OUTDATED else tr("cl.cmd.install"))
+        self.cmd_remove_btn.setEnabled(files_ok and state in (clients.CMD_INSTALLED, clients.CMD_OUTDATED))
+        self.cmd_state.setVisible(installed)
+        if not installed:
+            return
+        if not offered:
+            text, level = tr("cl.cmd.basic"), "info"
+        elif not ad.command_style:
+            text, level = tr("cl.cmd.native" if ad.prompts_native else "cl.cmd.unsupported", name=st.name), "info"
+        else:
+            text = tr("cl.cmd." + state, name=st.name, folder=ad.commands_dir(),
+                      first="/" + prompts.PREFIX + offered[0].name)
+            level = {clients.CMD_INSTALLED: "ok", clients.CMD_OUTDATED: "warn"}.get(state, "info")
+        pill(self.cmd_state, level, text)
+
+    def install_commands(self) -> bool:
+        profile, writes = self.saved_tools()
+        return self._act(lambda ad: ad.install_commands(profile, writes), "cl.cmd.done.install")
+
+    def remove_commands(self) -> bool:
+        st = self.status()
+        if st and ask(self, tr("cl.cmd.remove"), tr("cl.cmd.remove.ask", name=st.name), warning=False):
+            return self._act(lambda ad: ad.remove_commands(), "cl.cmd.done.remove")
+        return False
 
     # -- actions on the client's file
     def _act(self, fn, done_key: str) -> bool:
@@ -210,9 +267,11 @@ class ClientsPage(QWidget):
         except (ValueError, files.ClientFileError, JsoncError, OSError) as e:
             self.win.error(tr("cl.failed", name=st.name, err=e))
             return False
-        msg = tr(done_key, name=st.name)
+        msg = tr(done_key, name=st.name, folder=res.get("folder") or "")
         if res.get("backup"):
             msg += " " + tr("cl.backup", path=res["backup"])
+        if res.get("skipped"):
+            msg += " " + tr("cl.cmd.skipped", files=", ".join(res["skipped"]))
         self.win.flash(msg)
         self.rescan()
         return True

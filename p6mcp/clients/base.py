@@ -23,6 +23,8 @@ P6_MARKERS = ("p6_mcp_server", "p6mcp-server", "p6mcp.server")
 
 NOT_INSTALLED, NOT_REGISTERED, REGISTERED, OUTDATED, ERROR = (
     "not_installed", "not_registered", "registered", "outdated", "error")
+# P6 command files in the client's own command folder (p6mcp.prompts)
+CMD_UNSUPPORTED, CMD_NONE, CMD_INSTALLED, CMD_OUTDATED = "unsupported", "none", "installed", "outdated"
 
 
 @dataclass
@@ -61,6 +63,7 @@ class Status:
     running: bool = False
     message: Optional[str] = None
     transport: str = "stdio"          # of the entry this installation expects for this client
+    commands: str = CMD_UNSUPPORTED   # P6 command files: unsupported, none, installed, outdated
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -96,8 +99,14 @@ class Adapter:
     docs = ""  # where the path and format were checked
     supports_http = True      # False: the client only starts stdio servers (gets a stdio entry in http mode)
     token_in_file = True      # an HTTP entry holds the access token in the client's file
+    command_style: Optional[str] = None  # p6mcp.prompts.STYLES; None: no command folder (MCP prompts only)
+    prompts_native = False    # the client lists the server's MCP prompts by itself
 
     # -- to define per client
+    def commands_dir(self) -> Optional[str]:
+        """Folder the client reads its user commands from (None: none)."""
+        return None
+
     def config_path(self) -> str:
         raise NotImplementedError
 
@@ -153,6 +162,10 @@ class Adapter:
         except (files.ClientFileError, jsonc.JsoncError) as e:
             st.state, st.message = ERROR, str(e)
             return st
+        try:
+            st.commands = self.commands_state()
+        except (OSError, files.ClientFileError):
+            st.commands = CMD_OUTDATED
         servers = self.servers(data)
         st.others = sorted(k for k, v in servers.items() if k != SERVER_KEY and _is_p6(v))
         if SERVER_KEY not in servers:
@@ -188,6 +201,83 @@ class Adapter:
             return self._edit(lambda t: jsonc.delete_member(t, list(self.container), key) if t.strip() else t)
         return self._edit(lambda t: self.extra_unregister(jsonc.delete_member(t, list(self.container), key))
                           if t.strip() else t)
+
+
+    # -- P6 command files (p6mcp.prompts) in the client's command folder
+    def _command_files(self, profile: str, allow_writes: bool) -> dict[str, str]:
+        """file name -> content of the commands offered under these settings."""
+        from p6mcp import prompts
+        return {prompts.file_name(c, self.command_style): prompts.command_file(c, self.command_style)
+                for c in prompts.offered(profile, allow_writes)}
+
+    def _ours(self) -> dict[str, str]:
+        """Command files P6 MCP wrote in the folder (they carry the marker): name -> content."""
+        from p6mcp import prompts
+        folder = self.commands_dir()
+        out: dict[str, str] = {}
+        if not folder or not os.path.isdir(folder):
+            return out
+        for name in os.listdir(folder):
+            path = os.path.join(folder, name)
+            if not (name.startswith(prompts.PREFIX) and name.endswith(".md") and os.path.isfile(path)):
+                continue
+            text, _bom = files.read(path)
+            if text is not None and prompts.MARKER in text:
+                out[name] = text
+        return out
+
+    def commands_state(self, profile: Optional[str] = None, allow_writes: Optional[bool] = None) -> str:
+        """unsupported (no command folder), none, installed (every offered command, current text) or
+        outdated (some missing, changed or no longer offered). Settings default to the saved ones."""
+        if not self.command_style or not self.commands_dir():
+            return CMD_UNSUPPORTED
+        ours = self._ours()
+        if not ours:
+            return CMD_NONE
+        if profile is None or allow_writes is None:
+            from p6mcp import config
+            try:
+                data = config.read_file()[0] or config.DEFAULTS
+            except config.ConfigError:  # unreadable settings: the defaults, as the server
+                data = config.DEFAULTS
+            profile, allow_writes = data.get("tool_profile", "basic"), bool(data.get("allow_writes"))
+        return CMD_INSTALLED if ours == self._command_files(profile, allow_writes) else CMD_OUTDATED
+
+    def install_commands(self, profile: str, allow_writes: bool) -> dict:
+        """Write the commands offered under these settings into the client's command folder, and remove
+        the ones P6 MCP wrote earlier that are no longer offered. Files without the marker (the user's own)
+        are never touched. Returns {changed, folder, written, removed, skipped}."""
+        folder = self.commands_dir()
+        if not self.command_style or not folder:
+            raise ValueError(f"{self.name} has no command folder: it lists the server's commands itself"
+                             if self.prompts_native else f"{self.name} has no command folder")
+        want = self._command_files(profile, allow_writes)
+        ours = self._ours()
+        written, removed, skipped = [], [], []
+        for name, text in want.items():
+            path = os.path.join(folder, name)
+            if ours.get(name) == text:
+                continue
+            if name not in ours and os.path.exists(path):
+                skipped.append(name)  # a file of the user's with the same name
+                continue
+            files.write_atomic(path, text)
+            written.append(name)
+        for name in ours:
+            if name not in want:
+                os.remove(os.path.join(folder, name))
+                removed.append(name)
+        return {"changed": bool(written or removed), "folder": folder, "written": written, "removed": removed,
+                "skipped": skipped}
+
+    def remove_commands(self) -> dict:
+        """Delete the command files P6 MCP wrote (marker); the user's own files are kept."""
+        folder = self.commands_dir()
+        removed = []
+        for name in self._ours():
+            os.remove(os.path.join(folder, name))
+            removed.append(name)
+        return {"changed": bool(removed), "folder": folder, "removed": removed}
 
 
 def _is_p6(entry: Any) -> bool:

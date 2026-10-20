@@ -1,7 +1,7 @@
 # P6 MCP for Primavera P6
 
-A local [MCP](https://modelcontextprotocol.io) server that lets an AI assistant (Claude Desktop, Cursor,
-VS Code, LM Studio, Cline and any other MCP client) analyse, and when you allow it edit, **Primavera P6
+A local [MCP](https://modelcontextprotocol.io) server that lets an AI assistant (Claude Desktop, Claude Code,
+Cursor, VS Code, LM Studio, Cline and any other MCP client) analyse, and when you allow it edit, **Primavera P6
 Professional** schedules on your Windows PC: a standalone (SQLite) P6 database, or plain XER files.
 
 > P6 MCP is an independent project. It is not affiliated with, endorsed or sponsored by Oracle.
@@ -63,6 +63,7 @@ entry, comment and the file's formatting. It refuses a file it cannot parse.
 | Client | Configuration file |
 |---|---|
 | Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` (stdio only) |
+| Claude Code | `%USERPROFILE%\.claude.json` (user scope) |
 | Cursor | `%USERPROFILE%\.cursor\mcp.json` |
 | VS Code / VS Code Insiders | `%APPDATA%\Code\User\mcp.json` / `...\Code - Insiders\User\mcp.json` |
 | LM Studio | `%USERPROFILE%\.lmstudio\mcp.json` |
@@ -77,6 +78,37 @@ From the command line (the installer uses the same commands):
 ```powershell
 & "$env:LOCALAPPDATA\Programs\P6 MCP\p6mcp-server.exe" clients list
 & "$env:LOCALAPPDATA\Programs\P6 MCP\p6mcp-server.exe" clients register cursor
+```
+
+### P6 commands
+
+Five ready-made workflows chain the tools into one fixed report:
+
+| Command | Arguments | What it does |
+|---|---|---|
+| `weekly-update-review` | project, weeks (3) | Summary, progress issues, critical path, look-ahead, baseline variance, actions |
+| `schedule-quality-audit` | project | DCMA 14 table, trend since the previous audit, dangling ends, redundant links, float; fixes as dry runs |
+| `update-import-safely` | xer_path, project | Inspects the XER, dry-runs the update import, reviews missing rows, applies it only on your yes |
+| `delay-whatif` | project, task_code, delay_days (10) | Drivers and float origin of an activity, then the finish and milestone impact of a delay (in memory) |
+| `baseline-variance` | project, baseline | Finish variance, slipped activities, logic changes, SPI at the data date |
+
+They need the Full tool profile (the import also needs writes). The server offers them as MCP prompts:
+Claude Desktop lists them in the **+** menu, VS Code as `/mcp.p6mcp.<name>`, Claude Code as
+`/mcp__p6mcp__<name>`. **MCP clients > Install commands** also writes them as the client's own command
+files, typed as `/p6-<name>`:
+
+| Client | Command folder |
+|---|---|
+| Claude Code | `%USERPROFILE%\.claude\commands` |
+| Cursor | `%USERPROFILE%\.cursor\commands` |
+| VS Code / VS Code Insiders | `%APPDATA%\Code\User\prompts` (prompt files) |
+| Cline | `%USERPROFILE%\Documents\Cline\Workflows` (global workflows) |
+
+Update commands refreshes them after an update or a change of the tool settings; Remove commands (and
+uninstalling) deletes only the files P6 MCP wrote. From the command line:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\P6 MCP\p6mcp-server.exe" clients commands install --detected
 ```
 
 ## Safety

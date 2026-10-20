@@ -14,13 +14,15 @@ import json
 from typing import Iterable, Optional
 
 from p6mcp.clients.adapters import ADAPTERS, BY_ID
-from p6mcp.clients.base import (ERROR, NOT_INSTALLED, NOT_REGISTERED, OUTDATED, REGISTERED, SERVER_KEY, Adapter,
-                                HttpTarget, Launch, Status, launch)
+from p6mcp.clients.base import (CMD_INSTALLED, CMD_NONE, CMD_OUTDATED, CMD_UNSUPPORTED, ERROR, NOT_INSTALLED,
+                                NOT_REGISTERED, OUTDATED, REGISTERED, SERVER_KEY, Adapter, HttpTarget, Launch, Status,
+                                launch)
 from p6mcp.clients.base import _running_names
 
 __all__ = ["ADAPTERS", "BY_ID", "Adapter", "HttpTarget", "Launch", "Status", "launch", "scan", "get", "snippet",
            "http_url", "target",
-           "SERVER_KEY", "NOT_INSTALLED", "NOT_REGISTERED", "REGISTERED", "OUTDATED", "ERROR"]
+           "SERVER_KEY", "NOT_INSTALLED", "NOT_REGISTERED", "REGISTERED", "OUTDATED", "ERROR",
+           "CMD_UNSUPPORTED", "CMD_NONE", "CMD_INSTALLED", "CMD_OUTDATED"]
 
 
 def get(client_id: str) -> Adapter:

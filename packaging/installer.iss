@@ -75,6 +75,7 @@ Name: "{group}\{cm:UninstallProgram,P6 MCP}"; Filename: "{uninstallexe}"
 [Run]
 Filename: "{app}\p6mcp-server.exe"; Parameters: "setup startup on"; Flags: runhidden; Tasks: startup
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register claude_desktop"; Description: "{cm:RegisterWith,Claude Desktop}"; Flags: postinstall runhidden; Check: ClientDetected('claude_desktop') and not IsAutoUpdate
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register claude_code"; Description: "{cm:RegisterWith,Claude Code}"; Flags: postinstall runhidden; Check: ClientDetected('claude_code') and not IsAutoUpdate
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register cursor"; Description: "{cm:RegisterWith,Cursor}"; Flags: postinstall runhidden; Check: ClientDetected('cursor') and not IsAutoUpdate
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register vscode"; Description: "{cm:RegisterWith,VS Code}"; Flags: postinstall runhidden; Check: ClientDetected('vscode') and not IsAutoUpdate
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register vscode_insiders"; Description: "{cm:RegisterWith,VS Code Insiders}"; Flags: postinstall runhidden; Check: ClientDetected('vscode_insiders') and not IsAutoUpdate
@@ -85,8 +86,9 @@ Filename: "{app}\p6mcp-settings.exe"; Description: "{cm:OpenSettings}"; Flags: p
 Filename: "{app}\p6mcp-settings.exe"; Parameters: "--minimized"; Flags: nowait; Check: IsAutoUpdate
 
 [UninstallRun]
-; remove only the p6mcp entries, and the startup entry; settings, backups and logs are kept
+; remove only the p6mcp entries, the P6 command files P6 MCP wrote, and the startup entry; settings, backups and logs are kept
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients unregister --detected"; Flags: runhidden; RunOnceId: "UnregisterClients"
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients commands remove --detected"; Flags: runhidden; RunOnceId: "RemoveCommands"
 Filename: "{app}\p6mcp-server.exe"; Parameters: "setup startup off"; Flags: runhidden; RunOnceId: "StartupOff"
 
 [Code]

@@ -3,6 +3,21 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-10-20
+
+### Added
+
+- P6 commands: five ready-made workflows that chain the tools into one fixed report: weekly update
+  review, schedule quality audit, safe update import, delay what-if and baseline variance. The server
+  offers them as MCP prompts (Claude Desktop: + menu; VS Code: /mcp.p6mcp.*; Claude Code:
+  /mcp__p6mcp__*), only those whose tools the current tool settings offer (Full profile; the import also
+  needs writes).
+- MCP clients > Install commands writes them as the client's own command files, so they are typed as
+  /p6-weekly-update-review and so on: Claude Code (~/.claude/commands), Cursor (~/.cursor/commands),
+  VS Code prompt files (User\prompts) and Cline global workflows (Documents\Cline\Workflows). Update
+  commands refreshes them after an update or a settings change; Remove commands deletes only the files
+  P6 MCP wrote. Also from the command line: clients commands install|remove <ids>|--detected.
+- Claude Code is a supported client: registration in ~/.claude.json (user scope).
 ## [1.3.0] - 2026-10-20
 
 ### Added
@@ -107,6 +122,9 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[1.4.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.4.0
+[1.3.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.3.0
+[1.2.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.2.0
 [1.1.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.1.0
 [1.0.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.0.1
 [1.0.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.0.0

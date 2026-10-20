@@ -225,6 +225,33 @@ def test_clients_page_offers_registers_and_ignores(qtbot, env, golden, tmp_path)
     assert w.data["clients_ignored"] == ["cursor"] and not w.banner.isVisibleTo(w)
 
 
+def test_clients_page_installs_commands(qtbot, env, tmp_path):
+    os.makedirs(tmp_path / "User" / ".cursor")
+    os.makedirs(tmp_path / "Roaming" / "Claude")
+    w = make(qtbot, {"language": "en", "tool_profile": "basic"})
+    page = w.page(ClientsPage)
+    page.select("cursor")
+    assert not page.cmd_btn.isHidden() and not page.cmd_btn.isEnabled()  # Basic profile: no command offered
+    assert "Full tool profile" in page.cmd_state.text()
+    config.save(dict(config.read_file()[0], tool_profile="full", allow_writes=False))
+    page._show_selected()
+    assert page.cmd_btn.isEnabled() and page.cmd_btn.text() == "Install commands"
+    assert page.install_commands()
+    qtbot.waitUntil(lambda: page.job is None, timeout=15000)
+    folder = tmp_path / "User" / ".cursor" / "commands"
+    assert sorted(os.listdir(folder)) == ["p6-baseline-variance.md", "p6-delay-whatif.md",
+                                          "p6-schedule-quality-audit.md", "p6-weekly-update-review.md"]
+    page.select("cursor")
+    assert page.status().commands == "installed" and not page.cmd_btn.isEnabled()
+    assert "/p6-weekly-update-review" in page.cmd_state.text()
+    assert page.remove_commands()  # ask answers yes
+    qtbot.waitUntil(lambda: page.job is None, timeout=15000)
+    page.select("cursor")
+    assert os.listdir(folder) == [] and page.status().commands == "none"
+    page.select("claude_desktop")
+    assert page.cmd_btn.isHidden() and "nothing to install" in page.cmd_state.text()
+
+
 def test_clients_page_legacy_entry_and_snippet(qtbot, env, tmp_path):
     claude = tmp_path / "Roaming" / "Claude"
     claude.mkdir()

@@ -91,6 +91,7 @@ from p6mcp import __version__ as _pkg_version
 from p6mcp import config as _config
 from p6mcp import confirm as _confirm
 from p6mcp import policy as _policy
+from p6mcp import prompts as _prompts
 from p6mcp import schema as _schema
 from p6mcp import xerstore as _xerstore
 
@@ -551,6 +552,27 @@ def _tool(read_only: bool = True, destructive: bool = False, idempotent: bool = 
             mcp.tool(annotations=ToolAnnotations.model_validate(hints))(reg)
         return fn
     return deco
+
+
+PROMPTS: dict[str, Callable[..., str]] = {}  # P6 command -> its MCP prompt function (offered under the settings)
+
+
+def _register_prompts() -> None:
+    """Offer the P6 commands (p6mcp.prompts) whose tools are all offered, as MCP prompts."""
+    for cmd in _prompts.offered(STARTUP.tool_profile, STARTUP.allow_writes):
+        def fn(_cmd=cmd, **values) -> str:
+            return _prompts.render(_cmd, values)
+        P = inspect.Parameter
+        fn.__signature__ = inspect.Signature(
+            [P(a.name, P.KEYWORD_ONLY, default=P.empty if a.default is None else a.default, annotation=str)
+             for a in cmd.args], return_annotation=str)
+        fn.__annotations__ = {**{a.name: str for a in cmd.args}, "return": str}  # read by the SDK's pydantic
+        fn.__name__ = cmd.name.replace("-", "_")
+        fn.__doc__ = cmd.description
+        PROMPTS[cmd.name] = fn
+        if hasattr(mcp, "prompt"):
+            kw = {"title": cmd.title} if "title" in inspect.signature(mcp.prompt).parameters else {}
+            mcp.prompt(name=cmd.name, description=cmd.description, **kw)(fn)
 
 
 # ----------------------------------------------------------------- helpers
@@ -8567,6 +8589,9 @@ def _cp1252_ok(v: str) -> bool:
         return True
     except UnicodeEncodeError:
         return False
+
+
+_register_prompts()
 
 
 if __name__ == "__main__":

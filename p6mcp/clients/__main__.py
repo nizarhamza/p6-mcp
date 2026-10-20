@@ -4,6 +4,7 @@
     p6mcp-server clients register cursor vscode ...   (or --detected: every installed client)
     p6mcp-server clients unregister cursor ...
     p6mcp-server clients snippet [stdio|http|vscode]
+    p6mcp-server clients commands install|remove cursor ...   (or --detected: every client with a command folder)
 
 Exit code 0 when every requested action succeeded, 1 otherwise. Output is plain ASCII.
 """
@@ -30,9 +31,15 @@ def main(argv=None) -> int:
         p.add_argument("--detected", action="store_true", help="every installed client")
     sn = sub.add_parser("snippet")
     sn.add_argument("kind", nargs="?", default="stdio", choices=("stdio", "http", "vscode"))
+    cm = sub.add_parser("commands", help="P6 command files in the clients' command folders")
+    cm.add_argument("action", choices=("install", "remove"))
+    cm.add_argument("ids", nargs="*")
+    cm.add_argument("--detected", action="store_true", help="every installed client with a command folder")
     a = ap.parse_args(argv)
 
     data = config.read_file()[0] or config.DEFAULTS
+    if a.cmd == "commands":
+        return _commands(ap, a, data)
     http = clients.target(data)
     if a.cmd == "list":
         sts = clients.scan(http=http)
@@ -63,6 +70,30 @@ def main(argv=None) -> int:
             print(f"{cid}: FAILED {e}", file=sys.stderr)
     if ok and a.cmd == "register":
         print("Restart each client so it loads P6 MCP.")
+    return 0 if ok else 1
+
+
+def _commands(ap, a, data) -> int:
+    ids = list(a.ids)
+    if a.detected:
+        ids += [ad.id for ad in clients.ADAPTERS
+                if ad.command_style and ad.installed() and ad.id not in ids]
+    if not ids:
+        ap.error("name at least one client, or --detected")
+    ok = True
+    for cid in ids:
+        try:
+            ad = clients.get(cid)
+            if a.action == "install":
+                res = ad.install_commands(data.get("tool_profile", "basic"), bool(data.get("allow_writes")))
+                print(f"{cid}: {len(res['written'])} written, {len(res['removed'])} removed in {res['folder']}"
+                      + (f" (kept your own files: {', '.join(res['skipped'])})" if res["skipped"] else ""))
+            else:
+                res = ad.remove_commands()
+                print(f"{cid}: {len(res['removed'])} removed" + (f" from {res['folder']}" if res["folder"] else ""))
+        except (ValueError, files.ClientFileError, OSError) as e:
+            ok = False
+            print(f"{cid}: FAILED {e}", file=sys.stderr)
     return 0 if ok else 1
 
 

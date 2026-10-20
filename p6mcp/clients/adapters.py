@@ -11,6 +11,15 @@
 - Cline: docs.cline.bot/mcp/configuring-mcp-servers: ~/.cline/data/settings/cline_mcp_settings.json
   (CLINE_MCP_SETTINGS_PATH overrides), {"mcpServers": {name: {command, args, disabled, autoApprove}}}; the
   VS Code extension's older globalStorage file is used only when the shared folder does not exist.
+- Claude Code: code.claude.com/docs/en/mcp: user scope servers in ~/.claude.json, top-level
+  {"mcpServers": {name: {"type": "stdio", command, args} or {"type": "http", url, headers}}}.
+
+P6 command folders (p6mcp.prompts), checked on 2026-10-20: VS Code user prompt files in the profile's
+prompts folder (*.prompt.md, code.visualstudio.com/docs/copilot/customization/prompt-files); Cursor
+~/.cursor/commands (*.md, docs.cursor.com/en/agent/chat/commands); Cline global workflows
+~/Documents/Cline/Workflows (*.md, docs.cline.bot); Claude Code ~/.claude/commands (*.md with
+frontmatter, code.claude.com/docs/en/slash-commands). Claude Desktop has no command folder: it lists the
+server's MCP prompts itself; LM Studio has neither.
 """
 
 from __future__ import annotations
@@ -37,6 +46,7 @@ class ClaudeDesktop(Adapter):
     process_names = ("claude.exe",)
     docs = "https://modelcontextprotocol.io/docs/develop/connect-local-servers"
     supports_http = False  # its config file only starts local (stdio) servers
+    prompts_native = True  # the + menu lists the server's prompts
 
     def _packages(self) -> list[str]:
         return glob.glob(os.path.join(_env("LOCALAPPDATA"), "Packages", "Claude_*"))
@@ -57,9 +67,13 @@ class Cursor(Adapter):
     id, name = "cursor", "Cursor"
     process_names = ("cursor.exe",)
     docs = "https://cursor.com/docs/mcp"
+    command_style = "plain"
 
     def config_path(self) -> str:
         return os.path.join(_home(), ".cursor", "mcp.json")
+
+    def commands_dir(self) -> str:
+        return os.path.join(_home(), ".cursor", "commands")
 
     def installed(self) -> bool:
         return (os.path.isdir(os.path.join(_home(), ".cursor"))
@@ -73,9 +87,14 @@ class VSCode(Adapter):
     folder = "Code"
     exe_dirs = ("Microsoft VS Code",)
     docs = "https://code.visualstudio.com/docs/copilot/reference/mcp-configuration"
+    command_style = "vscode"
+    prompts_native = True  # also as /mcp.p6mcp.<prompt> in the chat
 
     def config_path(self) -> str:
         return os.path.join(_env("APPDATA"), self.folder, "User", "mcp.json")
+
+    def commands_dir(self) -> str:
+        return os.path.join(_env("APPDATA"), self.folder, "User", "prompts")
 
     def installed(self) -> bool:
         if os.path.isdir(os.path.join(_env("APPDATA"), self.folder, "User")):
@@ -130,6 +149,10 @@ class Cline(Adapter):
     id, name = "cline", "Cline"
     process_names = ("code.exe",)
     docs = "https://docs.cline.bot/mcp/configuring-mcp-servers"
+    command_style = "plain"
+
+    def commands_dir(self) -> str:  # global workflows: ~/Documents/Cline/Workflows (home, not the shell folder)
+        return os.path.join(_home(), "Documents", "Cline", "Workflows")
 
     def _legacy(self) -> str:
         return os.path.join(_env("APPDATA"), "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings",
@@ -161,5 +184,29 @@ class Cline(Adapter):
                 "disabled": False, "autoApprove": []}
 
 
-ADAPTERS: tuple[Adapter, ...] = (ClaudeDesktop(), Cursor(), VSCode(), VSCodeInsiders(), LMStudio(), Cline())
+class ClaudeCode(Adapter):
+    id, name = "claude_code", "Claude Code"
+    process_names = ()  # claude.exe is also Claude Desktop's process name: no running check
+    docs = "https://code.claude.com/docs/en/mcp"
+    command_style = "claude_code"
+    prompts_native = True  # also as /mcp__p6mcp__<prompt>
+
+    def config_path(self) -> str:
+        return os.path.join(_home(), ".claude.json")
+
+    def commands_dir(self) -> str:
+        return os.path.join(_home(), ".claude", "commands")
+
+    def installed(self) -> bool:
+        return os.path.isfile(self.config_path()) or os.path.isdir(os.path.join(_home(), ".claude"))
+
+    def stdio_entry(self, ln: Launch) -> dict:  # without type an entry with a url is a config error
+        return {"type": "stdio", "command": ln.command, "args": list(ln.args)}
+
+    def http_entry(self, http: HttpTarget) -> dict:
+        return {"type": "http", "url": http.url, "headers": {"Authorization": f"Bearer {http.token}"}}
+
+
+ADAPTERS: tuple[Adapter, ...] = (ClaudeDesktop(), ClaudeCode(), Cursor(), VSCode(), VSCodeInsiders(), LMStudio(),
+                                 Cline())
 BY_ID = {a.id: a for a in ADAPTERS}
