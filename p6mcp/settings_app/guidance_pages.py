@@ -243,11 +243,13 @@ class CommandDialog(QDialog):
         self.args.setItem(r, 3, req)
 
     def item(self) -> dict:
+        def cell(r: int, c: int) -> str:
+            return self.args.item(r, c).text() if self.args.item(r, c) else ""
+
         args = []
         for r in range(self.args.rowCount()):
-            cell = lambda c: (self.args.item(r, c).text() if self.args.item(r, c) else "")  # noqa: E731
             required = self.args.item(r, 3) is not None and self.args.item(r, 3).checkState() == Qt.CheckState.Checked
-            args.append({"name": cell(0), "description": cell(1), "default": None if required else cell(2)})
+            args.append({"name": cell(r, 0), "description": cell(r, 1), "default": None if required else cell(r, 2)})
         return {"name": self.name.text(), "title": self.title.text(), "description": self.desc.text(),
                 "args": args, "template": self.text.toPlainText(), "enabled": self.enabled}
 
