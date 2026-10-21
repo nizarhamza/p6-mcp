@@ -3,7 +3,7 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.1] - 2026-10-21
 
 ### Changed
 
@@ -129,6 +129,7 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[1.4.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.4.1
 [1.4.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.4.0
 [1.3.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.3.0
 [1.2.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.2.0
