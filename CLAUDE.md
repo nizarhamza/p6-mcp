@@ -134,7 +134,12 @@ stay outside this repository.
   not descendants of this process (toolhelp snapshot: servers of MCP clients, not the tray's HTTP child);
   `launch_install()` starts `cmd /c ping (3 s) & setup /VERYSILENT ... /AUTOUPDATE=1` detached, so the
   tray can quit and release the AppMutex first; the installer's `IsAutoUpdate` then skips the client
-  registrations and starts the tray again (`--minimized`). `can_self_update()`: frozen next to
+  registrations and starts the tray again (`--minimized`). The installer's `SetupMutex` =
+  `runtime.SETUP_MUTEX`: while it exists `p6mcp-settings` exits before loading Qt (a start without
+  `--minimized` leaves `request_window_after_setup()`, which the next start opens via
+  `take_window_request()`) and the stdio and HTTP servers exit 1 (`clients` / `setup` commands still run:
+  setup calls them). A start during a silent setup once locked `pyside6.abi3.dll`; setup aborted and its
+  rollback left a mix of old and new files. `can_self_update()`: frozen next to
   `unins000.exe` only (not the portable zip or a source run). `settings_app/updater.py` `Updater`
   (owned by the tray, passed to `SettingsWindow(updater=)`): with config `auto_update` (default True; an
   old `update_check: false` turns it off) it checks 1 min after start and every 6 h, downloads, then

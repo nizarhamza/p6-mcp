@@ -202,3 +202,45 @@ def test_settings_window_update_button(qtbot, env, fake):  # noqa: F811  (fake a
     logs.update_btn.click()
     qtbot.waitUntil(lambda: u.state == U.WAITING, timeout=5000)
     assert "claude" in logs.state.text() and not fake["installed"]
+
+
+# -- a program started while setup runs exits at once (it would lock files setup is replacing)
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows")
+def test_setup_running_sees_the_setup_mutex():
+    import ctypes
+    from p6mcp import runtime
+    name = f"P6MCP-Setup-test-{os.getpid()}"
+    assert not runtime.setup_running(name)
+    h = ctypes.windll.kernel32.CreateMutexW(None, False, name)
+    try:
+        assert runtime.setup_running(name)
+    finally:
+        ctypes.windll.kernel32.CloseHandle(h)
+    assert not runtime.setup_running(name)
+
+
+def test_settings_app_exits_during_setup_and_opens_after(monkeypatch, tmp_path):
+    from p6mcp import runtime
+    from p6mcp.settings_app.__main__ import main
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(runtime, "setup_running", lambda name=runtime.SETUP_MUTEX: True)
+    assert main(["p6mcp-settings", "--minimized"]) == 0 and not runtime.take_window_request()
+    assert main(["p6mcp-settings"]) == 0  # a click during setup: the window opens after it
+    assert runtime.take_window_request() and not runtime.take_window_request()
+
+
+def test_server_refuses_to_start_during_setup(monkeypatch, capsys):
+    import p6mcp.__main__ as entry
+    from p6mcp import runtime
+    monkeypatch.setattr(runtime, "setup_running", lambda name=runtime.SETUP_MUTEX: True)
+    for argv in (["p6mcp-server"], ["p6mcp-server", "--http"]):
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(SystemExit) as e:
+            entry.main()
+        assert e.value.code == 1 and "being updated" in capsys.readouterr().err
+    monkeypatch.setattr("p6mcp.setup_cli.main", lambda args: 7)  # setup runs these commands itself
+    monkeypatch.setattr(sys, "argv", ["p6mcp-server", "setup", "detected-clients"])
+    with pytest.raises(SystemExit) as e:
+        entry.main()
+    assert e.value.code == 7

@@ -16,10 +16,13 @@ def main() -> None:
     if args[:1] == ["setup"]:
         from p6mcp.setup_cli import main as setup_main
         sys.exit(setup_main(args[1:]))
+    from p6mcp import runtime
+    if runtime.setup_running():  # the clients and setup commands above run inside setup itself
+        print("P6 MCP is being updated: restart the MCP client (or the server) in a minute.", file=sys.stderr)
+        sys.exit(1)
     if "--http" in args:
         from p6mcp.http_server import main as http_main
         sys.exit(http_main(args))
-    from p6mcp import runtime
     runtime.setup_logging("stdio-server")  # never log to stdout: it carries the protocol
     from p6mcp.server import mcp
     mcp.run()

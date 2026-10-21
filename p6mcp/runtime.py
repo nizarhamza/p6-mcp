@@ -85,6 +85,48 @@ def pid_alive(pid: Optional[int]) -> bool:
         return False
 
 
+# ----------------------------------------------------------------- setup in progress
+
+SETUP_MUTEX = "P6MCP-Setup"  # the installer's SetupMutex, held while P6 MCP setup runs
+
+
+def setup_running(name: str = SETUP_MUTEX) -> bool:
+    """True while P6 MCP setup runs: a program started now would lock files it is replacing, and a
+    silent setup then aborts half way (its rollback does not restore the files already replaced)."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    h = k32.OpenMutexW(0x00100000, False, name)  # SYNCHRONIZE
+    if not h:
+        return False
+    k32.CloseHandle(h)
+    return True
+
+
+def window_request_path() -> str:
+    return os.path.join(config.localdata_dir(), "show_window_after_setup")
+
+
+def request_window_after_setup() -> None:
+    """The Settings window was asked for during setup: the app started after setup opens it."""
+    try:
+        os.makedirs(config.localdata_dir(), exist_ok=True)
+        with open(window_request_path(), "w", encoding="utf-8") as fh:
+            fh.write(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    except OSError:
+        pass
+
+
+def take_window_request() -> bool:
+    """True once after request_window_after_setup (the request is removed)."""
+    try:
+        os.unlink(window_request_path())
+        return True
+    except OSError:
+        return False
+
+
 def port_open(port: Optional[int], host: str = "127.0.0.1", timeout: float = 0.5) -> bool:
     if not port:
         return False

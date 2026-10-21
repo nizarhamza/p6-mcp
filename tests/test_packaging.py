@@ -76,3 +76,5 @@ def test_installer_script_is_consistent():
         assert f"clients register {cid}" in text and f"ClientDetected('{cid}')" in text
     from p6mcp.settings_app.tray import MUTEX
     assert f"AppMutex={MUTEX}" in text and "PrivilegesRequired=lowest" in text
+    from p6mcp.runtime import SETUP_MUTEX
+    assert f"SetupMutex={SETUP_MUTEX}" in text

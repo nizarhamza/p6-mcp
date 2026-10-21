@@ -3,6 +3,16 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] - 2026-10-21
+
+### Fixed
+
+- An update could fail half way when P6 MCP Settings or an MCP server was started while setup ran (for
+  example a click on the shortcut during an automatic update): setup could not replace a file in use,
+  stopped, and left a mix of old and new files (the old "P6" icon showed). Setup now holds a lock while it
+  runs; P6 MCP Settings exits at once and opens its window after the update, and a server started then
+  exits with "P6 MCP is being updated" (restart the MCP client a minute later).
+
 ## [1.5.0] - 2026-10-21
 
 ### Added
@@ -144,6 +154,7 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[1.5.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.5.1
 [1.5.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.5.0
 [1.4.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.4.1
 [1.4.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.4.0

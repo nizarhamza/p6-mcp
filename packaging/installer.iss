@@ -37,6 +37,9 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 AppMutex=P6MCP-Tray
+; held while setup runs: both programs exit at once when they see it (runtime.setup_running), so a start
+; during an update cannot lock a file setup is replacing
+SetupMutex=P6MCP-Setup
 CloseApplications=yes
 RestartApplications=no
 #ifexist "..\LICENSE"
