@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Callable
+import os
+import sys
+from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
-from PySide6.QtGui import QPalette
+from PySide6.QtGui import QPalette, QPixmap
 from PySide6.QtWidgets import QFrame, QGroupBox, QLabel, QMessageBox, QVBoxLayout, QWidget
 
 from p6mcp.i18n import tr
@@ -13,6 +15,25 @@ from p6mcp.i18n import tr
 # Palette of the status pills and banners: readable in light and dark Windows themes
 COLORS = {"ok": ("#1e6b3a", "#e3f4e8"), "warn": ("#7a4b00", "#fff1d6"), "error": ("#8a1c1c", "#fde4e4"),
           "info": ("#1f4e79", "#e3eef9"), "idle": ("#444444", "#ececec")}
+
+
+def brand_file(rel: str) -> Optional[str]:
+    """A file of assets/brand (repository root in a checkout, the bundle folder when frozen); None if absent."""
+    here = os.path.abspath(__file__)
+    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.dirname(os.path.dirname(here)))
+    path = os.path.join(base, "assets", "brand", *rel.split("/"))
+    return path if os.path.isfile(path) else None
+
+
+def brand_pixmap(name: str, height: int, dpr: float = 1.0) -> Optional[QPixmap]:
+    """A png/<name>.png brand image scaled to height logical pixels (the @2x file on high DPI screens)."""
+    path = (dpr > 1 and brand_file(f"png/{name}@2x.png")) or brand_file(f"png/{name}.png")
+    pm = QPixmap(path) if path else QPixmap()
+    if pm.isNull():
+        return None
+    pm = pm.scaledToHeight(round(height * dpr), Qt.TransformationMode.SmoothTransformation)
+    pm.setDevicePixelRatio(dpr)
+    return pm
 
 
 def pill(label: QLabel, level: str, text: str) -> None:

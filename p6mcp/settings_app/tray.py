@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from p6mcp import config, runtime, supervisor
 from p6mcp.i18n import tr
+from p6mcp.settings_app.common import brand_file
 from p6mcp.settings_app.updater import Updater
 
 TICK_MS = 2000
@@ -45,21 +46,30 @@ def _named_mutex(name: str):
     return ctypes.windll.kernel32.CreateMutexW(None, False, name)
 
 
+BRAND_SIZES = (16, 24, 32, 48, 64, 128, 256)  # assets/brand/png/p6mcp-icon-<size>.png (16 and 24 simplified)
+
+
 def badge(size: int, dot: Optional[str] = None) -> QPixmap:
-    """The app's "P6" badge (also the source of the .ico and the bundle icon)."""
+    """The app icon (assets/brand; a drawn "P6" tile when the files are absent) with an optional state dot."""
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setBrush(QColor("#1f4e79"))
-    p.setPen(Qt.PenStyle.NoPen)
-    p.drawRoundedRect(0, 0, size, size, size * 0.2, size * 0.2)
-    f = QFont("Segoe UI")
-    f.setBold(True)
-    f.setPixelSize(int(size * 0.5))
-    p.setFont(f)
-    p.setPen(QColor("white"))
-    p.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, "P6")
+    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    path = brand_file(f"png/p6mcp-icon-{next((s for s in BRAND_SIZES if s >= size), BRAND_SIZES[-1])}.png")
+    icon = QPixmap(path) if path else QPixmap()
+    if not icon.isNull():
+        p.drawPixmap(QRect(0, 0, size, size), icon)
+    else:
+        p.setBrush(QColor("#0a1a33"))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(0, 0, size, size, size * 0.2, size * 0.2)
+        f = QFont("Segoe UI")
+        f.setBold(True)
+        f.setPixelSize(int(size * 0.5))
+        p.setFont(f)
+        p.setPen(QColor("white"))
+        p.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, "P6")
     if dot:
         r = max(4, size // 4)
         p.setBrush(QColor(dot))
@@ -69,8 +79,14 @@ def badge(size: int, dot: Optional[str] = None) -> QPixmap:
     return pm
 
 
+def app_icon() -> QIcon:
+    """Window and taskbar icon: assets/brand/ico/p6mcp.ico (the badge when absent)."""
+    path = brand_file("ico/p6mcp.ico")
+    return QIcon(path) if path else make_icon()
+
+
 def make_icon(state: str = supervisor.DISABLED) -> QIcon:
-    """A small "P6" badge; its dot shows the HTTP server state (green running, red error)."""
+    """The app icon; its dot shows the HTTP server state (green running, red error)."""
     icon = QIcon()
     dot = {supervisor.RUNNING: "#2e9d57", supervisor.ERROR: "#c62828", supervisor.STARTING: "#e0a000"}.get(state)
     for size in (16, 20, 24, 32, 40, 48, 64):

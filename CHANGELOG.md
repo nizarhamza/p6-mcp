@@ -3,6 +3,13 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- New P6 MCP logo: executables, installer, Start Menu shortcut, Add/Remove Programs, Settings window and
+  notification area icon, plus a logo header in the Settings window. Brand files in `assets/brand`.
+
 ## [1.4.0] - 2026-10-20
 
 ### Added

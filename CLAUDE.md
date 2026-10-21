@@ -90,6 +90,11 @@ stay outside this repository.
   the window), tray icon with state dot and menu (open, status, restart HTTP server, quit), timer driving the
   supervisor, window created on demand; closing the window keeps the app in the tray when transport is http
   or run_at_startup (`SettingsWindow(on_close=...)`), else quits. `p6mcp-settings --minimized` = tray only.
+- Branding: `assets/brand` (see its BRAND.md) is the single source of the icon and logos. `common.brand_file`
+  finds it in a checkout or under `sys._MEIPASS` when frozen; `tray.badge` draws `p6mcp-icon-<size>.png`
+  plus the state dot (a drawn tile when the files are absent), `tray.app_icon` = `ico/p6mcp.ico` (window and
+  taskbar), the window header shows the lockup at `HEADER_HEIGHT` (on-dark variant on a dark palette, @2x
+  above 1x).
 - Clients in HTTP mode: `clients.target(data)` (url + token) is passed to `scan` / `register`; Cursor,
   LM Studio get `{url, headers}`, Cline `{type: streamableHttp, ...}` (token in their file, the page says so),
   VS Code `{type: http, headers: Bearer ${input:p6mcp-token}}` plus a `promptString` input (jsonc
@@ -108,9 +113,10 @@ stay outside this repository.
   files every read tool runs and `p6_cpm_validate` gives a match rate of 1.0. Settings: Database page data
   source radios and `xer_panel.XerPanel` (files, order, load check on the thread pool).
 
-- Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (icon from `tray.badge`, PNG-in-ICO,
-  version resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`
-  without Qt for the bundle; locales and package metadata collected), `installer.iss` (per user, `AppMutex` =
+- Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (copies the brand icon, version
+  resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`
+  without Qt for the bundle; locales and package metadata collected; exe icon and the Settings app's brand
+  images from `assets/brand`), `installer.iss` (per user, `AppMutex` =
   `tray.MUTEX`, one postinstall register entry per adapter with `Check: ClientDetected(id)` from
   `p6mcp-server setup detected-clients`, uninstall runs `clients unregister --detected` and
   `setup startup off`; a test keeps it in step with `clients.BY_ID`), `bundle.py` (portable zip, `.mcpb`

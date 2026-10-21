@@ -42,13 +42,11 @@ def test_unresolved_bundle_options_mean_unset(monkeypatch, tmp_path):
     assert st.allow_writes is False
 
 
-def test_ico_file(tmp_path):
-    a = load("make_assets")
-    a.write_ico({16: b"\x89PNG16", 256: b"\x89PNG256"}, str(tmp_path / "x.ico"))
-    data = (tmp_path / "x.ico").read_bytes()
-    assert struct.unpack("<HHH", data[:6]) == (0, 1, 2)
-    w16, w256 = data[6], data[22]
-    assert (w16, w256) == (16, 0)  # 0 means 256 in an ICO directory
+def test_brand_icon_file():
+    data = open(os.path.join(ROOT, "assets", "brand", "ico", "p6mcp.ico"), "rb").read()
+    reserved, kind, count = struct.unpack("<HHH", data[:6])
+    widths = {data[6 + 16 * i] for i in range(count)}
+    assert (reserved, kind) == (0, 1) and {16, 32, 48, 0} <= widths  # 0 means 256 in an ICO directory
 
 
 def test_setup_cli(monkeypatch, tmp_path, capsys):

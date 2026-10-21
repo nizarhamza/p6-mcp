@@ -1,3 +1,5 @@
+![P6 MCP](assets/brand/png/p6mcp-banner.png)
+
 # P6 MCP for Primavera P6
 
 A local [MCP](https://modelcontextprotocol.io) server that lets an AI assistant (Claude Desktop, Claude Code,
@@ -203,3 +205,5 @@ installer and releasing: [docs/RELEASING.md](docs/RELEASING.md).
 ## License
 
 [Apache License 2.0](LICENSE). Copyright 2026 Nizar Hamza. See [NOTICE](NOTICE).
+
+Primavera and P6 are trademarks of Oracle. This project is not affiliated with or endorsed by Oracle.

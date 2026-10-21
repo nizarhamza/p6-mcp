@@ -1,7 +1,7 @@
 ; P6 MCP installer (Inno Setup 6). Per-user install, no administrator rights.
 ;   ISCC packaging\installer.iss /DAppVersion=3.0.0
 ; Signing (optional): ISCC ... /DSIGN "/Sp6sign=signtool sign /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /f cert.pfx /p PASSWORD $f"
-; Expects packaging\dist\P6MCP (PyInstaller) and packaging\build\p6mcp.ico (make_assets.py).
+; Expects packaging\dist\P6MCP (PyInstaller) and the brand files in assets\brand.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -29,8 +29,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=dist
 OutputBaseFilename=P6MCP-Setup-{#AppVersion}
-SetupIconFile=build\p6mcp.ico
-UninstallDisplayIcon={app}\p6mcp-settings.exe
+SetupIconFile=..\assets\brand\ico\p6mcp.ico
+UninstallDisplayIcon={app}\p6mcp.ico
+WizardSmallImageFile=..\assets\brand\png\p6mcp-icon-256.png
 UninstallDisplayName=P6 MCP for Primavera P6
 Compression=lzma2/max
 SolidCompression=yes
@@ -67,9 +68,10 @@ Name: "startup"; Description: "{cm:RunAtStartup}"; Flags: unchecked
 Source: "dist\P6MCP\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "..\NOTICE"; DestDir: "{app}"; DestName: "NOTICE.txt"; Flags: ignoreversion
+Source: "..\assets\brand\ico\p6mcp.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\P6 MCP Settings"; Filename: "{app}\p6mcp-settings.exe"
+Name: "{group}\P6 MCP Settings"; Filename: "{app}\p6mcp-settings.exe"; IconFilename: "{app}\p6mcp.ico"
 Name: "{group}\{cm:UninstallProgram,P6 MCP}"; Filename: "{uninstallexe}"
 
 [Run]

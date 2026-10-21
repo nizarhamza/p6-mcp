@@ -26,7 +26,8 @@ def main(argv=None) -> int:
     app.setOrganizationName("P6MCP")
 
     from p6mcp import config, i18n, runtime
-    from p6mcp.settings_app.tray import TrayApp, signal_running_instance
+    from p6mcp.settings_app.tray import TrayApp, app_icon, signal_running_instance
+    app.setWindowIcon(app_icon())
     if signal_running_instance():
         return 0
     runtime.setup_logging("tray")

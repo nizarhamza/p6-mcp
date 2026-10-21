@@ -6,20 +6,22 @@ import copy
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QPalette
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton,
                                QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
 from p6mcp import __version__, config, i18n, settings_logic, startup
 from p6mcp.i18n import tr
-from p6mcp.settings_app.common import muted, pill
+from p6mcp.settings_app.common import brand_pixmap, muted, pill
 from p6mcp.settings_app.about_pages import AboutPage, LogsPage
 from p6mcp.settings_app.clients_page import ClientsPage
 from p6mcp.settings_app.pages import DatabasePage, ServerPage, StartupPage, ToolsPage
+from p6mcp.settings_app.tray import app_icon
 
 PAGES = (("nav.database", DatabasePage), ("nav.startup", StartupPage), ("nav.server", ServerPage),
          ("nav.clients", ClientsPage), ("nav.tools", ToolsPage), ("nav.logs", LogsPage), ("nav.about", AboutPage))
 CLIENTS_PAGE = [cls for _k, cls in PAGES].index(ClientsPage)
+HEADER_HEIGHT = 48  # logical pixels of the logo header
 
 
 class SettingsWindow(QMainWindow):
@@ -43,9 +45,18 @@ class SettingsWindow(QMainWindow):
     # -- layout (rebuilt when the language changes)
     def build(self, page: int = 0) -> None:
         self.setWindowTitle(tr("app.title"))
+        self.setWindowIcon(app_icon())
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft if i18n.is_rtl() else Qt.LayoutDirection.LeftToRight)
         root = QWidget()
         lay = QVBoxLayout(root)
+        self.header = QLabel()
+        dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        logo = brand_pixmap("p6mcp-lockup-on-dark" if dark else "p6mcp-lockup", HEADER_HEIGHT,
+                            self.devicePixelRatioF())
+        if logo is not None:
+            self.header.setPixmap(logo)
+        self.header.setVisible(logo is not None)
+        lay.addWidget(self.header, 0, Qt.AlignmentFlag.AlignLeft)
         self.banner = QLabel()
         self.banner.setWordWrap(True)
         self.banner.setVisible(False)

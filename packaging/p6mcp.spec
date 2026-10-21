@@ -1,14 +1,15 @@
 # PyInstaller spec: dist/P6MCP (p6mcp-server.exe + p6mcp-settings.exe sharing one folder) and
 # dist/P6MCP-server (the server alone, without Qt, for the MCPB bundle).
 #   pyinstaller packaging/p6mcp.spec --noconfirm --distpath packaging/dist --workpath packaging/build/pyi
-# Run packaging/make_assets.py first (icon and version resources).
+# Run packaging/make_assets.py first (version resources). Icon and images: assets/brand.
 import os
 
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 ASSETS = os.path.join(SPECPATH, "build")
-ICON = os.path.join(ASSETS, "p6mcp.ico")
+BRAND = os.path.join(ROOT, "assets", "brand")
+ICON = os.path.join(BRAND, "ico", "p6mcp.ico")
 
 datas = [(os.path.join(ROOT, "p6mcp", "locales", "*.json"), os.path.join("p6mcp", "locales"))]
 for dist in ("mcp", "pydantic", "pydantic_core", "uvicorn", "starlette", "anyio", "keyring", "jsonschema",
@@ -17,13 +18,17 @@ for dist in ("mcp", "pydantic", "pydantic_core", "uvicorn", "starlette", "anyio"
         datas += copy_metadata(dist)
     except Exception:  # a distribution that is not installed in this environment
         pass
+# the Settings app reads its window, tray and header images from assets/brand
+gui_datas = datas + [(ICON, os.path.join("assets", "brand", "ico")),
+                     (os.path.join(BRAND, "png", "p6mcp-icon-*.png"), os.path.join("assets", "brand", "png")),
+                     (os.path.join(BRAND, "png", "p6mcp-lockup*.png"), os.path.join("assets", "brand", "png"))]
 hidden = (collect_submodules("mcp") + collect_submodules("uvicorn") + collect_submodules("keyring.backends")
           + ["win32ctypes.core", "p6mcp.server", "p6mcp.http_server", "p6mcp.clients.__main__", "p6mcp.setup_cli"])
 excl = ["tkinter", "matplotlib", "numpy", "pytest", "PyInstaller"]
 
 srv = Analysis([os.path.join(ROOT, "p6mcp", "__main__.py")], pathex=[ROOT], datas=datas, hiddenimports=hidden,
                excludes=excl + ["PySide6", "shiboken6"], noarchive=False)
-gui = Analysis([os.path.join(ROOT, "p6mcp", "settings_app", "__main__.py")], pathex=[ROOT], datas=datas,
+gui = Analysis([os.path.join(ROOT, "p6mcp", "settings_app", "__main__.py")], pathex=[ROOT], datas=gui_datas,
                hiddenimports=hidden + ["p6mcp.settings_app.window", "p6mcp.settings_app.tray"], excludes=excl,
                noarchive=False)
 
