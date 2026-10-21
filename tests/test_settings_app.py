@@ -413,3 +413,40 @@ def test_logs_and_about_pages(qtbot, win, monkeypatch):
     about = win.page(AboutPage)
     texts = " ".join(w.text() for w in about.findChildren(QLabelType))
     assert "Apache" in texts and "Oracle" in texts and "local model" in texts
+
+
+def test_instructions_and_commands_pages(qtbot, win, env, monkeypatch):
+    from p6mcp.settings_app import guidance_pages
+    from p6mcp.settings_app.guidance_pages import CommandDialog, CommandsPage, InstructionsPage
+    monkeypatch.setattr(guidance_pages, "ask", lambda *a, **k: True)
+    act = "When you show an activity, write it as Activity ID - Activity name."
+    ins = win.page(InstructionsPage)
+    assert ins.builtin.count() == len(guidance_pages.instructions.BUILTIN)
+    monkeypatch.setattr(ins, "ask_text", lambda title, text="": act)
+    assert ins.add() and ins.custom.count() == 1 and ins.preview.toPlainText().endswith(act)
+    sql = next(i for i in range(ins.builtin.count()) if ins.builtin.item(i).data(Qt.ItemDataRole.UserRole) == "sql")
+    ins.builtin.item(sql).setCheckState(Qt.CheckState.Unchecked)
+    assert win.data["instructions_disabled"] == ["sql"] and "p6_sql_select" not in ins.preview.toPlainText()
+    assert win.save_btn.isEnabled() and win.save()
+    saved = json.loads(env["cfg"].read_text(encoding="utf-8"))
+    assert saved["custom_instructions"] == [{"text": act, "enabled": True}]
+    assert "your instructions" in win.banner.text()  # restart the client to read them
+
+    cmds = win.page(CommandsPage)
+    assert cmds.table.rowCount() == 5 and cmds.preview.toPlainText().startswith("Weekly update review of project")
+    dlg = CommandDialog(cmds, win.data)
+    qtbot.addWidget(dlg)
+    dlg.name.setText("my-check")
+    dlg.text.setPlainText("Check {project} with p6_update_activity(project=\"{project}\").")
+    dlg._add_arg({"name": "project", "description": "Project ID", "default": None})
+    dlg.accept()
+    assert dlg.result_data["custom_commands"][0]["args"] == [{"name": "project", "description": "Project ID",
+                                                              "default": None}]
+    monkeypatch.setattr(cmds, "edit_command", lambda item, old: dlg.result_data)
+    assert cmds.add() and cmds.table.rowCount() == 6 and cmds.current()["name"] == "my-check"
+    assert cmds.table.item(5, 4).text() == "No: needs p6_update_activity"  # Basic profile
+    assert "Check <project> with" in cmds.preview.toPlainText()
+    cmds.table.item(0, 0).setCheckState(Qt.CheckState.Unchecked)
+    assert win.data["commands_disabled"] == ["weekly-update-review"]
+    cmds.table.setCurrentCell(5, 1)
+    assert cmds.remove() and cmds.table.rowCount() == 5

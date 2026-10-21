@@ -205,10 +205,11 @@ class Adapter:
 
     # -- P6 command files (p6mcp.prompts) in the client's command folder
     def _command_files(self, profile: str, allow_writes: bool) -> dict[str, str]:
-        """file name -> content of the commands offered under these settings."""
+        """file name -> content of the commands offered under these settings (built-in ones turned off and
+        the user's own ones from the saved settings)."""
         from p6mcp import prompts
         return {prompts.file_name(c, self.command_style): prompts.command_file(c, self.command_style)
-                for c in prompts.offered(profile, allow_writes)}
+                for c in prompts.offered(profile, allow_writes, prompts.saved_config())}
 
     def _ours(self) -> dict[str, str]:
         """Command files P6 MCP wrote in the folder (they carry the marker): name -> content."""
@@ -235,11 +236,8 @@ class Adapter:
         if not ours:
             return CMD_NONE
         if profile is None or allow_writes is None:
-            from p6mcp import config
-            try:
-                data = config.read_file()[0] or config.DEFAULTS
-            except config.ConfigError:  # unreadable settings: the defaults, as the server
-                data = config.DEFAULTS
+            from p6mcp import prompts
+            data = prompts.saved_config()  # unreadable settings: the defaults, as the server
             profile, allow_writes = data.get("tool_profile", "basic"), bool(data.get("allow_writes"))
         return CMD_INSTALLED if ours == self._command_files(profile, allow_writes) else CMD_OUTDATED
 

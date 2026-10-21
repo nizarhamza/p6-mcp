@@ -113,6 +113,14 @@ uninstalling) deletes only the files P6 MCP wrote. From the command line:
 & "$env:LOCALAPPDATA\Programs\P6 MCP\p6mcp-server.exe" clients commands install --detected
 ```
 
+The **Commands** page of P6 MCP Settings lists them with whether the current tool settings offer them.
+Turn a built-in command off, or add your own (**New**, or **Copy to my commands** to start from a
+built-in one): a name, a title, arguments written as `{argument}` in the text, and the P6 tools to use.
+The P6 rules are appended to your text. The **Instructions** page shows the instructions every client
+receives when it connects; turn built-in lines off (the two-step write rule stays on) or add your own,
+such as "When you show an activity, write it as Activity ID - Activity name". Click Save and restart the
+MCP client; for clients with command files, also click Update commands.
+
 ## Safety
 
 ![Settings: tools and safety](docs/images/settings-tools.png)

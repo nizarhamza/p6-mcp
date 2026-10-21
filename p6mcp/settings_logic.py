@@ -10,9 +10,10 @@ import os
 import socket
 from typing import Optional
 
-from p6mcp import config, policy
+from p6mcp import config, instructions, policy, prompts
 
-RESTART_KEYS = ("tool_profile", "allow_writes", "transport", "http_port")  # read when the server starts
+RESTART_KEYS = ("tool_profile", "allow_writes", "transport", "http_port", "instructions_disabled",
+                "custom_instructions", "commands_disabled", "custom_commands")  # read when the server starts
 
 
 def _dbs(data: dict) -> list[dict]:
@@ -134,6 +135,136 @@ def free_port(start: int = 39217, tries: int = 50) -> Optional[int]:
 def restart_needed(saved: dict, current: dict) -> list[str]:
     """Settings that only take effect after the MCP client restarts the server."""
     return [k for k in RESTART_KEYS if saved.get(k, config.DEFAULTS[k]) != current.get(k, config.DEFAULTS[k])]
+
+
+# -- server instructions and P6 commands (Instructions and Commands pages)
+
+def _toggle(data: dict, key: str, value: str, off: bool) -> dict:
+    data = copy.deepcopy(data)
+    items = [x for x in data.get(key) or [] if x != value]
+    data[key] = items + [value] if off else items
+    return data
+
+
+def set_instruction_enabled(data: dict, line_id: str, on: bool) -> dict:
+    """Turn a built-in instruction line on or off (the locked one stays on)."""
+    line = instructions.BY_ID.get(line_id)
+    if line is None:
+        raise ValueError(f"No built-in instruction {line_id!r}")
+    if line.locked and not on:
+        raise ValueError("This instruction protects the database and cannot be turned off")
+    return _toggle(data, "instructions_disabled", line_id, not on)
+
+
+def put_instruction(data: dict, text: str, index: Optional[int] = None) -> dict:
+    """Add the user's own instruction line (index None) or replace the text of line index."""
+    text = " ".join((text or "").split())
+    if not text:
+        raise ValueError("The instruction is empty")
+    if len(text) > instructions.MAX_CUSTOM_CHARS:
+        raise ValueError(f"An instruction holds at most {instructions.MAX_CUSTOM_CHARS} characters")
+    data = copy.deepcopy(data)
+    items = data.setdefault("custom_instructions", [])
+    if index is None:
+        if len(items) >= instructions.MAX_CUSTOM:
+            raise ValueError(f"At most {instructions.MAX_CUSTOM} instructions")
+        items.append({"text": text, "enabled": True})
+    else:
+        items[index] = dict(items[index], text=text)
+    return data
+
+
+def set_custom_instruction_enabled(data: dict, index: int, on: bool) -> dict:
+    data = copy.deepcopy(data)
+    data["custom_instructions"][index]["enabled"] = bool(on)
+    return data
+
+
+def remove_instruction(data: dict, index: int) -> dict:
+    data = copy.deepcopy(data)
+    del data["custom_instructions"][index]
+    return data
+
+
+def move_instruction(data: dict, index: int, step: int) -> dict:
+    """Move line index up (step -1) or down (step 1); out of range: unchanged."""
+    items = list(data.get("custom_instructions") or [])
+    j = index + step
+    if not (0 <= index < len(items) and 0 <= j < len(items)):
+        return data
+    data = copy.deepcopy(data)
+    items = data["custom_instructions"]
+    items[index], items[j] = items[j], items[index]
+    return data
+
+
+def set_command_enabled(data: dict, name: str, on: bool) -> dict:
+    """Turn a built-in command or one of the user's own commands on or off."""
+    if name in prompts.BY_NAME:
+        return _toggle(data, "commands_disabled", name, not on)
+    data = copy.deepcopy(data)
+    item = next((c for c in data.get("custom_commands") or [] if c.get("name") == name), None)
+    if item is None:
+        raise ValueError(f"No command {name!r}")
+    item["enabled"] = bool(on)
+    return data
+
+
+def clean_command(item: dict) -> dict:
+    """A custom command as the Commands page edits it, trimmed into the stored shape."""
+    args = []
+    for a in item.get("args") or []:
+        name = (a.get("name") or "").strip()
+        if not name:
+            continue
+        dflt = a.get("default")
+        args.append({"name": name, "description": (a.get("description") or "").strip(),
+                     "default": None if dflt is None else str(dflt).strip()})
+    return {"name": (item.get("name") or "").strip().lower(), "title": (item.get("title") or "").strip(),
+            "description": " ".join((item.get("description") or "").split()), "args": args,
+            "template": (item.get("template") or "").strip("\n"), "enabled": bool(item.get("enabled", True))}
+
+
+def put_command(data: dict, item: dict, old_name: Optional[str] = None) -> dict:
+    """Add the user's own command (old_name None) or replace command old_name. Raises ValueError with
+    every problem found."""
+    item = clean_command(item)
+    data = copy.deepcopy(data)
+    items = data.setdefault("custom_commands", [])
+    others = tuple(c.get("name") for c in items if c.get("name") != old_name)
+    errs = prompts.check_custom(item, others)
+    if errs:
+        raise ValueError("; ".join(errs))
+    idx = next((i for i, c in enumerate(items) if c.get("name") == old_name), None) if old_name else None
+    if idx is None:
+        if len(items) >= prompts.MAX_CUSTOM:
+            raise ValueError(f"At most {prompts.MAX_CUSTOM} commands")
+        items.append(item)
+    else:
+        items[idx] = item
+    return data
+
+
+def remove_command(data: dict, name: str) -> dict:
+    data = copy.deepcopy(data)
+    data["custom_commands"] = [c for c in data.get("custom_commands") or [] if c.get("name") != name]
+    return data
+
+
+def command_rows(data: dict) -> list[dict]:
+    """Every command (built-in first, then the user's own) with whether clients get it under the saved
+    tool settings of data: {name, title, description, custom, enabled, offered, missing_tools, command}."""
+    profile, writes = data.get("tool_profile", "basic"), bool(data.get("allow_writes")) and \
+        data.get("data_source") != "xer"
+    off = set(data.get("commands_disabled") or [])
+    rows = []
+    cmds = [(c, c.name not in off) for c in prompts.COMMANDS]
+    cmds += [(prompts.from_config(it), bool(it.get("enabled", True))) for it in data.get("custom_commands") or []]
+    for cmd, on in cmds:
+        missing = [t for t in cmd.tools() if not policy.listed(t, profile, writes)]
+        rows.append({"name": cmd.name, "title": cmd.title, "description": cmd.description, "custom": cmd.custom,
+                     "enabled": on, "offered": on and not missing, "missing_tools": missing, "command": cmd})
+    return rows
 
 
 def tool_rows(profile: str, allow_writes: bool) -> list[dict]:

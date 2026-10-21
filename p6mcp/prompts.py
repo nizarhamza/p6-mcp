@@ -34,6 +34,7 @@ class Command:
     description: str
     args: tuple[Arg, ...]
     template: str  # str.format fields: the argument names and {rules}
+    custom: bool = False  # written by the user (Commands page): {arg} fields only, the rules appended
 
     def tools(self) -> list[str]:
         return sorted(set(re.findall(r"\bp6_\w+", self.template)))
@@ -162,18 +163,117 @@ baseline, say so and stop.
 BY_NAME = {c.name: c for c in COMMANDS}
 
 
+# -- the user's own commands (config `custom_commands`) and the built-in ones turned off (`commands_disabled`)
+NAME_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+ARG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+MAX_CUSTOM = 50
+MAX_NAME = 40
+MAX_TEXT = 8000
+
+
+def check_custom(item, others: tuple[str, ...] = ()) -> list[str]:
+    """Errors of one custom command {name, title, description, args [{name, description, default}],
+    template, enabled}. others: names already used (built-in names are always reserved)."""
+    if not isinstance(item, dict):
+        return ["a command must be an object"]
+    errs = []
+    name = item.get("name")
+    if not isinstance(name, str) or not NAME_RE.match(name) or len(name) > MAX_NAME:
+        errs.append(f"name {name!r}: lowercase letters, digits and single hyphens, starting with a letter, "
+                    f"at most {MAX_NAME} characters")
+    elif name in BY_NAME:
+        errs.append(f"name {name!r} is a built-in command")
+    elif name in others:
+        errs.append(f"name {name!r} is used twice")
+    for key in ("title", "description"):
+        if not isinstance(item.get(key, ""), str):
+            errs.append(f"{key} must be text")
+    text = item.get("template")
+    if not isinstance(text, str) or not text.strip():
+        errs.append("the command text is empty")
+    elif len(text) > MAX_TEXT:
+        errs.append(f"the command text is longer than {MAX_TEXT} characters")
+    if not isinstance(item.get("enabled", True), bool):
+        errs.append("enabled must be true or false")
+    args = item.get("args", [])
+    if not isinstance(args, list):
+        return errs + ["args must be a list"]
+    seen = set()
+    for a in args:
+        an = a.get("name") if isinstance(a, dict) else None
+        if not isinstance(an, str) or not ARG_RE.match(an) or an == "rules":
+            errs.append(f"argument {an!r}: lowercase letters, digits and _, starting with a letter (not 'rules')")
+        elif an in seen:
+            errs.append(f"argument {an!r} is used twice")
+        else:
+            seen.add(an)
+            if not isinstance(a.get("description", ""), str) or not (a.get("default") is None
+                                                                        or isinstance(a.get("default"), str)):
+                errs.append(f"argument {an!r}: description and default must be text")
+    return errs
+
+
+def check_config(cfg: dict) -> list[str]:
+    """Shape errors of the command keys of a config dict (used by config.validate)."""
+    errs = []
+    off = cfg.get("commands_disabled", [])
+    if not isinstance(off, list) or not all(isinstance(x, str) for x in off):
+        errs.append("commands_disabled must be a list of command names")
+    items = cfg.get("custom_commands", [])
+    if not isinstance(items, list):
+        return errs + ["custom_commands must be a list"]
+    if len(items) > MAX_CUSTOM:
+        errs.append(f"custom_commands holds at most {MAX_CUSTOM} commands")
+    names: list[str] = []
+    for i, it in enumerate(items):
+        errs += [f"custom_commands[{i}]: {e}" for e in check_custom(it, tuple(names))]
+        names.append(it.get("name") if isinstance(it, dict) else None)
+    return errs
+
+
+def from_config(item: dict) -> Command:
+    """A Command from a custom command of the config (checked by config.validate)."""
+    args = tuple(Arg(a["name"], a.get("description") or a["name"], a.get("default")) for a in item.get("args", []))
+    title = (item.get("title") or "").strip() or item["name"].replace("-", " ").capitalize()
+    desc = " ".join((item.get("description") or "").split()) or title
+    return Command(item["name"], title, desc, args, item["template"], custom=True)
+
+
+def custom_commands(cfg: Optional[dict]) -> list[Command]:
+    return [from_config(it) for it in (cfg or {}).get("custom_commands") or [] if it.get("enabled", True)]
+
+
+def all_commands(cfg: Optional[dict] = None) -> list[Command]:
+    """Built-in commands that are on, then the user's own ones that are on (None: the built-in ones)."""
+    off = set((cfg or {}).get("commands_disabled") or [])
+    return [c for c in COMMANDS if c.name not in off] + custom_commands(cfg)
+
+
+def saved_config() -> dict:
+    """The saved settings (an unreadable or missing file: the defaults, as the server)."""
+    from p6mcp import config
+    try:
+        return config.read_file()[0] or config.DEFAULTS
+    except config.ConfigError:
+        return config.DEFAULTS
+
+
 def available(cmd: Command, profile: str, allow_writes: bool) -> bool:
     """Every tool the command names is offered under these settings."""
     return all(policy.listed(t, profile, allow_writes) for t in cmd.tools())
 
 
-def offered(profile: str, allow_writes: bool) -> list[Command]:
-    return [c for c in COMMANDS if available(c, profile, allow_writes)]
+def offered(profile: str, allow_writes: bool, cfg: Optional[dict] = None) -> list[Command]:
+    """Commands offered under these settings; cfg gives the user's own and the ones turned off."""
+    return [c for c in all_commands(cfg) if available(c, profile, allow_writes)]
 
 
 def render(cmd: Command, values: dict) -> str:
     """The command text with the argument values filled in (missing ones take their default)."""
     vals = {a.name: values.get(a.name) if values.get(a.name) is not None else (a.default or "") for a in cmd.args}
+    if cmd.custom:  # the user's text: only {argument} fields are replaced, other braces are kept as written
+        text = re.sub(r"\{([a-z][a-z0-9_]*)\}", lambda m: str(vals.get(m.group(1), m.group(0))), cmd.template)
+        return text.rstrip() + "\n\n" + RULES
     return cmd.template.format(rules=RULES, **vals)
 
 

@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
+from p6mcp import instructions, prompts
+
 CONFIG_VERSION = 1
 APP_DIR_NAME = "P6MCP"
 TOOL_PROFILES = ("basic", "full")
@@ -59,6 +61,10 @@ DEFAULTS: dict[str, Any] = {
     "update_check": True,         # legacy key (<= 1.2.0): its False also turns auto_update off
     "auto_update": True,          # check, download and install new releases (tray app)
     "clients_ignored": [],        # client ids whose registration offer the user declined for good
+    "instructions_disabled": [],  # built-in server instruction ids turned off (p6mcp.instructions)
+    "custom_instructions": [],    # the user's own instruction lines [{text, enabled}]
+    "commands_disabled": [],      # built-in P6 command names turned off (p6mcp.prompts)
+    "custom_commands": [],        # the user's own commands [{name, title, description, args, template, enabled}]
 }
 
 
@@ -170,6 +176,7 @@ def validate(d: dict) -> dict:
         errs.append("trusted_schemas must be a list of fingerprints")
     if not isinstance(out["clients_ignored"], list) or not all(isinstance(x, str) for x in out["clients_ignored"]):
         errs.append("clients_ignored must be a list of client ids")
+    errs += instructions.check(out) + prompts.check_config(out)
     dbs = out["databases"]
     names = set()
     if not isinstance(dbs, list):

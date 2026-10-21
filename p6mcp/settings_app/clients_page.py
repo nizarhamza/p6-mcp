@@ -227,7 +227,7 @@ class ClientsPage(QWidget):
     def _show_commands(self, st, installed: bool) -> None:
         ad = clients.get(st.client) if st else None
         files_ok = bool(installed and ad and ad.command_style)
-        offered = prompts.offered(*self.saved_tools())
+        offered = prompts.offered(*self.saved_tools(), prompts.saved_config())
         state = st.commands if st else clients.CMD_UNSUPPORTED
         self.cmd_btn.setVisible(files_ok)
         self.cmd_remove_btn.setVisible(files_ok)

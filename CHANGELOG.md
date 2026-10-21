@@ -3,6 +3,21 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-10-21
+
+### Added
+
+- Settings > Instructions: the instructions every MCP client receives when it connects, with a preview of
+  the exact text. Built-in lines can be turned off (the two-step write rule stays on) and you can add,
+  edit, reorder and turn off your own lines, for example "When you show an activity, write it as
+  Activity ID - Activity name". Config keys `instructions_disabled` and `custom_instructions`.
+- Settings > Commands: every P6 command with whether the current tool settings offer it and a preview of
+  its text. Built-in commands can be turned off; New and Copy to my commands create your own commands
+  (name, title, description, arguments used as `{argument}` in the text; the P6 rules are appended).
+  They are offered as MCP prompts and written by Install / Update commands like the built-in ones.
+  Config keys `commands_disabled` and `custom_commands`.
+- Both take effect after Save and a restart of the MCP client (the restart banner says so).
+
 ## [1.4.1] - 2026-10-21
 
 ### Changed
@@ -129,6 +144,7 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[1.5.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.5.0
 [1.4.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.4.1
 [1.4.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.4.0
 [1.3.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.3.0

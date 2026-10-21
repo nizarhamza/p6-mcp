@@ -15,11 +15,13 @@ from p6mcp.i18n import tr
 from p6mcp.settings_app.common import brand_pixmap, muted, pill
 from p6mcp.settings_app.about_pages import AboutPage, LogsPage
 from p6mcp.settings_app.clients_page import ClientsPage
+from p6mcp.settings_app.guidance_pages import CommandsPage, InstructionsPage
 from p6mcp.settings_app.pages import DatabasePage, ServerPage, StartupPage, ToolsPage
 from p6mcp.settings_app.tray import app_icon
 
 PAGES = (("nav.database", DatabasePage), ("nav.startup", StartupPage), ("nav.server", ServerPage),
-         ("nav.clients", ClientsPage), ("nav.tools", ToolsPage), ("nav.logs", LogsPage), ("nav.about", AboutPage))
+         ("nav.clients", ClientsPage), ("nav.tools", ToolsPage), ("nav.instructions", InstructionsPage),
+         ("nav.commands", CommandsPage), ("nav.logs", LogsPage), ("nav.about", AboutPage))
 CLIENTS_PAGE = [cls for _k, cls in PAGES].index(ClientsPage)
 HEADER_HEIGHT = 48  # logical pixels of the logo header
 

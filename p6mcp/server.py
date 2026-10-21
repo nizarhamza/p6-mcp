@@ -90,6 +90,7 @@ except ImportError:  # test stub without pydantic: annotations are never evaluat
 from p6mcp import __version__ as _pkg_version
 from p6mcp import config as _config
 from p6mcp import confirm as _confirm
+from p6mcp import instructions as _instructions
 from p6mcp import policy as _policy
 from p6mcp import prompts as _prompts
 from p6mcp import schema as _schema
@@ -290,17 +291,8 @@ DCMA_CHECKS: dict[str, tuple] = {
 }
 assert list(DCMA_CHECKS) == list(get_args(DcmaCheck))
 
-INSTRUCTIONS = """Primavera P6 Professional database (standalone SQLite).
-- Name projects by Project ID (p6_list_projects) and activities by Activity ID.
-- Durations and float are in days of each activity's calendar.
-- Lag days use the project's lag calendar option (see lag_rule).
-- Dates and float come from the last P6 schedule run (F9); edits do not reschedule.
-- Writes take two calls: dry_run=true (default) returns the plan and a confirmation_token; after the user's explicit yes, repeat the call with dry_run=false and that token (and confirmation_text if asked). P6 must be closed. Then ask the user to press F9 in P6.
-- p6_diagnose explains configuration errors.
-- Planned dates are never written; new activities only come from p6_import_xer.
-- List tools return {total, offset, returned, next_offset, rows}: pass offset=next_offset for the next page (null = last). fields= trims activity rows.
-- Overview first: p6_project_summary.
-- Use p6_sql_select only when no other tool fits."""
+# built-in lines the user kept plus their own ones (Settings, Instructions page), fixed at startup
+INSTRUCTIONS = _instructions.build(STARTUP.raw)
 
 SERVER_VERSION = _pkg_version  # reported to clients as serverInfo.version where the SDK supports it
 _version_kw = {"version": SERVER_VERSION} if "version" in inspect.signature(FastMCP.__init__).parameters else {}
@@ -558,8 +550,9 @@ PROMPTS: dict[str, Callable[..., str]] = {}  # P6 command -> its MCP prompt func
 
 
 def _register_prompts() -> None:
-    """Offer the P6 commands (p6mcp.prompts) whose tools are all offered, as MCP prompts."""
-    for cmd in _prompts.offered(STARTUP.tool_profile, STARTUP.allow_writes):
+    """Offer the P6 commands (p6mcp.prompts: built-in ones left on and the user's own) whose tools are all
+    offered, as MCP prompts."""
+    for cmd in _prompts.offered(STARTUP.tool_profile, STARTUP.allow_writes, STARTUP.raw):
         def fn(_cmd=cmd, **values) -> str:
             return _prompts.render(_cmd, values)
         P = inspect.Parameter
