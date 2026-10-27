@@ -239,7 +239,7 @@ def test_clients_page_installs_commands(qtbot, env, tmp_path):
     assert page.install_commands()
     qtbot.waitUntil(lambda: page.job is None, timeout=15000)
     folder = tmp_path / "User" / ".cursor" / "commands"
-    assert sorted(os.listdir(folder)) == ["p6-baseline-variance.md", "p6-delay-whatif.md",
+    assert sorted(os.listdir(folder)) == ["p6-baseline-variance.md", "p6-delay-whatif.md", "p6-export-dashboard.md",
                                           "p6-schedule-quality-audit.md", "p6-weekly-update-review.md"]
     page.select("cursor")
     assert page.status().commands == "installed" and not page.cmd_btn.isEnabled()
@@ -433,7 +433,7 @@ def test_instructions_and_commands_pages(qtbot, win, env, monkeypatch):
     assert "your instructions" in win.banner.text()  # restart the client to read them
 
     cmds = win.page(CommandsPage)
-    assert cmds.table.rowCount() == 5 and cmds.preview.toPlainText().startswith("Weekly update review of project")
+    assert cmds.table.rowCount() == 6 and cmds.preview.toPlainText().startswith("Weekly update review of project")
     dlg = CommandDialog(cmds, win.data)
     qtbot.addWidget(dlg)
     dlg.name.setText("my-check")
@@ -443,10 +443,10 @@ def test_instructions_and_commands_pages(qtbot, win, env, monkeypatch):
     assert dlg.result_data["custom_commands"][0]["args"] == [{"name": "project", "description": "Project ID",
                                                               "default": None}]
     monkeypatch.setattr(cmds, "edit_command", lambda item, old: dlg.result_data)
-    assert cmds.add() and cmds.table.rowCount() == 6 and cmds.current()["name"] == "my-check"
-    assert cmds.table.item(5, 4).text() == "No: needs p6_update_activity"  # Basic profile
+    assert cmds.add() and cmds.table.rowCount() == 7 and cmds.current()["name"] == "my-check"
+    assert cmds.table.item(6, 4).text() == "No: needs p6_update_activity"  # Basic profile
     assert "Check <project> with" in cmds.preview.toPlainText()
     cmds.table.item(0, 0).setCheckState(Qt.CheckState.Unchecked)
     assert win.data["commands_disabled"] == ["weekly-update-review"]
-    cmds.table.setCurrentCell(5, 1)
-    assert cmds.remove() and cmds.table.rowCount() == 5
+    cmds.table.setCurrentCell(6, 1)
+    assert cmds.remove() and cmds.table.rowCount() == 6

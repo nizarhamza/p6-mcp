@@ -8876,10 +8876,11 @@ def _dash_read(con, pid: int, bid: Optional[int], codes: Optional[Sequence[str]]
             "hpd": pcal.hpd if pcal else 8.0, "kpi": kpi, "acts": acts, "wd_notes": sorted(wd_notes)}
 
 
-def _dash_book(d: dict) -> tuple[Any, dict]:
-    """The dashboard workbook (openpyxl) of what p6_export_dashboard gathered, and the data rows
-    written per sheet. Sheets in DASH_SHEETS order; the Dashboard sheet (fixed objects, protected) has
-    a sidebar of links to the others, which link back to it."""
+def _dash_book(d: dict) -> tuple[Any, dict, list]:
+    """The dashboard workbook (openpyxl) of what p6_export_dashboard gathered, the data rows written
+    per sheet and the 7 card values ({card, value, detail}, dates as YYYY-MM-DD). Sheets in DASH_SHEETS
+    order; the Dashboard sheet (fixed objects, protected) has a sidebar of links to the others, which
+    link back to it."""
     from openpyxl import Workbook
     from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
     from openpyxl.cell.rich_text import CellRichText, TextBlock
@@ -9319,6 +9320,9 @@ def _dash_book(d: dict) -> tuple[Any, dict]:
                 start_type="num", start_value=0, end_type="num", end_value=100, color=color, showValue=False))
     for rr, hh in ((5, 20), (6, 18), (7, 18), (8, 30), (9, 8)):
         ws.row_dimensions[rr].height = hh
+    card_values = [{"card": title, "value": value.strftime("%Y-%m-%d") if isinstance(value, datetime)
+                    else round(value, 2) if isinstance(value, float) else value, "detail": sub}
+                   for _, title, value, _, sub, _, _ in cards]
 
     def rows_cm(r0: int, r1: int) -> float:  # height of rows r0 to r1, less a margin, in cm
         return sum(row_px(ws.row_dimensions[rr].height) for rr in range(r0, r1 + 1)) / 37.8 - 0.4
@@ -9530,7 +9534,7 @@ def _dash_book(d: dict) -> tuple[Any, dict]:
     ws.print_area = f"A1:{letter(col(NG - 1))}{LAST}"
     counts["Dashboard"] = 1
     wb.active = 0
-    return wb, counts
+    return wb, counts, card_values
 
 
 @_tool(read_only=False, destructive=True)
@@ -9558,7 +9562,8 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
     milestone, at most 30). Slip and variance in working days: project calendar for the project
     figures, each activity's own calendar otherwise. prepared_by and revision are printed under the
     title; company (sidebar) and colors ('primary,accent' in hex: sidebar, headers and dark bars, then
-    the S-curve actual line) apply to this export only."""
+    the S-curve actual line) apply to this export only. The result gives the 7 card values as written
+    (cards) and the DCMA checks that fail (dcma_failed)."""
     if baseline_dates not in get_args(BaselineDates):
         raise ValueError(f"baseline_dates must be one of {list(get_args(BaselineDates))}")
     if period not in get_args(Period):
@@ -9626,7 +9631,7 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
             "rd": rd, "summary": summary, "curve": curve, "curve_error": curve_error, "crit": crit, "hc": hc,
             "state": state, "near": near, "baseline_dates": baseline_dates, "baseline_arg": baseline,
             "warnings": warnings, "brand": brand, **texts}
-    wb, counts = _dash_book(data)
+    wb, counts, cards = _dash_book(data)
     tmp = path + ".tmp"
     try:  # written beside the target, then swapped in: a failed export leaves the old file intact
         wb.save(tmp)
@@ -9640,6 +9645,7 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
             "baseline": rd["baseline"] and rd["baseline"]["proj_short_name"], "sheets": counts,
             "counts": {"wbs": len(rd["rows"]), "activities": len(rd["acts"]), "milestones": len(rd["milestones"]),
                        "critical": len(crit)},
+            "cards": cards, "dcma_failed": [k for k, c in hc["checks"].items() if c.get("pass") is False],
             "warnings": warnings, "schedule_state": state,
             "note": "Values of the last F9 in P6. The Dashboard sheet is protected (no password) and prints on one A3 "
                     "landscape page."}

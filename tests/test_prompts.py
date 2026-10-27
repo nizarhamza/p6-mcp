@@ -95,7 +95,7 @@ def test_install_update_and_remove_commands(home, cid, folder, suffix):
     other.write_text("unrelated", encoding="utf-8")
 
     res = ad.install_commands("full", True)
-    assert res["skipped"] == [mine.name] and len(res["written"]) == 4 and res["folder"] == str(d)
+    assert res["skipped"] == [mine.name] and len(res["written"]) == len(NAMES) - 1 and res["folder"] == str(d)
     assert mine.read_text(encoding="utf-8") == "my own command" and other.exists()
     mine.unlink()
     res = ad.install_commands("full", True)
@@ -111,7 +111,7 @@ def test_install_update_and_remove_commands(home, cid, folder, suffix):
     assert ad.commands_state("full", True) == clients.CMD_OUTDATED
 
     res = ad.remove_commands()
-    assert len(res["removed"]) == 4 and sorted(os.listdir(d)) == [other.name]
+    assert len(res["removed"]) == len(NAMES) - 1 and sorted(os.listdir(d)) == [other.name]
 
 
 @pytest.mark.parametrize("cid", ["claude_desktop", "lmstudio"])
@@ -153,7 +153,7 @@ def test_claude_code_registration_keeps_the_rest(home):
 def test_cli_commands(home, capsys):
     (home / "User" / ".cursor").mkdir()
     assert cli(["commands", "install", "--detected"]) == 0
-    assert "cursor: 5 written" in capsys.readouterr().out
+    assert f"cursor: {len(NAMES)} written" in capsys.readouterr().out
     assert cli(["commands", "install", "claude_desktop"]) == 1
     assert cli(["commands", "remove", "cursor"]) == 0
-    assert "cursor: 5 removed" in capsys.readouterr().out
+    assert f"cursor: {len(NAMES)} removed" in capsys.readouterr().out

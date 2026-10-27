@@ -3,6 +3,16 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] - 2026-10-27
+
+### Added
+
+- P6 command `export-dashboard` (Full profile): checks that the schedule is not stale, writes the Excel
+  dashboard of a project with `p6_export_dashboard`, then reports the 7 cards as written, the counts, the
+  DCMA checks that fail and the warnings. It asks before replacing an existing file (`overwrite`).
+- `p6_export_dashboard` also returns `cards` (value and detail of each card, as written on the Dashboard
+  sheet) and `dcma_failed` (the DCMA checks that fail).
+
 ## [1.6.0] - 2026-10-27
 
 ### Added
@@ -172,6 +182,7 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[1.7.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.7.0
 [1.6.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.6.0
 [1.5.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.5.1
 [1.5.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.5.0

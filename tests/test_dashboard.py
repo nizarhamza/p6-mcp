@@ -138,6 +138,17 @@ def test_enriched_project_workbook(p6, tmp_path):
     assert d.protection.sheet and not d.protection.password
     assert d["A1"].value == "Acme Builders" and so["A4"].fill.fgColor.rgb.endswith("2B4C7E")
     assert "Prepared by A. Planner" in d["C3"].value and "Data date" in str(d["AC1"].value)
+    # the result gives the 7 card values as written (row 6 of each card) and the DCMA checks that fail
+    def shown(v):
+        return v.strftime("%Y-%m-%d") if isinstance(v, datetime) else round(v, 2) if isinstance(v, float) else v
+    assert [c["card"] for c in res["cards"]] == ["Overall Progress", "Critical Activities", "Delayed Activities",
+                                                "Schedule Variance", "Forecast Completion", "Remaining Duration",
+                                                "Milestones Late"]
+    assert [shown(d.cell(6, 3 + 4 * k).value) for k in range(7)] == ["n/a" if c["value"] is None else c["value"]
+                                                                    for c in res["cards"]]
+    assert all(c["detail"] == d.cell(8, 3 + 4 * k).value for k, c in enumerate(res["cards"]))
+    hc = p6.call("p6_health_check", project="DEMO-A", save_snapshot=False)
+    assert res["dcma_failed"] == [k for k, c in hc["checks"].items() if c.get("pass") is False]
     with __import__("zipfile").ZipFile(path) as z:
         charts = "".join(z.read(n).decode() for n in z.namelist() if n.startswith("xl/charts/"))
     assert 'srgbClr val="C0392B"' in charts

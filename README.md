@@ -87,7 +87,7 @@ From the command line (the installer uses the same commands):
 
 ### P6 commands
 
-Five ready-made workflows chain the tools into one fixed report:
+Six ready-made workflows chain the tools into one fixed report:
 
 | Command | Arguments | What it does |
 |---|---|---|
@@ -96,6 +96,7 @@ Five ready-made workflows chain the tools into one fixed report:
 | `update-import-safely` | xer_path, project | Inspects the XER, dry-runs the update import, reviews missing rows, applies it only on your yes |
 | `delay-whatif` | project, task_code, delay_days (10) | Drivers and float origin of an activity, then the finish and milestone impact of a delay (in memory) |
 | `baseline-variance` | project, baseline | Finish variance, slipped activities, logic changes, SPI at the data date |
+| `export-dashboard` | project, path, baseline, prepared_by, revision, company, colors | Checks the last F9, writes the Excel dashboard, then reports its 7 cards, failed DCMA checks and warnings |
 
 They need the Full tool profile (the import also needs writes). The server offers them as MCP prompts:
 Claude Desktop lists them in the **+** menu, VS Code as `/mcp.p6mcp.<name>`, Claude Code as

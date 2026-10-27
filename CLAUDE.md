@@ -149,7 +149,7 @@ stay outside this repository.
   the network or start an installer in tests.
 - Public repository: https://github.com/nizarhamza/p6-mcp (Apache 2.0, Copyright 2026 Nizar Hamza; LICENSE,
   NOTICE, SECURITY.md, CHANGELOG.md, issue templates; README screenshots in `docs/images`, rendered from the
-  synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release; 1.0.1 = fixes of the 2026-10-20 server review; 1.1.0 = assignment units tools and the XER export of schedule options; 1.2.0 = UDF tools (list, filter and columns, set and clear activity values); 1.3.0 = automatic updates; 1.6.0 = Excel dashboard (`p6_export_dashboard`).
+  synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release; 1.0.1 = fixes of the 2026-10-20 server review; 1.1.0 = assignment units tools and the XER export of schedule options; 1.2.0 = UDF tools (list, filter and columns, set and clear activity values); 1.3.0 = automatic updates; 1.6.0 = Excel dashboard (`p6_export_dashboard`); 1.7.0 = `export-dashboard` command (dashboard result gives `cards` and `dcma_failed`).
 
 ## Running
 

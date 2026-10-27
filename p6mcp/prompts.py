@@ -159,6 +159,42 @@ planned against earned at the data date; a short conclusion on the recovery need
 baseline, say so and stop.
 
 {rules}"""),
+    Command(
+        "export-dashboard", "Excel dashboard",
+        "Excel project controls dashboard of a project (one A3 page and detail sheets), then a short "
+        "summary of its figures (the database is never written).",
+        (PROJECT, Arg("path", "Full path of the .xlsx file to write"),
+         Arg("baseline", "Project ID of the baseline (empty = the project baseline)", ""),
+         Arg("prepared_by", "Name printed under the title", ""),
+         Arg("revision", "Revision printed under the title", ""),
+         Arg("company", "Company name in the sidebar", ""),
+         Arg("colors", "Colors 'primary,accent' in hex, for example 1F3864,C00000", "")),
+        """Excel dashboard of project {project}, written to {path}.
+
+Optional values: baseline "{baseline}" (empty = the project baseline), prepared_by "{prepared_by}",
+revision "{revision}", company "{company}", colors "{colors}". Leave every empty one out of the calls
+below.
+
+Steps:
+1. p6_project_summary(project="{project}", baseline="{baseline}"): data date, last schedule run,
+   baseline and schedule_state. If the schedule is stale or was edited since the last schedule, say so
+   and ask the user whether to export anyway or to press F9 in P6 first; wait for the answer. Without a
+   baseline, say that the delayed count, the variance cards and the baseline bars will stay empty.
+2. p6_export_dashboard(project="{project}", path="{path}", baseline="{baseline}",
+   prepared_by="{prepared_by}", revision="{revision}", company="{company}", colors="{colors}"): writes
+   the workbook (the database is never written). If a file already exists at that path the call is
+   refused: ask the user whether to replace it, and only on a yes repeat it with overwrite=true. If the
+   file is open in Excel, ask the user to close it, then run this step again.
+3. Read the result: path, sheets (rows per sheet), counts, cards, dcma_failed, warnings.
+
+Report: the file path; the 7 cards with their value and detail, as written on the Dashboard; the
+numbers of activities, WBS nodes, milestones and critical activities; the DCMA checks that fail (or
+that all pass); every warning. End with how to use the file: the Dashboard prints on one A3 landscape
+page and is protected without a password; the Schedule Overview opens folded to WBS level 2 (outline
+buttons unfold it); the Critical Path sheet lists the P6 float paths of the last F9 (when P6 stored
+none, the near critical activities grouped by total float).
+
+{rules}"""),
 )
 BY_NAME = {c.name: c for c in COMMANDS}
 
