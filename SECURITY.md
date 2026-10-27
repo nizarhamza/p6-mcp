@@ -18,6 +18,7 @@ you allow it, its write tools change that database **directly, without P6's own 
 | `p6_restore_backup` | replaces the database with one of its backups (a safety copy is taken first) |
 | `p6_backup_database` | writes a copy of the database to the backup folder |
 | `p6_export_xer` | writes an XER file (refuses to overwrite an existing file unless asked) |
+| `p6_export_dashboard` | writes an Excel (.xlsx) dashboard file (refuses to overwrite an existing file unless asked) |
 
 Planned, early and late dates and float are never written: P6 recalculates them (press F9).
 

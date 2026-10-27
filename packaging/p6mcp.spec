@@ -22,7 +22,9 @@ for dist in ("mcp", "pydantic", "pydantic_core", "uvicorn", "starlette", "anyio"
 gui_datas = datas + [(ICON, os.path.join("assets", "brand", "ico")),
                      (os.path.join(BRAND, "png", "p6mcp-icon-*.png"), os.path.join("assets", "brand", "png")),
                      (os.path.join(BRAND, "png", "p6mcp-lockup*.png"), os.path.join("assets", "brand", "png"))]
+# openpyxl: imported on use by p6_export_dashboard (inside functions), collected explicitly
 hidden = (collect_submodules("mcp") + collect_submodules("uvicorn") + collect_submodules("keyring.backends")
+          + collect_submodules("openpyxl")
           + ["win32ctypes.core", "p6mcp.server", "p6mcp.http_server", "p6mcp.clients.__main__", "p6mcp.setup_cli"])
 excl = ["tkinter", "matplotlib", "numpy", "pytest", "PyInstaller"]
 

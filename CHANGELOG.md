@@ -3,6 +3,24 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-10-27
+
+### Added
+
+- `p6_export_dashboard` (Full profile): an Excel project controls dashboard of one project, built by the
+  server (no template file): a protected one-page A3 Dashboard sheet with 7 cards, the S-curve, the finish
+  variance of each level 1 WBS in working days (colored Delayed, At risk, On track), WBS progress (level 1)
+  and level 2 progress against the baseline planned units at the data date, the milestones and the critical
+  and delayed activities; a Schedule Overview sheet with every activity under WBS bands (opens folded to
+  level 2); the P6 float paths; the DCMA 14 checks with sources and definitions. Values of the last F9,
+  native Excel charts, no formulas. Company name and colors are arguments of the export (nothing is
+  stored); an existing file is replaced only with `overwrite=True`.
+- `p6_diagnose` reports the openpyxl version used by the dashboard.
+
+### Changed
+
+- New dependency: openpyxl (bundled in the installer and the portable zip).
+
 ## [1.5.1] - 2026-10-21
 
 ### Fixed
@@ -154,6 +172,7 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[1.6.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.6.0
 [1.5.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.5.1
 [1.5.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.5.0
 [1.4.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.4.1

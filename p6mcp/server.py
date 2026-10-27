@@ -48,6 +48,7 @@ import difflib
 import functools
 import html
 import inspect
+import itertools
 import json
 import math
 import os
@@ -221,6 +222,7 @@ WindowDays = Annotated[int, Field(ge=1, le=366, description="Window length in ca
 WindowWeeks = Annotated[int, Field(ge=1, le=52, description="Window length in weeks (max 52).")]
 FloatEdges = Annotated[list[float], Field(min_length=1, description="Bucket edges in days, increasing; 0 is always added.")]
 ProjectIds = Annotated[list[ProjectId], Field(description="Project IDs (earlier updates of the same schedule).")]
+ActivityIds = Annotated[list[ActivityId], Field(description="Activity IDs (task_code).")]
 SchedValues = Annotated[dict[str, Any], Field(description="Option name -> value (names as p6_schedule_options shows them).")]
 LevelPriority = Annotated[list[str], Field(description="Leveling priorities, 'field:ASC' or 'field:DESC', e.g. ['priority_type:ASC'].")]
 class _NewEpsKeys(TypedDict):
@@ -5596,6 +5598,7 @@ def p6_diagnose() -> dict:
         "tools_listed": len(LISTED),
         "restart_required": now_listed != LISTED,
         "p6_running": _p6_running(),
+        "openpyxl": _openpyxl_version(),  # p6_export_dashboard needs it (None: not installed)
     }
     if out["restart_required"]:
         out["restart_note"] = ("The tool profile or the write permission changed since the server started: restart "
@@ -8447,10 +8450,11 @@ def p6_export_xer(project: ProjectId, path: str, tables: Optional[list[XerTable]
         return _export_xer(con, project, path, tables, xer_version)
 
 
-def _export_target(path: str) -> str:
-    """Absolute export path: a .xer file in an existing folder (never the database, a backup or a log)."""
-    if not path or not path.lower().endswith(".xer"):
-        raise ValueError(f"Export path must end with .xer: {path!r}")
+def _export_target(path: str, ext: str = ".xer") -> str:
+    """Absolute export path: a file ending with ext (.xer, .xlsx) in an existing folder (never the
+    database, a backup or a log)."""
+    if not path or not path.lower().endswith(ext):
+        raise ValueError(f"Export path must end with {ext}: {path!r}")
     path = os.path.abspath(path)
     if not os.path.isdir(os.path.dirname(path)):
         raise ValueError(f"Folder not found: {os.path.dirname(path)!r}")
@@ -8582,6 +8586,1063 @@ def _cp1252_ok(v: str) -> bool:
         return True
     except UnicodeEncodeError:
         return False
+
+
+# ----------------------------------------------------------------- dashboard export (Excel)
+# p6_export_dashboard gathers the report tools' results (each from its own snapshot: the data date and
+# the last F9 are compared at the start and the end) and writes a workbook built by _dash_book with
+# openpyxl, imported on use so the server runs without it. The template is this code: sheets are sized
+# to the data, values are written as values (the file is regenerated at every update) and charts are
+# native Excel charts.
+
+DASH_WBS_ROWS = 5000  # WBS bands of the Schedule Overview sheet
+DASH_MILESTONES = 30  # milestones listed without milestones= (every milestone, in date order)
+DASH_MILESTONES_MAX = 50  # Activity IDs milestones= accepts
+DASH_PANEL_MILESTONES = 11  # milestones on the one-page dashboard
+DCMA_LABELS = {"logic": "Logic (no predecessor or successor)", "leads": "Leads (negative lags)", "lags": "Lags",
+               "long_lags": "Long lags", "fs_links": "Finish to start links", "hard_constraints": "Hard constraints",
+               "high_float": "High float", "negative_float": "Negative float", "high_duration": "High duration",
+               "invalid_dates": "Invalid dates", "resources": "Resources", "missed_tasks": "Missed tasks",
+               "critical_path_test": "Critical path test", "cpli": "Critical path length index (CPLI)",
+               "bei": "Baseline execution index (BEI)", "key_dates": "Key dates (information only)"}
+# Colors (RGB): text, rules, headers; float classes (told apart by lightness too, always labeled); tints
+# for cells; good status.
+DASH_INK, DASH_MUTED, DASH_RULE, DASH_HEAD = "1F2937", "6B7280", "D1D5DB", "1F3A5F"
+DASH_FLOAT = {"neg": "B2182B", "near": "E69F00", "ok": "0072B2"}  # negative, 0 to near_critical_days, above
+DASH_TINT = {"neg": "F6D5D9", "near": "FCEBC7", "ok": "D6E7F3", "pass": "DCEFE2", "fail": "F6D5D9", "na": "EEF0F3"}
+DASH_GOOD = "1B7F3B"
+# Sheets in order, with the sidebar glyph of each (Segoe UI Symbol); the Dashboard sidebar links to the others
+DASH_SHEETS = ("Dashboard", "Schedule Overview", "Critical Path", "Reports")
+DASH_NAV = {"Dashboard": "⌂", "Schedule Overview": "▤", "Critical Path": "◎", "Reports": "▥"}
+DASH_ACT_CAP = 20000  # activities of the Schedule Overview sheet
+DASH_TABLE_ROWS = 12  # critical and delayed activities on the Dashboard sheet
+DASH_PAGE = "F3F5F8"  # page background of the Dashboard sheet (cards and panels are white)
+DASH_STATUS = {"Delayed": "B2182B", "At risk": "E69F00", "On track": "009E73", "Completed": "9CA3AF"}  # finish variance
+DASH_SO_LEVEL = 2  # the Schedule Overview opens folded to the WBS bands of this level (activities hidden)
+DASH_WBS_BARS = 20  # WBS per progress chart of the Dashboard (more: the ones with the most budget units)
+DASH_PILL = {"Critical": ("F6D5D9", "B2182B"), "Delayed": ("FCEBC7", "8A5300"), "At risk": ("FDF3D7", "8A5300"),
+             "On track": ("DCEFE2", "1B7F3B"), "Completed": ("EEF0F3", "4B5563"), "No baseline": ("EEF0F3", "4B5563")}
+
+
+def _openpyxl():
+    """The openpyxl module (a dependency, imported on use), or a ValueError saying how to get it back."""
+    try:
+        import openpyxl
+    except ImportError:
+        if getattr(sys, "frozen", False):
+            raise ValueError("p6_export_dashboard needs the openpyxl package, missing from this P6 MCP build: "
+                             "reinstall P6 MCP") from None
+        raise ValueError(f"p6_export_dashboard needs the openpyxl package: run '\"{sys.executable}\" -m pip install "
+                         "openpyxl', then restart the server") from None
+    return openpyxl
+
+
+def _openpyxl_version() -> Optional[str]:
+    try:
+        return _openpyxl().__version__
+    except ValueError:
+        return None
+
+
+def _dash_brand(company: Optional[str] = None, colors: Optional[str] = None) -> dict:
+    """Dashboard branding from the export's own arguments (nothing is stored): company name (at most
+    120 characters) and colors 'primary[,accent]' in hex, else the defaults. Raises before anything is
+    written when a value cannot be used."""
+    name = (str(company).strip() or None) if company is not None else None
+    if name and len(name) > 120:
+        raise ValueError("company: at most 120 characters")
+    out: dict[str, Any] = {"company": name, "primary": DASH_HEAD, "accent": "0072B2"}
+    cols = [c.strip().lstrip("#") for c in str(colors or "").split(",") if c.strip()]
+    if len(cols) > 2:
+        raise ValueError("colors: at most two hex colors, 'primary,accent' (e.g. '1F3A5F,0072B2')")
+    for key, c in zip(("primary", "accent"), cols):
+        if not re.fullmatch(r"[0-9A-Fa-f]{6}", c):
+            raise ValueError(f"colors: {c!r} is not a hex color such as 1F3A5F")
+        out[key] = c.upper()
+    return out
+
+
+def _ink_on(color: str) -> str:
+    """Text color for a fill: white or the ink color, whichever contrasts more (WCAG luminance)."""
+    def lum(c: str) -> float:
+        ch = [int(c[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        ch = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in ch]
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+    fill = lum(color)
+    return "FFFFFF" if 1.05 / (fill + 0.05) >= (fill + 0.05) / (lum(DASH_INK) + 0.05) else DASH_INK
+
+
+def _all_rows(fn: Callable[..., dict], cap: int, **kw) -> tuple[dict, list[dict], bool]:
+    """Rows of every page of a list tool, up to cap: (first page, rows, cut at cap)."""
+    first = res = fn(offset=0, limit=MAX_ROWS, **kw)
+    rows = list(res["rows"])
+    while res["next_offset"] is not None and len(rows) < cap:
+        res = fn(offset=res["next_offset"], limit=MAX_ROWS, **kw)
+        rows += res["rows"]
+    return first, rows[:cap], len(rows) > cap or res["next_offset"] is not None
+
+
+def _dash_read(con, pid: int, bid: Optional[int], codes: Optional[Sequence[str]], baseline_dates: str) -> dict:
+    """What the dashboard reads itself, in the caller's snapshot: the project and baseline dates; every
+    activity (baseline dates of the baseline activity with the same Activity ID, slip in working days of
+    its own calendar, % complete by its percent complete type, labor units, original, remaining and
+    actual durations, P6 float path); every WBS node in P6 order with its units % (as p6_list_wbs), the
+    baseline planned units % at the data date, the finish variance (latest baseline finish to latest
+    finish of its activities) and the band values of its activities and of the WBS below it (dates,
+    labor units, % complete; finish variance and durations in working days of the project calendar); the
+    milestones (milestones= codes, else every milestone) with their baseline date and variance; the
+    project figures in working days of the project calendar."""
+    al = functools.partial(_alive, con)
+    pc = _cols(con, "PROJECT")
+    pf = ("proj_short_name", "last_recalc_date", "last_schedule_date", "scd_end_date", "plan_end_date", "clndr_id")
+
+    def proj(p: int) -> dict:
+        return _dict(con.execute("SELECT " + ", ".join(c if c in pc else f"NULL AS {c}" for c in pf)
+                                 + " FROM PROJECT WHERE proj_id = ?", (p,)).fetchone())
+    prj, base = proj(pid), proj(bid) if bid is not None else None
+    cals, wd_notes = _calendars(con), set()
+    pcal = cals.get(prj["clndr_id"]) if prj["clndr_id"] is not None else None
+
+    def wd(cal: Optional[_Cal], a: Optional[datetime], b: Optional[datetime]) -> Optional[float]:
+        """Working days from a to b (negative when b is earlier), 1 decimal; calendar days when the
+        calendar is missing or unreadable (noted)."""
+        if a is None or b is None:
+            return None
+        if cal is None or cal.error:
+            wd_notes.add("a calendar is missing or unreadable: calendar days used instead of working days there")
+            return round((b - a).total_seconds() / 86400, 1)
+        return round(cal.work_days(a, b), 1) + 0.0  # + 0.0: -0.0 becomes 0.0
+    sep = _name_sep(con, pid)
+    nodes = _wbs_tree(con, pid, sep)
+    if not nodes:
+        raise ValueError(f"Project {prj['proj_short_name']} has no project WBS node.")
+    own = {r["wbs_id"]: {k: r[k] for k in r.keys() if k != "wbs_id"} for r in con.execute(
+        f"SELECT t.wbs_id AS wbs_id, {_act_agg_sql(con)} FROM TASK t LEFT JOIN CALENDAR c ON c.clndr_id = t.clndr_id "
+        "WHERE t.proj_id = ?" + al("TASK", "t") + " GROUP BY t.wbs_id", (pid,))}
+
+    def bdate(x: str, kind: str) -> str:  # baseline date: actual else early ('current'), or planned
+        return (f"COALESCE({x}.act_{kind}_date, {x}.early_{kind}_date)" if baseline_dates == "current"
+                else f"{x}.target_{kind}_date")
+    bl_finish, bl_act = None, {}  # baseline project finish (its latest activity date); dates by Activity ID
+    if bid is not None:
+        bl_finish = _db_dt(con.execute(f"SELECT MAX({bdate('x', 'end')}) FROM TASK x WHERE x.proj_id = ?" + al("TASK", "x"),
+                                       (bid,)).fetchone()[0])
+        bl_act = {r[0]: (_db_dt(r[1]), _db_dt(r[2])) for r in con.execute(
+            f"SELECT x.task_code, {bdate('x', 'start')}, {bdate('x', 'end')} FROM TASK x WHERE x.proj_id = ?"
+            + al("TASK", "x") + " ORDER BY x.task_id DESC", (bid,))}  # lowest task_id wins
+    dd = _db_dt(prj["last_recalc_date"])
+    top = nodes[0]["wbs_code"]
+    code_of = {n["wbs_id"]: n["wbs_code"][len(top) + len(sep):] if n["depth"] else top for n in nodes}
+    acts = []
+    for r in con.execute(_act_from(con) + " ORDER BY COALESCE(t.act_start_date, t.early_start_date), t.task_code, "
+                         "t.task_id", (pid,)):
+        a = _dict(r)
+        num = lambda k: float(a.get(k) or 0)  # noqa: E731
+        bs, bf = bl_act.get(a["task_code"], (None, None))
+        s_act, f_act = _db_dt(a["act_start_date"]), _db_dt(a["act_end_date"])
+        f = f_act or _db_dt(a["early_end_date"])
+        done = a["status_code"] == "TK_Complete"
+        orig_h, rem_h = num("target_drtn_hr_cnt"), num("remain_drtn_hr_cnt")
+        kind = a.get("complete_pct_type")  # the activity's % complete as P6 shows it, by its percent complete type
+        if kind == "CP_Drtn":
+            pct = 100 * (orig_h - rem_h) / orig_h if orig_h else 100.0 * done
+        elif kind == "CP_Units":
+            at = sum(num(f"{k}_{u}_qty") for k in ("act", "remain") for u in ("work", "equip"))
+            pct = 100 * (num("act_work_qty") + num("act_equip_qty")) / at if at else 100.0 * done
+        else:
+            pct = num("phys_complete_pct")
+        end = f_act or dd
+        acts.append({"task_code": a["task_code"], "task_name": a["task_name"], "task_type": a["task_type"],
+                     "status_code": a["status_code"], "wbs_id": a["wbs_id"], "wbs_name": a["wbs_name"],
+                     "wbs_code": code_of.get(a["wbs_id"]), "start": _db_dt(a["act_start_date"] or a["early_start_date"]),
+                     "finish": f, "bl_start": bs, "bl_finish": bf, "slip_d": wd(cals.get(a["clndr_id"]), bf, f),
+                     "act_start": s_act, "act_finish": f_act, "plan_start": _db_dt(a["target_start_date"]),
+                     "plan_finish": _db_dt(a["target_end_date"]), "pct": round(min(100.0, max(0.0, pct)), 2),
+                     "lab_t": num("target_work_qty"), "lab_a": num("act_work_qty"), "lab_r": num("remain_work_qty"),
+                     "orig_h": orig_h, "rem_h": rem_h, "orig_d": _days(a["target_drtn_hr_cnt"], a["hpd"]),
+                     "rem_d": _days(a["remain_drtn_hr_cnt"], a["hpd"]),
+                     "act_d": max(0.0, wd(cals.get(a["clndr_id"]), s_act, end)) if s_act and end else None,
+                     "tf_d": _days(a["total_float_hr_cnt"], a["hpd"]) if not done else None,
+                     "longest": a.get("driving_path_flag") == "Y", "float_path": a.get("float_path"),
+                     "float_path_order": a.get("float_path_order")})
+    # baseline planned units at the data date per WBS (baseline assignments by the Activity ID of the current
+    # activities, linear between their planned dates as p6_progress_curve), rolled up below
+    bpl: dict[int, dict] = {}
+    if bid is not None and dd is not None and _cols(con, "TASKRSRC"):
+        wbs_of = {a["task_code"]: a["wbs_id"] for a in acts}
+        rtype = "COALESCE(tr.rsrc_type, r.rsrc_type)" if "rsrc_type" in _cols(con, "TASKRSRC") else "r.rsrc_type"
+        for code, q, s, e in con.execute(
+                "SELECT x.task_code, COALESCE(tr.target_qty, 0), tr.target_start_date, tr.target_end_date FROM TASKRSRC tr "
+                "JOIN TASK x ON x.task_id = tr.task_id LEFT JOIN RSRC r ON r.rsrc_id = tr.rsrc_id" + al("RSRC", "r")
+                + f" WHERE x.proj_id = ? AND {rtype} IN ('RT_Labor', 'RT_Equip')" + al("TASKRSRC", "tr") + al("TASK", "x"),
+                (bid,)):
+            w = wbs_of.get(code)
+            if w is None or not q:
+                continue
+            s, e = _db_dt(s), _db_dt(e)
+            acc = bpl.setdefault(w, {"bl_plan": 0.0, "bl_budget": 0.0})
+            acc["bl_budget"] += float(q)
+            if s and e:
+                acc["bl_plan"] += _value_at([(float(q), s, max(s, e))], dd)
+    # band values of every WBS: its activities and the WBS below it
+    lows, highs = ("bl_s", "s", "as", "ps", "os"), ("bl_f", "f", "af", "pf", "of")
+
+    def merge(acc: dict, part: Mapping) -> dict:  # minimum or maximum of dates, sum of the rest; None ignored
+        for k, v in part.items():
+            if v is not None:
+                a0 = acc.get(k)
+                acc[k] = v if a0 is None else min(a0, v) if k in lows else max(a0, v) if k in highs else a0 + v
+        return acc
+    band_own: dict[int, dict] = {}
+    for a in acts:
+        is_open = a["status_code"] != "TK_Complete"
+        merge(band_own.setdefault(a["wbs_id"], {}), {
+            "n": 1, "done": 0 if is_open else 1, "bl_s": a["bl_start"], "bl_f": a["bl_finish"], "s": a["start"],
+            "f": a["finish"], "as": a["act_start"], "af": a["act_finish"], "ps": a["plan_start"], "pf": a["plan_finish"],
+            "os": a["start"] if is_open else None, "of": a["finish"] if is_open else None, "lt": a["lab_t"],
+            "la": a["lab_a"], "lr": a["lab_r"], "oh": a["orig_h"], "rh": a["rem_h"]})
+    ids = {n["wbs_id"] for n in nodes}
+    roll: dict[int, dict] = {}
+    proll: dict[int, dict] = {}
+    band: dict[int, dict] = {}
+    for n in reversed(nodes):  # descendants first
+        w, par = n["wbs_id"], n["parent_wbs_id"]
+        roll[w] = _merge_agg(roll.get(w, {}), own.get(w, {}))
+        proll[w] = _merge_agg(proll.get(w, {}), bpl.get(w, {}))
+        band[w] = merge(band.get(w, {}), band_own.get(w, {}))
+        if par in ids:
+            roll[par] = _merge_agg(roll.get(par, {}), roll[w])
+            proll[par] = _merge_agg(proll.get(par, {}), proll[w])
+            band[par] = merge(band.get(par, {}), band[w])
+    rows = []
+    for n in nodes:
+        r, pl, b = _rollup(roll[n["wbs_id"]]), proll[n["wbs_id"]], band[n["wbs_id"]]
+        n_, all_done = b.get("n", 0), b.get("n", 0) and b.get("done", 0) == b.get("n", 0)
+        lab, oh = b.get("la", 0) + b.get("lr", 0), b.get("oh", 0)
+        os_ = max(b["os"], dd) if b.get("os") and dd else b.get("os")
+        rows.append({"wbs_id": n["wbs_id"], "depth": n["depth"], "code": code_of[n["wbs_id"]], "name": n["wbs_name"],
+                     "units_pct": r["units_pct"], "budget_units": r["budget_units"],
+                     "bl_planned_pct": round(100 * pl["bl_plan"] / pl["bl_budget"], 2) if pl.get("bl_budget") else None,
+                     "finish_var_d": wd(pcal, b.get("bl_f"), b.get("f")), "all_done": bool(all_done),
+                     "band": {"activities": n_, "bl_start": b.get("bl_s"), "bl_finish": b.get("bl_f"), "start": b.get("s"),
+                              "finish": b.get("f"), "act_start": b.get("as"), "act_finish": b.get("af") if all_done else None,
+                              "pct": (round(100 * b["la"] / lab, 2) if lab else round(100 * (oh - b.get("rh", 0)) / oh, 2)
+                                      if oh else 100.0 if all_done else None) if n_ else None,
+                              "lab_t": b.get("lt"), "lab_a": b.get("la"), "lab_r": b.get("lr"),
+                              "orig_d": wd(pcal, b.get("ps"), b.get("pf")),
+                              "rem_d": max(0.0, wd(pcal, os_, b["of"])) if os_ and b.get("of") else 0.0 if n_ else None,
+                              "act_d": max(0.0, wd(pcal, b["as"], b.get("af") if all_done else dd))
+                              if b.get("as") and (all_done or dd) else None}})
+    cut = len(rows) > DASH_WBS_ROWS
+    q, args = _act_from(con), [pid]
+    if codes:
+        q += f" AND t.task_code IN ({', '.join('?' * len(codes))})"
+        args += list(codes)
+    else:
+        q += " AND t.task_type IN ('TT_Mile', 'TT_FinMile')"
+    found: dict[str, dict] = {}
+    for r in con.execute(q + " ORDER BY t.task_code, t.task_id", args):
+        found.setdefault(r["task_code"], _dict(r))
+    if codes and set(codes) - set(found):
+        raise ValueError(f"Activity IDs not found in {prj['proj_short_name']}: {sorted(set(codes) - set(found))}")
+
+    def mdate(m: Mapping, planned: bool = False) -> Optional[datetime]:  # the milestone's one date
+        kind = "start" if m["task_type"] == "TT_Mile" else "end"
+        return _db_dt(m[f"target_{kind}_date"] if planned else m[f"act_{kind}_date"] or m[f"early_{kind}_date"])
+    ms = sorted(found.values(), key=lambda m: (mdate(m) or datetime.max, m["task_code"]))
+    ms_note = None
+    if not codes and len(ms) > DASH_MILESTONES:
+        ms_note = f"{len(ms)} milestones: the first {DASH_MILESTONES} by date are shown (pass milestones= to choose)."
+        ms = ms[:DASH_MILESTONES]
+    bl: dict[str, dict] = {}
+    if bid is not None and ms:
+        bl = {r["task_code"]: _dict(r) for r in con.execute(
+            "SELECT task_code, act_start_date, act_end_date, early_start_date, early_end_date, target_start_date, "
+            f"target_end_date FROM TASK WHERE proj_id = ? AND task_code IN ({', '.join('?' * len(ms))})" + al("TASK")
+            + " ORDER BY task_id DESC", [bid, *(m["task_code"] for m in ms)])}
+    out_ms = []
+    for m in ms:
+        cur, b = mdate(m), bl.get(m["task_code"])
+        bd = mdate({**b, "task_type": m["task_type"]}, baseline_dates == "planned") if b else None
+        out_ms.append({"task_code": m["task_code"], "task_name": m["task_name"], "task_type": m["task_type"],
+                       "status_code": m["status_code"], "date": cur, "baseline": bd,
+                       "variance_d": wd(cals.get(m["clndr_id"]), bd, cur),
+                       "total_float_d": _days(m["total_float_hr_cnt"], m["hpd"])})
+    scd, must = (_db_dt(prj[k]) for k in ("scd_end_date", "plan_end_date"))
+    kpi = {"vs_must_d": wd(pcal, must, scd), "vs_baseline_d": wd(pcal, bl_finish, scd),
+           "remaining_d": max(0.0, wd(pcal, dd, scd)) if dd and scd else None}
+    return {"project": prj, "baseline": base, "bl_finish": bl_finish, "rows": rows[:DASH_WBS_ROWS], "rows_cut": cut,
+            "milestones": out_ms, "ms_note": ms_note, "calendar": pcal.name if pcal else None,
+            "hpd": pcal.hpd if pcal else 8.0, "kpi": kpi, "acts": acts, "wd_notes": sorted(wd_notes)}
+
+
+def _dash_book(d: dict) -> tuple[Any, dict]:
+    """The dashboard workbook (openpyxl) of what p6_export_dashboard gathered, and the data rows
+    written per sheet. Sheets in DASH_SHEETS order; the Dashboard sheet (fixed objects, protected) has
+    a sidebar of links to the others, which link back to it."""
+    from openpyxl import Workbook
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
+    from openpyxl.chart import BarChart, LineChart, Reference
+    from openpyxl.chart.axis import ChartLines
+    from openpyxl.chart.label import DataLabelList
+    from openpyxl.chart.marker import DataPoint
+    from openpyxl.chart.shapes import GraphicalProperties
+    from openpyxl.drawing.line import LineProperties
+    from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
+    from openpyxl.formatting.rule import DataBarRule
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Side
+    from openpyxl.utils import get_column_letter as letter
+    from openpyxl.utils.units import pixels_to_EMU
+    from openpyxl.worksheet.hyperlink import Hyperlink
+    from openpyxl.worksheet.page import PageMargins
+
+    DATE, DAYS, SIGNED, PCT = "dd-mmm-yy", "0.0", "+0.0;-0.0;0.0", '0.0"%"'
+    near, rd, st, hc, sm = d["near"], d["rd"], d["state"], d["hc"], d["summary"]
+    dd = _db_dt(rd["project"]["last_recalc_date"])
+    lsd = _db_dt(rd["project"]["last_schedule_date"])
+    bname = rd["baseline"]["proj_short_name"] if rd["baseline"] else None
+    counts: dict[str, int] = {}
+    fills: dict[str, Any] = {}
+    wb = Workbook()
+    wb.properties.creator = "P6 MCP server"
+    wb.properties.title = f"{d['project']} project controls dashboard"
+    sheets = {DASH_SHEETS[0]: wb.active}
+    sheets[DASH_SHEETS[0]].title = DASH_SHEETS[0]
+    for n in DASH_SHEETS[1:]:
+        sheets[n] = wb.create_sheet(n)
+    brand = d["brand"]
+    head, accent = brand["primary"], brand["accent"]  # headers, sidebar and dark bars; S-curve actual line
+    head_ink = _ink_on(head)
+    sheets[DASH_SHEETS[0]].sheet_properties.tabColor = head
+    crit, acts, ms = d["crit"], rd["acts"], rd["milestones"]
+
+    def fclass(tf: Optional[float]) -> Optional[str]:
+        return None if tf is None else "neg" if tf < 0 else "near" if tf <= near else "ok"
+
+    def late(v: Optional[float]) -> str:  # a slip in working days against the baseline
+        return "No baseline" if v is None else "Delayed" if v > near else "At risk" if v > 0 else "On track"
+
+    def act_status(a: Mapping) -> str:  # Completed, Critical (project definition), else by the slip
+        return "Completed" if a["status_code"] == "TK_Complete" else "Critical" if a["task_code"] in crit else late(a["slip_d"])
+
+    def fill(color: str):
+        if color not in fills:
+            fills[color] = PatternFill("solid", fgColor=color)
+        return fills[color]
+
+    def mix(color: str, f: float) -> str:  # color moved toward white by f (0 to 1)
+        return "".join(f"{round(int(color[i:i + 2], 16) + (255 - int(color[i:i + 2], 16)) * f):02X}" for i in (0, 2, 4))
+
+    def put(ws, r: int, c: int, v, fmt: Optional[str] = None, bold: bool = False, size: float = 10,
+            color: str = DASH_INK, bg: Optional[str] = None, h: Optional[str] = None, wrap: bool = False, indent: int = 0,
+            valign: str = "center", font: str = "Calibri"):
+        if isinstance(v, str):
+            v = ILLEGAL_CHARACTERS_RE.sub("", v)[:32000]
+        cell = ws.cell(row=r, column=c, value=v)
+        if isinstance(v, str) and v.startswith("="):
+            cell.data_type = "s"  # text from the database, never a formula
+        cell.font = Font(name=font, size=size, bold=bold, color=color)
+        cell.alignment = Alignment(horizontal=h, vertical=valign, wrap_text=wrap, indent=indent)
+        if fmt:
+            cell.number_format = fmt
+        if bg:
+            cell.fill = fill(bg)
+        return cell
+
+    def merged(ws, r: int, c0: int, c1: int, v, r1: Optional[int] = None, **kw):
+        if c1 > c0 or (r1 or r) > r:
+            ws.merge_cells(start_row=r, start_column=c0, end_row=r1 or r, end_column=c1)
+        return put(ws, r, c0, v, **kw)
+
+    def rich(*parts: tuple) -> Any:  # (text, color, symbol font?, bold?, size) blocks in one cell
+        return CellRichText(*(TextBlock(InlineFont(rFont="Segoe UI Symbol" if sym else "Calibri", sz=size, b=bold or None,
+                                                   color=color), text) for text, color, sym, bold, size in parts))
+
+    def link(ws, r: int, c: int, text: str, sheet: str, color: str = "0563C1", size: float = 9) -> None:
+        cell = put(ws, r, c, text, size=size, color=color)
+        cell.font = Font(name="Calibri", size=size, color=color, underline="single")
+        cell.hyperlink = Hyperlink(ref=cell.coordinate, location=f"'{sheet}'!A1", display=text)
+
+    def top(ws, title: str, sub: Optional[str] = None) -> None:
+        put(ws, 1, 1, title, bold=True, size=14)
+        if sub:
+            put(ws, 2, 1, sub, color=DASH_MUTED)
+        ws.row_dimensions[1].height = 22
+        link(ws, 3, 1, "Back to the Dashboard", DASH_SHEETS[0])
+
+    def header(ws, r: int, c0: int, labels: Sequence[str], widths: Optional[Sequence[float]] = None) -> None:
+        for i, lab in enumerate(labels):
+            put(ws, r, c0 + i, lab, bold=True, size=9, color=head_ink, bg=head, h="center", wrap=True)
+            if widths:
+                ws.column_dimensions[letter(c0 + i)].width = widths[i]
+        ws.row_dimensions[r].height = 30
+
+    def page(ws, one_page: bool = False, title_rows: Optional[str] = None) -> None:
+        ws.page_setup.orientation = "landscape"
+        ws.page_setup.paperSize = ws.PAPERSIZE_A3
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 1 if one_page else 0
+        ws.page_margins = PageMargins(left=0.4, right=0.4, top=0.5, bottom=0.5)
+        if title_rows:
+            ws.print_title_rows = title_rows
+
+    def section(ws, r: int, c0: int, c1: int, text: str) -> None:
+        put(ws, r, c0, text, bold=True, size=11)
+        for c in range(c0, c1 + 1):
+            ws.cell(r, c).border = Border(bottom=Side(style="thin", color=DASH_RULE))
+
+    def axes(ch, legend: str = "b") -> None:
+        ch.roundedCorners = False
+        ch.x_axis.delete = False
+        ch.y_axis.delete = False
+        ch.y_axis.majorGridlines = ChartLines(spPr=GraphicalProperties(ln=LineProperties(solidFill="E5E7EB")))
+        ch.x_axis.majorGridlines = None
+        if legend:
+            ch.legend.position = legend
+            ch.legend.overlay = False  # Excel overlays the plot when the flag is missing
+        else:
+            ch.legend = None
+
+    def borderless(ch) -> Any:  # a chart inside a white panel: no frame of its own
+        ch.graphical_properties = GraphicalProperties(ln=LineProperties(noFill=True))
+        return ch
+
+    def values_only():  # data labels with the value alone (Excel adds series and category names otherwise)
+        return DataLabelList(showVal=True, showSerName=False, showCatName=False, showLegendKey=False,
+                             showPercent=False, showBubbleSize=False, dLblPos="outEnd")
+
+    def line(s, color: str, width: float = 2.0, dash: Optional[str] = None) -> None:
+        s.graphicalProperties.line.solidFill = color
+        s.graphicalProperties.line.width = int(width * 12700)  # points to EMU
+        if dash:
+            s.graphicalProperties.line.dashStyle = dash
+        s.smooth = False
+        s.marker.symbol = "none"
+
+    def bars(s, color: str) -> None:
+        s.graphicalProperties = GraphicalProperties(solidFill=color)
+        s.graphicalProperties.line.solidFill = color
+        s.invertIfNegative = False  # a negative bar keeps its color
+
+    def col_px(width: float) -> int:  # pixels of a column of that width (Calibri 11: 7 px per character)
+        return int((256 * width + int(128 / 7)) / 256 * 7)
+
+    def row_px(height: Optional[float]) -> int:  # pixels of a row of that height in points (Excel rounds down)
+        return int((height or 15) * 4 / 3 + 1e-9)
+
+    def act_label(code: str, name: Optional[str]) -> str:
+        return f"{code} - {name or ''}".rstrip(" -")
+
+    def pill(ws, r: int, c: int, status: str) -> None:  # a status as colored text on its tint
+        bg, fg = DASH_PILL.get(status, DASH_PILL["Completed"])
+        cell = ws.cell(r, c)
+        cell.fill = fill(bg)
+        cell.font = Font(name="Calibri", size=9, bold=True, color=fg)
+
+    # ---- Schedule Overview: every activity grouped by WBS, a band row per WBS (all levels), outline levels
+    ws = sheets["Schedule Overview"]
+    shown = acts[:DASH_ACT_CAP]
+    top(ws, "Schedule Overview")  # what the columns hold: the Reports notes
+    labels =["Activity ID", "Activity Name", "BL Start", "BL Finish", "Start", "Finish", "Actual Start", "Actual Finish",
+              "% Complete", "Budgeted Labor Units", "Actual Labor Units", "Remaining Labor Units", "Original Duration",
+              "Remaining Duration", "Actual Duration"]
+    header(ws, 4, 1, labels, [16, 62, 11, 11, 11, 11, 11, 11, 10, 12, 12, 12, 10, 10, 10])
+    fmts = (None, None, DATE, DATE, DATE, DATE, DATE, DATE, PCT, "#,##0.0", "#,##0.0", "#,##0.0", DAYS, DAYS, DAYS)
+    by_wbs: dict[int, list] = {}
+    for a in shown:
+        by_wbs.setdefault(a["wbs_id"], []).append(a)
+    r = 5
+    for w in rd["rows"]:
+        b, depth = w["band"], w["depth"]
+        bg = mix(head, min(0.94, 0.55 + 0.1 * depth))  # the band color lightens with the depth, as P6 bands
+        ink = _ink_on(bg)
+        vals = [w["code"], w["name"], b["bl_start"], b["bl_finish"], b["start"], b["finish"], b["act_start"],
+                b["act_finish"], b["pct"], b["lab_t"], b["lab_a"], b["lab_r"], b["orig_d"], b["rem_d"], b["act_d"]]
+        for j, (v, f) in enumerate(zip(vals, fmts)):
+            put(ws, r, 1 + j, v, fmt=f, size=9, bold=True, color=ink, bg=bg, indent=depth if j == 1 else 0,
+                h="center" if j == 0 else None)
+        ws.row_dimensions[r].outline_level = min(depth, 7)
+        ws.row_dimensions[r].hidden = depth > DASH_SO_LEVEL
+        r += 1
+        for a in by_wbs.get(w["wbs_id"], []):
+            vals = [a["task_code"], a["task_name"], a["bl_start"], a["bl_finish"], a["start"], a["finish"], a["act_start"],
+                    a["act_finish"], a["pct"], a["lab_t"], a["lab_a"], a["lab_r"], a["orig_d"], a["rem_d"], a["act_d"]]
+            for j, (v, f) in enumerate(zip(vals, fmts)):
+                put(ws, r, 1 + j, v, fmt=f, size=9, indent=depth + 1 if j == 1 else 0, h="center" if j == 0 else None)
+            ws.row_dimensions[r].outline_level = min(depth + 1, 7)
+            ws.row_dimensions[r].hidden = True  # folded to the WBS bands of DASH_SO_LEVEL
+            r += 1
+    for rr in range(5, r - 1):  # a band whose rows below are folded shows +, as Excel marks it (nested ones too)
+        nxt = ws.row_dimensions[rr + 1]
+        if nxt.hidden and nxt.outline_level > ws.row_dimensions[rr].outline_level:
+            ws.row_dimensions[rr].collapsed = True
+    ws.sheet_properties.outlinePr.summaryBelow = False  # a band is above its activities
+    ws.auto_filter.ref = f"A4:{letter(len(labels))}{r - 1}"
+    ws.freeze_panes = "C5"
+    page(ws, title_rows="4:4")
+    counts["Schedule Overview"] = len(shown)
+
+    # ---- Critical Path: P6 float paths (path 1 = most critical), a bold line between paths
+    ws = sheets["Critical Path"]
+    fp = sorted((a for a in acts if a["float_path"] is not None and a["task_type"] not in ("TT_LOE", "TT_WBS")),
+                key=lambda a: (a["float_path"], a["float_path_order"] or 0, a["task_code"]))
+    if fp:
+        groups = [(f"Path {k}", list(g)) for k, g in itertools.groupby(fp, key=lambda a: a["float_path"])]
+        cp_how = (f"the {len(groups)} float paths P6 calculated at the last F9 (path 1 = most critical), each in P6's "
+                  "order (float_path_order)")
+    else:
+        near_rows = sorted((a for a in acts if a["status_code"] != "TK_Complete" and a["task_type"] not in ("TT_LOE", "TT_WBS")
+                            and a["tf_d"] is not None and a["tf_d"] <= near),
+                           key=lambda a: (a["tf_d"], a["start"] or datetime.max, a["task_code"]))
+        groups = [(f"TF {k:g} d", list(g)) for k, g in itertools.groupby(near_rows, key=lambda a: a["tf_d"])]
+        cp_how = (f"no float paths are stored (enable multiple float paths in the P6 schedule options), so it lists the "
+                  f"open activities with total float up to {near:g} d, grouped by total float value")
+    top(ws, "Critical Path")  # how the paths were chosen: the Reports notes
+    labels = ["Path", "Order", "Activity ID", "Activity Name", "WBS", "P6 status", "Start", "Finish", "BL Finish",
+              "Slip (wd)", "Remaining (d)", "Total float (d)", "Status"]
+    header(ws, 4, 1, labels, [10, 7, 18, 56, 30, 12, 11, 11, 11, 10, 11, 11, 12])
+    thick = Side(style="thick", color=DASH_INK)
+    r = 5
+    for name, rows_ in groups:
+        for i, a in enumerate(rows_):
+            status = act_status(a)
+            vals = [name if i == 0 else None, a["float_path_order"] if fp else i + 1, a["task_code"], a["task_name"],
+                    a["wbs_name"], STATUS_NAMES.get(a["status_code"], a["status_code"]), a["start"], a["finish"],
+                    a["bl_finish"], a["slip_d"], a["rem_d"], a["tf_d"], status]
+            for j, (v, f) in enumerate(zip(vals, (None, "0", None, None, None, None, DATE, DATE, DATE, SIGNED, DAYS, DAYS,
+                                                  None))):
+                put(ws, r, 1 + j, v, fmt=f, size=9, bold=j == 0, h="center" if j in (1, 12) else None)
+            pill(ws, r, 13, status)
+            cls = fclass(a["tf_d"])
+            if cls:
+                ws.cell(r, 12).fill = fill(DASH_TINT[cls])
+            if i == len(rows_) - 1:  # the bold line under the last activity of the path
+                for c in range(1, len(labels) + 1):
+                    ws.cell(r, c).border = Border(bottom=thick)
+            r += 1
+    if not groups:
+        put(ws, 5, 1, "No activity.", color=DASH_MUTED)
+    ws.freeze_panes = "E5"
+    page(ws, title_rows="4:4")
+    counts["Critical Path"] = r - 5
+
+    # ---- Reports: schedule quality (DCMA 14), about
+    ws, chk = sheets["Reports"], hc["checks"]
+    top(ws, "Reports","Schedule quality (DCMA 14) and the sources, settings and definitions of this dashboard.")
+    section(ws, 4, 1, 6, "Schedule quality (DCMA 14)")
+    header(ws, 5, 1, ["Check", "Result", "Count", "Of", "Value", "Threshold"], [44, 16, 12, 12, 12, 14])
+    qrows = [k for k in DCMA_CHECKS if k in chk] + (["key_dates"] if "key_dates" in chk else [])
+    for i, k in enumerate(qrows):
+        c, rule = chk[k], DCMA_CHECKS.get(k, (None, None))[1]
+        ratio = rule == "ratio"
+        thr = c.get("threshold")
+        thr_txt = "" if thr is None or rule is None else ("<= " if rule == "max" else ">= ") + (f"{thr:g}" if ratio else f"{thr:g} %")
+        res = "Information" if k == "key_dates" else {True: "Pass", False: "Fail", None: "Not evaluated"}[c.get("pass")]
+        vals = [DCMA_LABELS.get(k, k), res, c.get("count"), c.get("denominator"), c.get("value") if ratio else c.get("pct"),
+                thr_txt]
+        for j, (v, f) in enumerate(zip(vals, (None, None, "#,##0", "#,##0", "0.00" if ratio else '0.00"%"', None))):
+            put(ws, 6 + i, 1 + j, v, fmt=f, size=9, h="center" if j in (1, 5) else None)
+        ws.cell(6 + i, 2).fill = fill(DASH_TINT["pass" if res == "Pass" else "fail" if res == "Fail" else "na"])
+    counts["Reports"] = len(qrows)
+    r = 6 + len(qrows) + 1
+    section(ws, r, 1, 6, "About this dashboard")
+    cv = d["curve"]
+    cvb = cv and cv["baseline"]
+    facts = [("Project", d["project"]), ("Project name", d["name"]), ("Company", brand["company"]),
+             ("Prepared by", d["prepared_by"]), ("Revision", d["revision"]), ("Database file", d["db"]),
+             ("Project calendar", rd["calendar"]), ("Data date", dd), ("Last schedule run (F9)", lsd),
+             ("Edited since the last F9", "Yes: open P6 and press F9, then export again" if st["stale"] else "No"),
+             ("Baseline", f"{bname} ({'baseline=' if d['baseline_arg'] else 'project baseline'}), {d['baseline_dates']} dates"
+              if bname else "None: set a project baseline in P6 or pass baseline="),
+             ("Critical", sm["critical"]["definition"]), ("Delayed and at risk", f"more than {near:g} / up to {near:g} "
+                                                                                  "working days after the baseline finish"),
+             ("S-curve", f"{cv['measure']['kind']} per {cv['period']}" + (f", baseline {cvb['project']}" if cvb else "")
+              if cv else "not drawn"),
+             ("DCMA thresholds", hc["threshold_source"]), ("Generated", d["now"]), ("Server version", SERVER_VERSION)]
+    r += 1
+    for i, (k, v) in enumerate(facts):
+        put(ws, r + i, 1, k, bold=True, size=9)
+        merged(ws, r + i, 2, 6, v, fmt="dd-mmm-yyyy hh:mm" if isinstance(v, datetime) else None, size=9, h="left")
+    r += len(facts) + 1
+    put(ws, r, 1, "Definitions and notes", bold=True, size=11)
+    notes = [
+        "Dates, float and the critical path are those of the last F9 in P6; changes made after it show only once P6 "
+        "reschedules.",
+        f"Slip and variance: working days between the baseline date and the forecast or actual date, on the project "
+        f"calendar ({rd['calendar'] or 'none'}) for the project figures and on each activity's or milestone's own calendar "
+        "otherwise, as P6 variance columns.",
+        f"Status: Critical = the project's critical definition; Delayed = open and more than {near:g} working days later "
+        f"than the baseline finish; At risk = later by up to {near:g}; On track = not later.",
+        "Remaining duration (card): working days of the project calendar from the data date to the forecast finish.",
+        f"Schedule Overview: every activity of the last F9 ({len(acts):,}" + (f", the first {DASH_ACT_CAP:,} listed"
+        if len(acts) > DASH_ACT_CAP else "") + f") under a band per WBS in P6 order; it opens folded to the WBS bands of "
+        f"level {DASH_SO_LEVEL} (outline buttons on the left show the activities). Baseline dates of the same Activity "
+        "ID; % complete by each activity's percent complete type; labor units as stored; original and remaining "
+        "durations in days of the activity calendar, actual duration in working days to the actual finish or data date.",
+        "Schedule Overview WBS bands: earliest start and latest finish of their activities (actual finish once all are "
+        "completed), summed labor units, % complete = actual / (actual + remaining) labor units, else the duration %; "
+        "original duration from the earliest planned start to the latest planned finish, remaining from the data date "
+        "(or the earliest open start) to the latest open finish, actual from the earliest actual start to the data date "
+        "(or the last actual finish), in working days of the project calendar.",
+        f"Critical Path sheet: {cp_how}. A bold line separates the paths. Slip against the baseline finish in working "
+        "days of the activity calendar; total float in days.",
+        "DCMA checks: open activities = not completed, LOE and WBS summary left out; the relationship checks count the "
+        "links whose successor is open.",
+        "WBS Progress and Level 2 Progress (dashboard): units % complete = actual / (actual + remaining) labor and "
+        "nonlabor units; baseline planned % = baseline assignments of the activities with the same Activity ID, spread "
+        "linearly between their planned dates, at the data date.",
+        "Finish Variance by WBS (dashboard): working days of the project calendar from the latest baseline finish to "
+        "the latest finish of the level 1 WBS's activities; colored by the status rule above (gray: all completed).",
+        "S-curve: quantities are spread linearly over calendar time between the assignment dates (P6 spreads over "
+        "working time and resource curves) and the actual curve is rebuilt from the actual dates, so only the values at "
+        "the data date are exact. Earned value = budget x activity % complete (its percent complete type).",
+        *d["warnings"]]
+    for i, n in enumerate(notes):
+        put(ws, r + 1 + i, 1, "Warning" if i >= len(notes) - len(d["warnings"]) else None, size=9, bold=True,
+            color=DASH_FLOAT["neg"], valign="top")
+        merged(ws, r + 1 + i, 2, 6, n, size=9, wrap=True, valign="top")
+        ws.row_dimensions[r + 1 + i].height = 13 * max(1, math.ceil(len(n) / 95))
+    page(ws)
+
+    # ---- Dashboard: sidebar, header, 7 cards, then 6 panels, on one A3 page; objects fixed, sheet protected
+    ws = sheets["Dashboard"]
+    ws.sheet_view.showGridLines = False
+    ws.sheet_view.zoomScale = 85
+    G0, NG, LAST = 3, 27, 60  # first grid column (C), grid columns, last row
+    col = lambda k: G0 + k  # noqa: E731
+    hc0 = col(NG) + 2  # hidden helper data of the charts, right of the print area
+    ws.column_dimensions["A"].width, ws.column_dimensions["B"].width = 26, 1.5
+    for k in range(NG):  # 7 groups of 3 wide columns (a card) and a narrow gutter, the last without: the A3 width
+        ws.column_dimensions[letter(col(k))].width = 6.14 if k % 4 == 3 else 10.29
+    side_ink = _ink_on(head)
+    side_soft = mix(head, 0.65) if side_ink == "FFFFFF" else DASH_MUTED
+    for rr in range(1, LAST + 1):
+        ws.cell(rr, 1).fill = fill(head)
+        for c in range(2, col(NG)):
+            ws.cell(rr, c).fill = fill(DASH_PAGE)
+    placed: list[tuple] = []  # (chart, row, column, (width, height) in cm): anchored once every size is final
+
+    def area(r0: int, r1: int, c0_: int, c1: int, color: str = "FFFFFF") -> None:
+        for rr in range(r0, r1 + 1):
+            for c in range(c0_, c1 + 1):
+                ws.cell(rr, c).fill = fill(color)
+    frames: list[tuple] = []  # (r0, r1, c0, c1) drawn last, after every merge
+
+    def box(r0: int, r1: int, k0: int, k1: int) -> None:
+        area(r0, r1, col(k0), col(k1))
+        frames.append((r0, r1, col(k0), col(k1)))
+
+    def panel_title(r: int, k: int, text: str) -> None:
+        put(ws, r, col(k), text, bold=True, size=12, indent=1)
+        ws.row_dimensions[r].height = 22
+
+    # sidebar: company, links to every sheet, the project at the bottom
+    merged(ws, 1, 1, 1, brand["company"] or "Schedule dashboard", r1=2, bold=True, size=13, color=side_ink, bg=head,
+           indent=1, wrap=True)
+    put(ws, 3, 1, "Primavera P6 schedule", size=9, color=side_soft, bg=head, indent=1)
+    for i, name in enumerate(DASH_SHEETS):  # one link every other row from row 12 (rows of the panels, 15 points)
+        cell = ws.cell(12 + 2 * i, 1)
+        cell.value = rich((DASH_NAV[name] + "  ", side_ink, True, False, 11), (name, side_ink, False, i == 0, 11))
+        cell.fill = fill(mix(head, 0.18) if i == 0 else head)
+        cell.alignment = Alignment(vertical="center", indent=1)
+        if i:
+            cell.hyperlink = Hyperlink(ref=cell.coordinate, location=f"'{name}'!A1", display=name)
+            cell.protection = Protection(locked=False)  # the only cells that can be selected: the links work
+    put(ws, LAST - 7, 1, d["project"], bold=True, size=11, color=side_ink, bg=head, indent=1)
+    merged(ws, LAST - 6, 1, 1, d["name"] or "", r1=LAST - 3, size=9, color=side_soft, bg=head, indent=1, wrap=True,
+           valign="top")
+    put(ws, LAST - 2, 1, f"Data date {dd:%d %b %Y}" if dd else "No data date", size=9, color=side_soft, bg=head, indent=1)
+
+    # header: title, subtitle, data date (its dot red when this server changed the schedule after the last F9)
+    put(ws, 1, col(0), "Project Controls Dashboard", bold=True, size=20)
+    put(ws, 2, col(0), f"Primavera P6 schedule analysis  |  Excel export  |  {d['project']}" + (f" - {d['name']}" if d["name"]
+        else ""), size=10, color=DASH_MUTED)
+    put(ws, 3, col(0), "  |  ".join(x for x in (d["prepared_by"] and f"Prepared by {d['prepared_by']}",
+                                                 d["revision"] and f"Revision {d['revision']}",
+                                                 f"Generated {d['now']:%d %b %Y %H:%M}") if x), size=9, color=DASH_MUTED)
+    for rr, hh in ((1, 32), (2, 18), (3, 16)):
+        ws.row_dimensions[rr].height = hh
+    state = ws.cell(1, col(NG - 1))  # right-aligned on the right edge, running on to the left
+    state.value = rich(("● ", DASH_GOOD if not st["stale"] else DASH_FLOAT["neg"], True, False, 12),
+                       ("Data date " + (f"{dd:%d %b %Y %H:%M}" if dd else "none"), DASH_INK, False, True, 12))
+    state.alignment = Alignment(horizontal="right", vertical="center")
+    if st["stale"]:
+        put(ws, 4, col(0), "Warning: this server changed the schedule after the last F9. Open P6, press F9, then export "
+            "again.", bold=True, size=9, color=DASH_FLOAT["neg"])
+
+    # cards
+    pc, bl, cr = sm["percent_complete"], sm["baseline"], sm["critical"]
+    kpi, ms_open = rd["kpi"], [m for m in ms if m["status_code"] != "TK_Complete" and m["variance_d"] is not None]
+    real = [a for a in acts if a["task_type"] not in ("TT_LOE", "TT_WBS")]
+    open_real = [a for a in real if a["status_code"] != "TK_Complete"]
+    n_delayed = sum(1 for a in open_real if late(a["slip_d"]) == "Delayed")
+    n_risk = sum(1 for a in open_real if late(a["slip_d"]) == "At risk")
+    plan = bl.get("planned_units_pct_at_data_date")
+    td = cv["to_date"] if cv else None
+    sv = 100 * td["variance"] / td["baseline_planned"] if td and td["baseline_planned"] else None
+    thr_h = cr.get("threshold_h")
+    crit_sub = ("On the longest path (project setting)" if thr_h is None
+                else f"Total float <= {thr_h / (rd['hpd'] or 8):g} d (project setting)")
+    bfin, vb, rem = rd["bl_finish"], kpi["vs_baseline_d"], kpi["remaining_d"]
+    n_late = sum(1 for m in ms_open if m["variance_d"] > 0)
+    cards = [
+        ("◔", "Overall Progress", pc["primary_pct"], '0.00"%"',
+         f"Planned: {plan:.2f}%  |  Variance: {pc['primary_pct'] - plan:+.2f}%" if plan is not None and pc["primary_pct"]
+         is not None else "No baseline plan at the data date", "0072B2", pc["primary_pct"]),
+        ("◎", "Critical Activities", cr["critical"], "#,##0", crit_sub, DASH_FLOAT["neg"], None),
+        ("◷", "Delayed Activities", n_delayed if bname else None, "#,##0",
+         f"Behind baseline by over {near:g} wd; {n_risk:,} at risk" if bname else "No baseline", DASH_FLOAT["near"], None),
+        ("Δ", "Schedule Variance", sv, '+0.0"%";-0.0"%";0.0"%"',
+         f"Earned vs baseline planned (SPI {td['spi']:.2f})" if sv is not None else "Needs a baseline with resources",
+         "7B61C9", None),
+        ("⚑", "Forecast Completion", _db_dt(rd["project"]["scd_end_date"]), DATE,
+         f"Baseline: {bfin:%d %b %Y} ({vb:+.1f} wd)" if bfin and vb is not None else "No baseline", "009E73", None),
+        ("▸", "Remaining Duration", rem, '0" d"' if rem is None or float(rem).is_integer() else '0.0" d"',
+         "Working days to the forecast finish", head, None),
+        ("◆", "Milestones Late", n_late if ms_open else None, "0",
+         f"of {len(ms_open)} open milestones with a baseline" if ms_open else "No open milestone with a baseline",
+         DASH_FLOAT["neg"] if n_late else DASH_GOOD, None)]
+    for k, (glyph, title, value, fmt, sub, color, bar) in enumerate(cards):
+        c0_ = col(4 * k)
+        merged(ws, 5, c0_, c0_ + 2, None, indent=1)  # the card's symbol in its color, then the title
+        ws.cell(5, c0_).value = rich((glyph + "  ", color, glyph != "Δ", True, 12), (title, DASH_INK, False, True, 9))
+        merged(ws, 6, c0_, c0_ + 2, "n/a" if value is None else value, r1=7, fmt=fmt, bold=True, size=18, h="center")
+        merged(ws, 8, c0_, c0_ + 2, sub, size=8, color=DASH_MUTED, wrap=True, indent=1, valign="top")
+        box(5, 9, 4 * k, 4 * k + 2)
+        if bar is None:
+            ws.cell(9, c0_).fill = fill(color)  # the short accent line of the card
+        else:
+            merged(ws, 9, c0_, c0_ + 2, bar, fmt=";;;", bg="FFFFFF")
+            ws.conditional_formatting.add(f"{letter(c0_)}9:{letter(c0_ + 2)}9", DataBarRule(
+                start_type="num", start_value=0, end_type="num", end_value=100, color=color, showValue=False))
+    for rr, hh in ((5, 20), (6, 18), (7, 18), (8, 30), (9, 8)):
+        ws.row_dimensions[rr].height = hh
+
+    def rows_cm(r0: int, r1: int) -> float:  # height of rows r0 to r1, less a margin, in cm
+        return sum(row_px(ws.row_dimensions[rr].height) for rr in range(r0, r1 + 1)) / 37.8 - 0.4
+
+    def cols_cm(k0: int, k1: int) -> float:  # width of grid columns k0 to k1, less a margin, in cm
+        return sum(col_px(ws.column_dimensions[letter(col(k))].width or 8.43) for k in range(k0, k1 + 1)) / 37.8 - 0.4
+
+    def wlabel(w: Mapping) -> str:  # a WBS on a chart axis: its code (relative to the project) and name
+        return (f"{w['code']}. {w['name']}" if w["depth"] == 1 else f"{w['code']} {w['name']}")[:40]
+
+    def pick(level: int) -> tuple[list, int]:  # WBS of a level with units in P6 order; past the cap, the most budget
+        all_ = [w for w in rd["rows"] if w["depth"] == level and w["units_pct"] is not None]
+        keep = {w["wbs_id"] for w in sorted(all_, key=lambda w: (-(w["budget_units"] or 0), w["code"]))[:DASH_WBS_BARS]}
+        return [w for w in all_ if w["wbs_id"] in keep], len(all_)
+
+    def bar_chart(cats: int, c0_: int, series: Sequence[tuple[int, str]]) -> Any:
+        """Horizontal bars of the helper rows 2 to cats + 1: categories in column c0_, a series (title in row 1)
+        per (column, color); the data labels show the cells' number format."""
+        ch = BarChart()
+        ch.type, ch.grouping, ch.gapWidth, ch.overlap = "bar", "clustered", 60, 0
+        ch.visible_cells_only = False
+        for c, color in series:
+            ch.add_data(Reference(ws, min_col=c, min_row=1, max_row=1 + cats), titles_from_data=True)
+            bars(ch.series[-1], color)
+        ch.set_categories(Reference(ws, min_col=c0_, min_row=2, max_row=1 + cats))  # after the series: it sets theirs
+        ch.x_axis.axPos, ch.y_axis.axPos = "l", "b"
+        return ch
+
+    def progress_chart(rows_: list, c0_: int, both: bool) -> Any:
+        """Baseline planned % (with a baseline) and actual units % of WBS rows, the first one on top; data in
+        the hidden columns c0_ to c0_ + 2; data labels on both series when there is room, else on the actual."""
+        for j, lab in enumerate(("WBS", "Planned (baseline)", "Actual")):
+            put(ws, 1, c0_ + j, lab, size=8)
+        for i, w in enumerate(reversed(rows_)):  # Excel draws the first category at the bottom
+            put(ws, 2 + i, c0_, wlabel(w), size=8)
+            put(ws, 2 + i, c0_ + 1, w["bl_planned_pct"], fmt='0"%"', size=8)
+            put(ws, 2 + i, c0_ + 2, w["units_pct"], fmt='0"%"', size=8)
+        ch = bar_chart(len(rows_), c0_, ([(c0_ + 1, "A9B8CC")] if bname else []) + [(c0_ + 2, head)])
+        for s_ in ch.series[-1:] if not both else ch.series:
+            s_.dLbls = values_only()
+        axes(ch, "t")
+        ch.y_axis.number_format = '0"%"'
+        ch.y_axis.scaling.min, ch.y_axis.scaling.max = 0, 110
+        ch.y_axis.majorUnit = 20
+        return borderless(ch)
+
+    def per_bar(r0: int, r1: int, n: int) -> float:  # pixels of plot height per category, about
+        return rows_cm(r0, r1) * 37.8 / max(1, n)
+
+    # panel row 1: S-curve (grid 0-10), finish variance by WBS (12-18), WBS progress (20-26), rows 11 to 27
+    box(11, 27, 0, 10)
+    panel_title(11, 0, "Planned vs Actual S-Curve")
+    per = cv["periods"] if cv else []
+    if per:  # the S-curve's own data in hidden columns (the dashboard needs no other sheet)
+        ref = cv["baseline"] is not None
+        sc0 = hc0 + 9
+        for j, lab in enumerate(["Period", "Planned (baseline)" if ref else "Planned (current)", "Actual", "Forecast"]):
+            put(ws, 1, sc0 + j, lab, size=8)
+        for i, p in enumerate(per):
+            a = datetime.strptime(p["start"], "%Y-%m-%d")
+            for j, v in enumerate([f"{a:%b-%y}" if cv["period"] == "month" else f"{a:%d-%b-%y}",
+                                   p.get("baseline_pct" if ref else "planned_pct"), p.get("actual_pct"),
+                                   p.get("forecast_pct")]):
+                put(ws, 2 + i, sc0 + j, v, size=8)
+        ch = LineChart()
+        ch.visible_cells_only = False
+        for j, (color, width, dash) in enumerate((("7F8A99", 2.0, "dash"), (accent, 2.75, None), ("E69F00", 2.0, "sysDash"))):
+            ch.add_data(Reference(ws, min_col=sc0 + 1 + j, min_row=1, max_row=1 + len(per)), titles_from_data=True)
+            line(ch.series[-1], color, width, dash)
+        ch.set_categories(Reference(ws, min_col=sc0, min_row=2, max_row=1 + len(per)))
+        axes(ch, "t")
+        ch.y_axis.number_format = '0"%"'
+        ch.y_axis.scaling.min = 0
+        if max([v for p in per for v in (p.get("baseline_pct"), p.get("planned_pct"), p.get("actual_pct"),
+                                         p.get("forecast_pct")) if v is not None] or [0]) <= 100:
+            ch.y_axis.scaling.max = 100
+        placed.append((borderless(ch), 12, col(0), (cols_cm(0, 10), rows_cm(12, 27))))
+    else:
+        merged(ws, 13, col(0), col(10), f"Not drawn: {d['curve_error']}", color=DASH_MUTED, wrap=True)
+    box(11, 27, 12, 18)
+    panel_title(11, 12, "Finish Variance by WBS")
+    fv = [w for w in rd["rows"] if w["depth"] == 1 and w["finish_var_d"] is not None][:DASH_WBS_BARS]
+    if fv:  # working days from the latest baseline finish to the latest finish of each level 1 WBS
+        put(ws, 1, hc0 + 3, "WBS", size=8)
+        put(ws, 1, hc0 + 4, "Finish variance (wd)", size=8)
+        tone = [DASH_STATUS["Completed" if w["all_done"] else late(w["finish_var_d"])] for w in reversed(fv)]
+        for i, w in enumerate(reversed(fv)):
+            put(ws, 2 + i, hc0 + 3, wlabel(w), size=8)
+            put(ws, 2 + i, hc0 + 4, w["finish_var_d"], fmt=SIGNED, size=8)
+        ch = bar_chart(len(fv), hc0 + 3, [(hc0 + 4, DASH_STATUS["On track"])])
+        sv_ = ch.series[0]
+        for i, color in enumerate(tone):  # each bar in its status color
+            sv_.dPt.append(DataPoint(idx=i, invertIfNegative=False,
+                                     spPr=GraphicalProperties(solidFill=color, ln=LineProperties(solidFill=color))))
+        sv_.dLbls = values_only()
+        axes(ch, None)
+        ch.x_axis.tickLblPos = "low"  # the WBS names stay on the left beside a negative bar
+        ch.y_axis.number_format = "0"
+        placed.append((borderless(ch), 12, col(12), (cols_cm(12, 18), rows_cm(12, 26))))
+        keyc = ws.cell(27, col(12))  # the color key, as the bars carry no legend
+        keyc.value = rich(*(part for lab in ("Delayed", "At risk", "On track", "Completed") for part in (
+            ("● ", DASH_STATUS[lab], True, False, 9),
+            (lab + (f" (> {near:g} wd)" if lab == "Delayed" else "") + "    ", DASH_MUTED, False, False, 8))))
+        keyc.alignment = Alignment(vertical="center", indent=1)
+    else:
+        merged(ws, 13, col(12), col(18), "Needs a baseline: no level 1 WBS has a baseline finish." if bname
+               else "No baseline: the finish variance needs one.", size=9, color=DASH_MUTED, indent=1, wrap=True)
+    box(11, 27, 20, 26)
+    l1, n_l1 = pick(1)
+    panel_title(11, 20, "WBS Progress" + (f" ({len(l1)} of {n_l1}, by budget units)" if n_l1 > len(l1) else ""))
+    if l1:
+        placed.append((progress_chart(l1, hc0, per_bar(12, 27, len(l1)) >= 40), 12, col(20),
+                       (cols_cm(20, 26), rows_cm(12, 27))))
+    else:
+        merged(ws, 13, col(20), col(26), "No level 1 WBS with resource units.", size=9, color=DASH_MUTED, indent=1)
+
+    # panel row 2: milestones, level 2 progress (rows 29 to 42); milestone rows hold two lines of a long name
+    for rr in range(31, 31 + DASH_PANEL_MILESTONES):
+        ws.row_dimensions[rr].height = 27.75
+    box(29, 42, 0, 10)
+    panel_title(29, 0, "Milestones")
+    for a, b, lab in ((0, 4, "Milestone"), (5, 6, "Baseline"), (7, 8, "Forecast"), (9, 10, "Status")):
+        merged(ws, 30, col(a), col(b), lab, bold=True, size=9, color=DASH_MUTED, bg="F7F8FA", indent=1 if a == 0 else 0,
+               h=None if a == 0 else "center")
+    shown_ms = ms if len(ms) <= DASH_PANEL_MILESTONES else sorted(
+        ([m for m in ms if m["status_code"] != "TK_Complete"] + [m for m in ms if m["status_code"] == "TK_Complete"])
+        [:DASH_PANEL_MILESTONES], key=lambda m: (m["date"] or datetime.max, m["task_code"]))
+    for i, m in enumerate(shown_ms):
+        rr = 31 + i
+        status = "Completed" if m["status_code"] == "TK_Complete" else late(m["variance_d"])
+        merged(ws, rr, col(0), col(4), act_label(m["task_code"], m["task_name"]), size=9, indent=1, wrap=True, h="left")
+        merged(ws, rr, col(5), col(6), m["baseline"], fmt=DATE, size=9, h="center")
+        merged(ws, rr, col(7), col(8), m["date"], fmt=DATE, size=9, h="center")
+        merged(ws, rr, col(9), col(10), None)
+        ws.cell(rr, col(9)).value = rich(("● ", DASH_PILL.get(status, DASH_PILL["Completed"])[1], True, False, 9),
+                                         (status, DASH_INK, False, False, 9))
+        for c in range(col(0), col(10) + 1):
+            ws.cell(rr, c).border = Border(bottom=Side(style="hair", color=DASH_RULE))
+    if not ms:
+        merged(ws, 31, col(0), col(10), "No milestones in this project.", size=9, color=DASH_MUTED, indent=1)
+    elif len(ms) > len(shown_ms):
+        merged(ws, 31 + len(shown_ms), col(0), col(10), f"{len(ms) - len(shown_ms)} more milestones not shown.", size=8,
+               color=DASH_MUTED, indent=1)
+    box(29, 42, 12, 26)
+    l2, n_l2 = pick(2)
+    panel_title(29, 12, "Level 2 Progress" + (f" ({len(l2)} of {n_l2}, by budget units)" if n_l2 > len(l2) else ""))
+    if l2:
+        placed.append((progress_chart(l2, hc0 + 5, per_bar(30, 42, len(l2)) >= 40), 30, col(12),
+                       (cols_cm(12, 26), rows_cm(30, 42))))
+    else:
+        merged(ws, 31, col(12), col(26), "No level 2 WBS with resource units.", size=9, color=DASH_MUTED, indent=1)
+    ws.column_dimensions.group(letter(hc0), letter(hc0 + 12), hidden=True)
+
+    # panel row 3: critical and delayed activities (rows 44 to 58)
+    box(44, 58, 0, 26)
+    flagged = [a for a in open_real if a["task_code"] in crit or late(a["slip_d"]) == "Delayed"]
+    flagged.sort(key=lambda a: (a["task_code"] not in crit, (a["tf_d"] or 0) if a["task_code"] in crit
+                                else -(a["slip_d"] or 0), a["start"] or datetime.max, a["task_code"]))
+    panel_title(44, 0, "Critical & Delayed Activities")
+    put(ws, 44, col(26), "Full lists on the Schedule Overview and Critical Path sheets", size=8, color=DASH_MUTED, h="right")
+    cols = ((0, 1, "ID"), (2, 3, "WBS"), (4, 11, "Activity Name"), (12, 13, "Start (BL)"), (14, 15, "Finish (BL)"),
+            (16, 17, "Start"), (18, 19, "Finish"), (20, 21, "Total Float"), (22, 23, "Slip (wd)"), (24, 26, "Status"))
+    for j, (a, b, lab) in enumerate(cols):
+        merged(ws, 45, col(a), col(b), lab, bold=True, size=9, color=DASH_MUTED, bg="F7F8FA",
+               indent=1 if j == 0 else 0, h=None if j < 3 else "center")
+    for i, a in enumerate(flagged[:DASH_TABLE_ROWS]):
+        rr = 46 + i
+        status = act_status(a)
+        vals = (a["task_code"], a["wbs_code"], a["task_name"], a["bl_start"], a["bl_finish"], a["start"], a["finish"],
+                a["tf_d"], a["slip_d"], status)
+        for j, ((c_a, c_b, _), v) in enumerate(zip(cols, vals)):  # j: 7 total float, 8 slip, 9 status
+            fmt = (DATE if isinstance(v, datetime) else '0.0" d"' if j == 7 else SIGNED if j == 8 else None)
+            merged(ws, rr, col(c_a), col(c_b), v, fmt=fmt, size=9, indent=1 if j < 3 else 0,
+                   h=None if j < 3 else "center", bold=j == 9,
+                   color=DASH_FLOAT["neg"] if j == 7 and (v or 0) < 0 else DASH_INK)
+        pill(ws, rr, col(cols[-1][0]), status)
+        for c in range(col(0), col(26) + 1):
+            ws.cell(rr, c).border = Border(bottom=Side(style="hair", color=DASH_RULE))
+    put(ws, 58, col(0), f"Showing {min(len(flagged), DASH_TABLE_ROWS)} of {len(flagged):,} critical or delayed activities.",
+        size=8, color=DASH_MUTED, indent=1)
+    put(ws, LAST, col(0), f"Source: {d['db']}, project {d['project']}. Values of the last F9"
+        + (f" ({lsd:%d-%b-%Y %H:%M})" if lsd else "") + f". P6 MCP server {SERVER_VERSION}.", size=8, color=DASH_MUTED)
+    rule = Side(style="thin", color=DASH_RULE)
+    for r0, r1, c0_, c1 in frames:  # panel and card frames, after the merges (a merge rewrites its edge borders)
+        for rr in range(r0, r1 + 1):
+            for c in range(c0_, c1 + 1):
+                if rr in (r0, r1) or c in (c0_, c1):
+                    old = ws.cell(rr, c).border
+                    ws.cell(rr, c).border = Border(left=rule if c == c0_ else old.left, right=rule if c == c1 else old.right,
+                                                   top=rule if rr == r0 else old.top, bottom=rule if rr == r1 else old.bottom)
+    # fixed charts: two-cell anchors that never move or size with cells (Excel's "Don't move or size with cells"),
+    # from the final column widths and row heights. An absolute anchor would keep its points while printing widens
+    # the columns, so the charts would print off their panels.
+    def marker(r: int, c: int, dx: int, dy: int) -> AnchorMarker:  # the point dx, dy pixels right of and below (r, c)
+        while dx >= (w := col_px(ws.column_dimensions[letter(c)].width or 8.43)):
+            dx, c = dx - w, c + 1
+        while dy >= (h := row_px(ws.row_dimensions[r].height)):
+            dy, r = dy - h, r + 1
+        return AnchorMarker(col=c - 1, colOff=pixels_to_EMU(dx), row=r - 1, rowOff=pixels_to_EMU(dy))
+
+    for obj, r, c, size in placed:  # 4 px inside the cell corner, so a chart never covers its panel's frame
+        w, h = (round(v * 96 / 2.54) for v in size)
+        obj.anchor = TwoCellAnchor(editAs="absolute", _from=marker(r, c, 4, 4), to=marker(r, c, 4 + w, 4 + h))
+        ws.add_chart(obj)
+    ws.protection.sheet = True  # a page: locked cells cannot be selected or changed, objects cannot be moved
+    ws.protection.selectLockedCells = True
+    ws.protection.objects = True
+    page(ws, one_page=True)
+    ws.print_area = f"A1:{letter(col(NG - 1))}{LAST}"
+    counts["Dashboard"] = 1
+    wb.active = 0
+    return wb, counts
+
+
+@_tool(read_only=False, destructive=True)
+def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[ProjectId] = None,
+                        baseline_dates: BaselineDates = "planned", milestones: Optional[ActivityIds] = None,
+                        near_critical_days: NonNegDays = 10, period: Period = "month",
+                        prepared_by: Optional[str] = None, revision: Optional[str] = None,
+                        company: Optional[str] = None, colors: Optional[str] = None,
+                        overwrite: bool = False) -> dict:
+    """Write an Excel project controls dashboard to path (.xlsx in an existing folder; an existing file
+    is refused unless overwrite=True; never writes the database). Sheets: Dashboard (one A3 page, protected, objects fixed, a
+    sidebar of links: cards for overall progress, critical and delayed activities, schedule variance,
+    forecast completion, remaining duration and late milestones; S-curve, finish variance by level 1
+    WBS, WBS progress (level 1) and level 2 progress against the baseline, milestones, critical and
+    delayed activities), Schedule Overview (every activity grouped by WBS with WBS bands, opened folded
+    to WBS level 2: baseline, current and actual dates, % complete, labor units, original, remaining
+    and actual durations), Critical Path (the P6 float paths of the last
+    F9, a bold line between paths; without stored paths, activities with total float up to
+    near_critical_days by total float value) and Reports (DCMA 14, sources and definitions). Status:
+    Critical (project definition), Delayed (more than near_critical_days working days after the
+    baseline finish), At risk (later by up to that), On track. Values of the last F9: reschedule in P6
+    first. baseline= Project ID (default the project baseline); baseline_dates 'planned' (default: the
+    baseline's planned dates) or 'current' (its actual, else early dates); baseline dates come from
+    the baseline activities with the same Activity ID. milestones= Activity IDs (default every
+    milestone, at most 30). Slip and variance in working days: project calendar for the project
+    figures, each activity's own calendar otherwise. prepared_by and revision are printed under the
+    title; company (sidebar) and colors ('primary,accent' in hex: sidebar, headers and dark bars, then
+    the S-curve actual line) apply to this export only."""
+    if baseline_dates not in get_args(BaselineDates):
+        raise ValueError(f"baseline_dates must be one of {list(get_args(BaselineDates))}")
+    if period not in get_args(Period):
+        raise ValueError(f"period must be one of {list(get_args(Period))}")
+    near = float(near_critical_days)
+    if not math.isfinite(near) or near < 0:
+        raise ValueError("near_critical_days must be 0 or more")
+    codes = None
+    if milestones is not None:
+        codes = list(dict.fromkeys(str(c).strip() for c in ([milestones] if isinstance(milestones, str) else milestones)))
+        if not codes or not all(codes):
+            raise ValueError("milestones must list Activity IDs")
+        if len(codes) > DASH_MILESTONES_MAX:
+            raise ValueError(f"milestones: at most {DASH_MILESTONES_MAX} Activity IDs")
+    texts = {k: (str(v).strip() or None) if v is not None else None
+             for k, v in (("prepared_by", prepared_by), ("revision", revision))}
+    for k, v in texts.items():
+        if v and len(v) > 100:
+            raise ValueError(f"{k}: at most 100 characters")
+    brand = _dash_brand(company, colors)
+    path = _export_target(path, ".xlsx")
+    if os.path.exists(path) and not overwrite:
+        raise ValueError(f"{path} already exists: pass overwrite=True to replace it, or choose another path.")
+    _openpyxl()
+    con = _connect()
+    pid = _project_id(con, project)
+    con.execute("BEGIN")  # project, WBS, activities and milestones from one snapshot
+    try:
+        bid = _baseline_pid(con, pid, baseline)
+        rd = _dash_read(con, pid, bid, codes, baseline_dates)
+        name = con.execute("SELECT wbs_name FROM PROJWBS WHERE proj_id = ? AND proj_node_flag = 'Y'"
+                           + _alive(con, "PROJWBS"), (pid,)).fetchone()
+    finally:
+        con.rollback()
+    warnings: list[str] = [f"Working days: {n}." for n in rd["wd_notes"]]
+    if rd["rows_cut"]:
+        warnings.append(f"More than {DASH_WBS_ROWS} WBS nodes: the first {DASH_WBS_ROWS} are shown.")
+    if rd["ms_note"]:
+        warnings.append(rd["ms_note"])
+    if len(rd["acts"]) > DASH_ACT_CAP:
+        warnings.append(f"{len(rd['acts']):,} activities: the Schedule Overview shows the first {DASH_ACT_CAP:,}.")
+    summary = p6_project_summary(project, baseline)
+    curve, curve_error = None, None
+    for measure in ("units", "cost"):
+        try:
+            curve = p6_progress_curve(project, period=period, baseline=baseline, measure=measure)
+            break
+        except ValueError as e:
+            curve_error = str(e)
+    if curve is None:
+        warnings.append(f"S-curve not drawn: {curve_error}")
+    elif curve["measure"]["kind"] == "cost":
+        warnings.append("No planned units on labor or nonlabor assignments: the S-curve uses cost.")
+    crit = {r["task_code"] for r in _all_rows(p6_critical_path, 10 ** 7, project=project, fields=["task_code"])[1]}
+    hc = p6_health_check(project, baseline=baseline, baseline_dates=baseline_dates, save_snapshot=False)
+    state = hc["schedule_state"]
+    seen = {(rd["project"]["last_recalc_date"], rd["project"]["last_schedule_date"]),
+            (summary["dates"]["data_date"], summary["dates"]["last_schedule_run"]),
+            (state["data_date"], state["last_schedule_date"])}
+    if len(seen) > 1:
+        raise ValueError(f"The schedule of {project} changed during the export (data date or last F9): run it again.")
+    source = (", ".join(os.path.basename(f) for f in SETTINGS.xer_files) if SETTINGS.xer_files  # XER-only mode
+              else os.path.basename(DB_PATH))
+    data = {"project": project, "name": name and name[0], "db": source, "now": datetime.now(),
+            "rd": rd, "summary": summary, "curve": curve, "curve_error": curve_error, "crit": crit, "hc": hc,
+            "state": state, "near": near, "baseline_dates": baseline_dates, "baseline_arg": baseline,
+            "warnings": warnings, "brand": brand, **texts}
+    wb, counts = _dash_book(data)
+    tmp = path + ".tmp"
+    try:  # written beside the target, then swapped in: a failed export leaves the old file intact
+        wb.save(tmp)
+        os.replace(tmp, path)
+    except PermissionError as e:
+        raise ValueError(f"Cannot write {path}: close it in Excel, then export again ({e.strerror})") from None
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return {"path": path, "project": project, "data_date": rd["project"]["last_recalc_date"],
+            "baseline": rd["baseline"] and rd["baseline"]["proj_short_name"], "sheets": counts,
+            "counts": {"wbs": len(rd["rows"]), "activities": len(rd["acts"]), "milestones": len(rd["milestones"]),
+                       "critical": len(crit)},
+            "warnings": warnings, "schedule_state": state,
+            "note": "Values of the last F9 in P6. The Dashboard sheet is protected (no password) and prints on one A3 "
+                    "landscape page."}
 
 
 _register_prompts()

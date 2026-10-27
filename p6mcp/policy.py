@@ -2,7 +2,7 @@
 
 kind:
   read         reads the database only (read-only connection)
-  file         reads the database and writes a file the caller names (export_xer): Full profile
+  file         reads the database and writes a file the caller names (export_xer, export_dashboard): Full profile
   write        changes the database: Full profile + allow_writes + dry run + confirmation token
   destructive  write that deletes or replaces data: also needs the exact confirmation text
 
@@ -31,7 +31,7 @@ TOOL_KIND: dict[str, str] = {
     "p6_list_backups": READ, "p6_edit_log": READ, "p6_diagnose": READ, "p6_sql_select": READ,
     "p6_list_udfs": READ,
     # file output
-    "p6_export_xer": FILE,
+    "p6_export_xer": FILE, "p6_export_dashboard": FILE,
     # write
     "p6_update_activity": WRITE, "p6_update_assignment": WRITE, "p6_update_assignments": WRITE,
     "p6_update_udf": WRITE, "p6_update_udfs": WRITE,

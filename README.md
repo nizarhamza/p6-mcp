@@ -28,6 +28,9 @@ server computes the answers; the model explains them.
 - **Comparisons and what-if**: compare two updates or a baseline activity by activity and link by link;
   a CPM engine that reproduces P6's F9 on the projects it was checked against, for what-if scenarios
   run in memory, never written.
+- **Excel dashboard**: one call writes a project controls workbook (Full profile): a one-page A3
+  dashboard with cards, S-curve, finish variance and progress by WBS against the baseline, milestones,
+  critical and delayed activities; every activity grouped by WBS; the P6 float paths; the DCMA checks.
 - **XER files**: inspect, import (new project, baseline, update), export, or analyse XER files alone in
   read-only XER mode, without a P6 database or P6 installed.
 - **Edits** (off by default): durations, constraints, actual dates, progress, resource assignment
@@ -125,7 +128,7 @@ MCP client; for clients with command files, also click Update commands.
 
 ![Settings: tools and safety](docs/images/settings-tools.png)
 
-- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 51).
+- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 52).
 - **Writes are off by default.** With the Full profile and "Allow write operations", every write takes
   two calls: a dry run that shows the plan and returns a single-use confirmation token, then, after your
   explicit yes, the same call with that token. Deleting a project or an activity and restoring a backup
@@ -157,6 +160,25 @@ server, hosted by the notification area app, for clients that need HTTP or to sh
 - every request needs `Authorization: Bearer <token>`; the token lives in the Windows Credential Manager
   (shown masked, copy, regenerate);
 - Host and Origin headers are checked to block DNS rebinding.
+
+## Excel dashboard
+
+Ask for example "export the dashboard of DEMO-A to D:\Reports\DEMO-A.xlsx" (Full profile). The template
+is built into the server: `p6_export_dashboard` reads the last F9 and writes a finished workbook (values
+and native Excel charts, no formulas), so press F9 in P6 first. An existing file is replaced only when
+you say so (`overwrite`).
+
+| Sheet | Content |
+|---|---|
+| Dashboard | One A3 landscape page, protected (no password) with its charts fixed: 7 cards (overall progress, critical and delayed activities, schedule variance, forecast completion, remaining duration, late milestones); S-curve; finish variance by level 1 WBS in working days; WBS progress (level 1) and level 2 progress, actual against baseline planned; milestones; critical and delayed activities |
+| Schedule Overview | Every activity under a band per WBS (opens folded to level 2): baseline, current and actual dates, % complete, labor units, original, remaining and actual durations |
+| Critical Path | The P6 float paths of the last F9, a bold line between paths (without stored paths: the activities with total float up to `near_critical_days`) |
+| Reports | DCMA 14 checks, sources, settings and definitions |
+
+Options: `baseline` (default the project baseline), `baseline_dates` (`planned` or `current`),
+`milestones` (Activity IDs), `near_critical_days` (10: Delayed beyond it, At risk up to it), `period`
+(`month` or `week`), `prepared_by`, `revision`, and for this export only `company` (shown in the sidebar)
+and `colors` (`"primary,accent"` in hex). Slip and variance are in working days, as P6 variance columns.
 
 ## XER-only mode
 
