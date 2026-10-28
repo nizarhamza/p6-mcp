@@ -7,11 +7,18 @@ One definition serves two channels:
 - the server offers them as MCP prompts (Claude Desktop's + menu, /mcp... commands of other clients).
 
 A skill is offered only when every tool it names is offered under the current settings (policy.listed):
-in the Basic profile most of them are not. Texts are ASCII, without double hyphens.
+in the Basic profile most of them are not.
+
+Since 1.9 no skill is built in: every skill is an entry of the config's custom_skills, the core set installed
+from the skill shop by the Settings app at its first start (p6mcp.core_skills). Until then (config key
+core_skills_installed false, also without a config file) the core set bundled with P6 MCP is offered instead,
+so the server's MCP prompts work from the first start. Core texts are ASCII, without double hyphens
+(house_problems).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -43,171 +50,23 @@ class Skill:
         return sorted(set(re.findall(r"\bp6_\w+", "\n".join([self.template] + [t for _p, t in self.files]))))
 
 
-RULES = """Rules: name projects by Project ID and activities by Activity ID. Dates, float and the critical
-path come from the last P6 schedule run (F9): if schedule_state says stale or edited since the last
-schedule, say so first. Durations and float are in days. Read every page you rely on (offset =
-next_offset). Writes take two calls: the first one (dry_run=true, the default) only returns the plan and a
-confirmation_token; repeat it with dry_run=false and that token only after the user's explicit yes to
-that plan. After a write, ask the user to open P6 and press F9."""
+RULES = """## Rules for every P6 skill
 
-PROJECT = Arg("project", "Project ID as shown in P6")
+Name projects by Project ID and activities by Activity ID. Dates, float and the critical path come from the
+last P6 schedule run (F9): when a result carries schedule_state and it says stale, warn the user (in the
+skill's warning block when it has one). Durations and float are in days unless a column says otherwise. When
+the skill shows one page of a list, keep to that page; otherwise read every page you rely on (offset =
+next_offset). Only for a skill that writes: writes take two calls; the first one (dry_run=true, the default)
+only returns the plan and a confirmation_token; repeat it with dry_run=false and that token only after the
+user's explicit yes to that plan. After a write, ask the user to open P6 and press F9."""
 
-BUILTIN: tuple[Skill, ...] = (
-    Skill(
-        "weekly-update-review", "Weekly update review",
-        "Weekly schedule update review of a project: progress, critical path, status issues, look-ahead "
-        "and baseline variance. Use when the user asks for a weekly update review, a status report or how "
-        "a project is progressing.",
-        (PROJECT, Arg("weeks", "Look-ahead length in weeks", "3")),
-        """Weekly update review of project {project}.
-
-Steps:
-1. p6_project_summary(project="{project}"): data date, finish dates, % complete, SPI, schedule_state.
-2. p6_progress_check(project="{project}"): out of sequence links and status inconsistencies.
-3. p6_critical_path(project="{project}"): open critical activities and their float.
-4. p6_lookahead(project="{project}", weeks={weeks}): work in progress, starting and finishing.
-5. If the project has a baseline: p6_compare_projects(project="{project}", section="activities",
-   min_variance_days=5) for the finish variance and the most slipped activities.
-
-Report, in this order: status and data date (with any stale warning); progress (units %, physical %,
-SPI); forecast finish against the must finish date and the baseline; critical path and the activities
-that slipped; progress issues to fix in the next update; look-ahead for the next {weeks} weeks; a short
-numbered list of actions.
-
-{rules}"""),
-    Skill(
-        "schedule-quality-audit", "Schedule quality audit",
-        "DCMA 14 quality audit of a project with trend, dangling ends, redundant links and float profile; "
-        "fixes proposed as dry runs only. Use when the user asks to audit, check or score the quality of a "
-        "schedule.",
-        (PROJECT,),
-        """Schedule quality audit of project {project}.
-
-Steps:
-1. p6_health_check(project="{project}"): full DCMA 14 run (it saves a snapshot).
-2. p6_health_check_compare(project="{project}", before="previous", after="latest"): trend since the
-   previous audit; skip it if there is no previous snapshot.
-3. p6_dangling(project="{project}"): open starts and open finishes with suggested links.
-4. p6_redundant_links(project="{project}"): links that are candidates for removal.
-5. p6_float_analysis(project="{project}"): float distribution and high or negative float.
-
-Report: a table of the DCMA checks (pass or fail, value, threshold, threshold source); what improved or
-got worse since the previous audit; findings ranked by impact on the critical path and the finish date,
-each with the Activity IDs concerned; proposed fixes. A fix that changes the database is shown as a dry
-run only: do not apply it unless the user approves it explicitly.
-
-{rules}"""),
-    Skill(
-        "update-import-safely", "Update import (safe)",
-        "Import an updated XER into an existing project safely: inspect, dry run, review, then apply only "
-        "on the user's yes. Use when the user wants to import or load an XER update into a project.",
-        (Arg("xer_path", "Full path of the XER file"), PROJECT),
-        """Update project {project} from the XER file {xer_path}, safely.
-
-Steps:
-1. p6_inspect_xer(path="{xer_path}"): projects in the file, data date, pre-flight errors and warnings.
-   If there are pre-flight errors, stop and report them: the import would be refused.
-2. p6_import_xer(path="{xer_path}", mode="update", project="{project}", dry_run=true): the dry run.
-3. Review it: data_date (database against XER, older), would_refuse and refuse_reasons, counts per
-   table, missing_from_xer (activities, links and assignments of the project that the XER does not
-   contain) and the warnings.
-4. Show the user a short summary of what the import would change and ask two questions: apply it (yes
-   or no), and whether missing links or assignments must be removed (remove_missing).
-5. Only after an explicit yes: call p6_import_xer again with the same arguments, dry_run=false and the
-   confirmation_token of the dry run (and remove_missing if the user asked). Report the backup taken
-   and stale_projects.
-6. Ask the user to open P6 and press F9, then suggest the weekly update review.
-
-{rules}"""),
-    Skill(
-        "delay-whatif", "Delay what-if",
-        "What-if impact of delaying one activity: driving path, float origin and the effect on the project "
-        "finish and milestones (nothing is written). Use when the user asks what happens if an activity is "
-        "late or delayed.",
-        (PROJECT, Arg("task_code", "Activity ID"), Arg("delay_days", "Extra working days", "10")),
-        """What happens to project {project} if activity {task_code} takes {delay_days} more days?
-
-Steps:
-1. p6_get_activity(project="{project}", task_code="{task_code}"): remaining and original duration, total
-   float, calendar.
-2. p6_driving_path(project="{project}", target="{task_code}"): what drives it today.
-3. p6_float_origin(project="{project}", task_code="{task_code}"): where its float comes from.
-4. p6_schedule_whatif(project="{project}", edits=[{{"op": "duration", "task_code": "{task_code}",
-   "remaining_days": <current remaining days + {delay_days}>}}]): use the remaining duration read in
-   step 1 (for a not started activity also set original_days the same way).
-
-Report: the activity today (dates, float, drivers); the project finish before and after (calendar and
-working days); milestones and constrained activities that move or go negative; the activities that
-become critical; whether the engine is trusted (engine.trusted) for this project. Nothing is written to
-the database.
-
-{rules}"""),
-    Skill(
-        "baseline-variance", "Baseline variance",
-        "Variance of a project against its baseline (or another project): finish variance, slipped "
-        "activities, link changes and SPI. Use when the user asks to compare a project with its baseline or "
-        "with another version.",
-        (PROJECT, Arg("baseline", "Project ID of the baseline (empty = the project baseline)", "")),
-        """Variance of project {project} against the baseline "{baseline}" (when it is empty, use the project
-baseline: leave other= and baseline= out of the calls below).
-
-Steps:
-1. p6_compare_projects(project="{project}", other="{baseline}", section="activities",
-   min_variance_days=1): the summary (finish variance, activities added, removed, later and earlier)
-   and the most slipped activities first.
-2. p6_compare_projects(project="{project}", other="{baseline}", section="relationships"): logic added,
-   removed and lags changed.
-3. p6_progress_curve(project="{project}", baseline="{baseline}"): planned against actual and earned at
-   the data date (to_date: spi, variance).
-
-Report: project finish against the baseline (calendar days); the slipped activities grouped by cause
-when visible (late start, longer duration, logic change); added and removed scope and logic; SPI and
-planned against earned at the data date; a short conclusion on the recovery needed. If there is no
-baseline, say so and stop.
-
-{rules}"""),
-    Skill(
-        "export-dashboard", "Excel dashboard",
-        "Excel project controls dashboard of a project (one A3 page and detail sheets), then a short "
-        "summary of its figures (the database is never written). Use when the user asks for an Excel "
-        "dashboard or a one-page project report.",
-        (PROJECT, Arg("path", "Full path of the .xlsx file to write"),
-         Arg("baseline", "Project ID of the baseline (empty = the project baseline)", ""),
-         Arg("prepared_by", "Name printed under the title", ""),
-         Arg("revision", "Revision printed under the title", ""),
-         Arg("company", "Company name in the sidebar", ""),
-         Arg("colors", "Colors 'primary,accent' in hex, for example 1F3864,C00000", "")),
-        """Excel dashboard of project {project}, written to {path}.
-
-Optional values: baseline "{baseline}" (empty = the project baseline), prepared_by "{prepared_by}",
-revision "{revision}", company "{company}", colors "{colors}". Leave every empty one out of the calls
-below.
-
-Steps:
-1. p6_project_summary(project="{project}", baseline="{baseline}"): data date, last schedule run,
-   baseline and schedule_state. If the schedule is stale or was edited since the last schedule, say so
-   and ask the user whether to export anyway or to press F9 in P6 first; wait for the answer. Without a
-   baseline, say that the delayed count, the variance cards and the baseline bars will stay empty.
-2. p6_export_dashboard(project="{project}", path="{path}", baseline="{baseline}",
-   prepared_by="{prepared_by}", revision="{revision}", company="{company}", colors="{colors}"): writes
-   the workbook (the database is never written). If a file already exists at that path the call is
-   refused: ask the user whether to replace it, and only on a yes repeat it with overwrite=true. If the
-   file is open in Excel, ask the user to close it, then run this step again.
-3. Read the result: path, sheets (rows per sheet), counts, cards, dcma_failed, warnings.
-
-Report: the file path; the 7 cards with their value and detail, as written on the Dashboard; the
-numbers of activities, WBS nodes, milestones and critical activities; the DCMA checks that fail (or
-that all pass); every warning. End with how to use the file: the Dashboard prints on one A3 landscape
-page and is protected without a password; the Schedule Overview opens folded to WBS level 2 (outline
-buttons unfold it); the Critical Path sheet lists the P6 float paths of the last F9 (when P6 stored
-none, the near critical activities grouped by total float).
-
-{rules}"""),
-)
+# No skill is built into P6 MCP since 1.9: every one comes from the skill shop (p6mcp.shop), the core set
+# (p6mcp.core_skills) installed at the first start of the Settings app. Kept empty for older callers.
+BUILTIN: tuple[Skill, ...] = ()
 BY_NAME = {s.name: s for s in BUILTIN}
 
 
-# -- the user's own skills (config `custom_skills`) and the built-in ones turned off (`skills_disabled`)
+# -- the skills of the config (`custom_skills`: shop skills, the core set included, and the user's own ones)
 NAME_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")  # with PREFIX, a valid Agent Skills name
 ARG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 # reference files: a relative path (one folder at most), text formats only (never scripts)
@@ -223,6 +82,7 @@ MAX_FILES = 5
 MAX_FILE_TEXT = 10000
 MAX_JSON = 60000  # a whole skill as JSON: the shop's GitHub issue body holds 65,536 characters
 SHARED_KEYS = ("name", "title", "description", "args", "template", "files")
+CONTENT_KEYS = SHARED_KEYS[1:]  # what a skill says: its name, on/off state and source are not content
 
 
 def _one_line(text: str) -> bool:
@@ -251,9 +111,26 @@ def shared_item(item: dict) -> dict:
     return {k: item.get(k, [] if k in ("args", "files") else "") for k in SHARED_KEYS}
 
 
+def content_sha(item: dict) -> str:
+    """SHA-256 of what a stored skill says (title, description, inputs, text, reference files): recorded as
+    source.content_sha when a shop skill is installed, so an edit made here is seen (edited)."""
+    body = {k: item.get(k, [] if k in ("args", "files") else "") for k in CONTENT_KEYS}
+    text = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def edited(item: dict) -> bool:
+    """A stored shop skill whose content changed since its install (no content_sha recorded: edited, so an
+    automatic update never replaces what it cannot compare). False for the user's own skills."""
+    src = item.get("source")
+    if not isinstance(src, dict):
+        return False
+    return src.get("content_sha") != content_sha(item)
+
+
 def check_skill(item, others: tuple[str, ...] = (), strict: bool = False) -> list[str]:
     """Errors of one custom skill {name, title, description, args [{name, description, default}], template,
-    files [{path, text}], enabled, source}. others: names already used (built-in names are always reserved).
+    files [{path, text}], enabled, source}. others: names already used.
     strict: the rules of a new or edited skill (Skills page, shop, file import): description required, on one
     line and at most MAX_DESCRIPTION characters, title on one line, every p6_* tool known, the whole skill at
     most MAX_JSON characters. Stored skills only get the base checks, so older settings keep loading."""
@@ -264,8 +141,6 @@ def check_skill(item, others: tuple[str, ...] = (), strict: bool = False) -> lis
     if not isinstance(name, str) or not NAME_RE.match(name) or len(name) > MAX_NAME:
         errs.append(f"name {name!r}: lowercase letters, digits and single hyphens, starting with a letter, "
                     f"at most {MAX_NAME} characters")
-    elif name in BY_NAME:
-        errs.append(f"name {name!r} is a built-in skill")
     elif name in others:
         errs.append(f"name {name!r} is used twice")
     for key in ("title", "description"):
@@ -280,7 +155,7 @@ def check_skill(item, others: tuple[str, ...] = (), strict: bool = False) -> lis
         errs.append("enabled must be true or false")
     src = item.get("source")
     if src is not None and not (isinstance(src, dict) and isinstance(src.get("shop"), str)):
-        errs.append("source must be {shop, version, sha256}")
+        errs.append("source must be {shop, version, sha256, content_sha}")
     files = item.get("files", [])
     if not isinstance(files, list):
         errs.append("files must be a list")
@@ -365,10 +240,26 @@ def custom_skills(cfg: Optional[dict]) -> list[Skill]:
     return [from_config(it) for it in (cfg or {}).get("custom_skills") or [] if it.get("enabled", True)]
 
 
+def pending_core(cfg: Optional[dict]) -> bool:
+    """The Settings app has not installed the core set yet (None, a missing file: not yet)."""
+    return not (cfg or {}).get("core_skills_installed")
+
+
+def bundled_core(cfg: Optional[dict]) -> list[Skill]:
+    """While pending_core: the core skills bundled with P6 MCP, without the names turned off in skills_disabled
+    (built-in skills of 1.8) and the ones the config already holds (by name or as a shop skill)."""
+    from p6mcp import core_skills
+    cfg = cfg or {}
+    taken = set(cfg.get("skills_disabled") or [])
+    for it in cfg.get("custom_skills") or []:
+        taken |= {it.get("name"), (it.get("source") or {}).get("shop")}
+    return [s for s in core_skills.bundled_skills() if s.name not in taken]
+
+
 def all_skills(cfg: Optional[dict] = None) -> list[Skill]:
-    """Built-in skills that are on, then the user's own ones that are on (None: the built-in ones)."""
-    off = set((cfg or {}).get("skills_disabled") or [])
-    return [s for s in BUILTIN if s.name not in off] + custom_skills(cfg)
+    """The skills of cfg that are on; before the core set is installed (pending_core), the bundled core set
+    first (None: the bundled core set)."""
+    return (bundled_core(cfg) if pending_core(cfg) else []) + custom_skills(cfg)
 
 
 def saved_config() -> dict:
@@ -392,8 +283,62 @@ def available(skill: Skill, profile: str, allow_writes: bool) -> bool:
 
 
 def offered(profile: str, allow_writes: bool, cfg: Optional[dict] = None) -> list[Skill]:
-    """Skills offered under these settings; cfg gives the user's own and the ones turned off."""
+    """Skills offered under these settings; cfg gives the skills and which ones are on."""
     return [s for s in all_skills(cfg) if available(s, profile, allow_writes)]
+
+
+# -- house rules of the skills P6 MCP installs as its core set (bundle) and the catalog marks core
+OUR_COMMENTS_RE = re.compile(r"<!-- p6mcp [^>]*-->\n?|^---$", re.M)  # MARKER, files list, frontmatter fences
+
+
+def tool_calls(text: str) -> list[tuple[str, str]]:
+    """(tool, argument text) of every p6_x(...) call written in text: parentheses matched, those inside double
+    quoted strings skipped (SQL in p6_sql_select); a call left open is not one."""
+    out = []
+    for m in re.finditer(r"\b(p6_\w+)\(", text):
+        depth, i, quoted = 1, m.end(), False
+        while i < len(text) and depth:
+            c = text[i]
+            if c == '"':
+                quoted = not quoted
+            elif not quoted and c in "()":
+                depth += 1 if c == "(" else -1
+            i += 1
+        if depth == 0:
+            out.append((m.group(1), text[m.end():i - 1]))
+    return out
+
+
+def call_params(args: str) -> list[str]:
+    """The name= arguments of a call's argument text (quoted strings left out: name=value inside SQL)."""
+    return re.findall(r"(\w+)\s*=(?!=)", re.sub(r'"[^"]*"', '""', args))
+
+
+def house_problems(skill: Skill, params=None) -> list[str]:
+    """Problems of a core skill in its SKILL.md (P6 MCP's own comments and the frontmatter fences left out) and
+    in every reference file:
+    text not ASCII, a double hyphen, an unknown p6_* tool, a name= inside a p6_x(...) call that is not a
+    parameter of that tool. params: tool -> its parameter names (the server's signatures; None skips that
+    check). Quoted strings in a call are not read for name= (SQL in p6_sql_select)."""
+    out = []
+    for path, text in skill_files(skill).items():
+        if path == "SKILL.md":
+            text = OUR_COMMENTS_RE.sub("", text)
+        if not text.isascii():
+            out.append(f"{path}: not ASCII")
+        if "--" in text:
+            out.append(f"{path}: a double hyphen")
+        unknown = sorted({t for t in re.findall(r"\bp6_\w+", text) if t not in policy.TOOL_KIND})
+        if unknown:
+            out.append(f"{path}: unknown tools {', '.join(unknown)}")
+        for tool, args in tool_calls(text) if params else ():
+            if tool not in policy.TOOL_KIND:
+                continue
+            names = set(params(tool))
+            bad = [a for a in call_params(args) if a not in names]
+            if bad:
+                out.append(f"{path}: {tool}() has no parameter {', '.join(bad)}")
+    return out
 
 
 def render(skill: Skill, values: dict, before_rules: str = "") -> str:
@@ -409,6 +354,8 @@ def render(skill: Skill, values: dict, before_rules: str = "") -> str:
 def prompt_text(skill: Skill, values: dict) -> str:
     """The MCP prompt: the rendered skill with its reference files inline (a prompt has no folder)."""
     refs = "".join(f"Reference file {p}:\n\n{t.rstrip()}\n\n" for p, t in skill.files)
+    if refs:  # the rules then read as the skill's own, not as the end of the last reference file
+        refs += "End of the reference files.\n\n"
     return render(skill, values, refs)
 
 

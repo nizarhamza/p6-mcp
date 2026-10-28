@@ -88,21 +88,21 @@ From the command line (the installer uses the same commands):
 
 ### P6 skills
 
-Six ready-made workflows chain the tools into one fixed report:
+P6 skills are ready-made workflows that chain the tools into one fixed report (weekly update review,
+schedule quality audit, safe update import, delay what-if, baseline variance, Excel dashboard and more).
+Since 1.9 none is built into the app: they all come from the [skill shop](#skill-shop). At its first start
+the Settings app installs the **core set** from the shop (when GitHub cannot be reached, from the copy of the
+core set shipped with P6 MCP, updated from the shop later); the skills you had turned off in 1.8 stay off,
+and the clients' skill folders keep their names. **Restore core skills** (Skills or Skill shop page)
+installs the core set again: missing skills come back and edited ones get the shop's version. With automatic
+updates on (**Logs and updates**), the tray app also installs newer shop versions of your shop skills,
+except the ones you edited here: those show **Update available** on the Skill shop page, and Update asks
+before replacing your changes.
 
-| Skill | Inputs | What it does |
-|---|---|---|
-| `weekly-update-review` | project, weeks (3) | Summary, progress issues, critical path, look-ahead, baseline variance, actions |
-| `schedule-quality-audit` | project | DCMA 14 table, trend since the previous audit, dangling ends, redundant links, float; fixes as dry runs |
-| `update-import-safely` | xer_path, project | Inspects the XER, dry-runs the update import, reviews missing rows, applies it only on your yes |
-| `delay-whatif` | project, task_code, delay_days (10) | Drivers and float origin of an activity, then the finish and milestone impact of a delay (in memory) |
-| `baseline-variance` | project, baseline | Finish variance, slipped activities, logic changes, SPI at the data date |
-| `export-dashboard` | project, path, baseline, prepared_by, revision, company, colors | Checks the last F9, writes the Excel dashboard, then reports its 7 cards, failed DCMA checks and warnings |
-
-They need the Full tool profile (the import also needs writes). **MCP clients > Install skills** writes each
-one as an [Agent Skills](https://agentskills.io) folder `p6-<name>` (a `SKILL.md` and its reference files);
-the client's AI uses a skill when your request matches its description, and Claude Code also runs it as
-`/p6-<name>`:
+Most skills need the Full tool profile (the import also needs writes). **MCP clients > Install skills**
+writes each one as an [Agent Skills](https://agentskills.io) folder `p6-<name>` (a `SKILL.md` and its
+reference files); the client's AI uses a skill when your request matches its description, and Claude Code
+also runs it as `/p6-<name>`:
 
 | Client | Skills folder |
 |---|---|
@@ -121,8 +121,9 @@ The server also offers them as MCP prompts: Claude Desktop lists them in the **+
 `/mcp.p6mcp.<name>`, Claude Code as `/mcp__p6mcp__<name>`. Claude Desktop has no skills folder: export a
 skill as a zip file (**Skills > Export**) and upload it in Claude Desktop's settings to add it as a skill.
 
-The **Skills** page of P6 MCP Settings lists them with whether the current tool settings offer them. Turn a
-built-in skill off, or add your own (**New**, or **Copy to my skills** to start from a built-in one): a name,
+The **Skills** page of P6 MCP Settings lists them with whether the current tool settings offer them and where
+they come from (Shop, Shop edited here, Yours). Turn a skill off, edit it, or add your own (**New**, or **Copy
+to my skills** to start from a shop skill): a name,
 a title, a description that says what it does and when to use it (clients pick a skill by it), inputs
 written as `{input}` in the instructions, the P6 tools to use, and up to 5 text reference files
 (checklists, thresholds, examples; never scripts). The P6 rules are appended to your instructions. The
@@ -133,9 +134,9 @@ client for the prompts.
 
 ### Skill shop
 
-The **Skill shop** page lists the P6 skills other users shared, from the public catalog
-[nizarhamza/p6-mcp-shop](https://github.com/nizarhamza/p6-mcp-shop), and the built-in skills of P6 MCP
-(status Built-in: nothing to install, the Skills page turns them on or off). Reading it needs no account; P6 MCP
+The **Skill shop** page lists the P6 skills of the public catalog
+[nizarhamza/p6-mcp-shop](https://github.com/nizarhamza/p6-mcp-shop): the core set maintained with P6 MCP and
+the skills other users shared. Reading it needs no account; P6 MCP
 reads it only when you open the page or ask your AI client (tools `p6_shop_search`, `p6_shop_get` and
 `p6_shop_install`, Full profile; an install shows the whole skill first and needs your confirmation).
 Read a skill before installing it: it is instructions for the AI, and a skill that uses write tools can
@@ -171,8 +172,10 @@ for the list of what the write tools can change.
 
 P6 MCP runs **only on your PC**: no cloud component, no telemetry. Its only network requests go to GitHub:
 the updates (releases of this repository), which you can turn off under **Logs and updates**, and the skill
-shop (reads of its public catalog, only when you open the Skill shop page or ask for it), which you can
-turn off under **Tools and safety**.
+shop (reads of its public catalog when you open the Skill shop page or ask for it, at the first start of the
+Settings app for the core set, on Restore core skills, and with automatic updates on for newer skill
+versions), which you can turn off under **Tools and safety** (the core set then comes from the copy shipped
+with P6 MCP).
 
 **The data returned by the tools goes to the AI model your MCP client uses**, which may be a cloud
 service. For confidential schedules, use a local model (for example in LM Studio).

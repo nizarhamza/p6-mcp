@@ -1,0 +1,2 @@
+# The bundled core skills are the catalog's p6mcp.json bytes (core.json holds their sha256): never converted
+p6mcp/data/core_skills/*.json -text

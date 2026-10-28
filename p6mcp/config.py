@@ -25,7 +25,7 @@ from typing import Any, Optional
 
 from p6mcp import instructions, skills
 
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 APP_DIR_NAME = "P6MCP"
 TOOL_PROFILES = ("basic", "full")
 TRANSPORTS = ("stdio", "http")
@@ -63,9 +63,11 @@ DEFAULTS: dict[str, Any] = {
     "clients_ignored": [],        # client ids whose registration offer the user declined for good
     "instructions_disabled": [],  # built-in server instruction ids turned off (p6mcp.instructions)
     "custom_instructions": [],    # the user's own instruction lines [{text, enabled}]
-    "skills_disabled": [],        # built-in P6 skill names turned off (p6mcp.skills)
-    "custom_skills": [],          # the user's own skills [{name, title, description, args, template, files,
-                                  #   enabled, source}]
+    "skills_disabled": [],        # 1.8: built-in skill names turned off, carried as enabled false by the core
+                                  #   set install (p6mcp.core_skills), then emptied
+    "custom_skills": [],          # every skill [{name, title, description, args, template, files, enabled,
+                                  #   source {shop, version, sha256, content_sha}}]: shop ones and the user's
+    "core_skills_installed": False,  # the Settings app installed the core set (until then: the bundled copy)
     "shop_enabled": True,         # the skill shop (p6mcp.shop: reads the GitHub catalog when asked)
 }
 
@@ -116,7 +118,17 @@ def _migrate_1_to_2(d: dict) -> dict:
     return d
 
 
-MIGRATIONS = {0: _migrate_0_to_1, 1: _migrate_1_to_2}  # from version -> function giving version + 1
+def _migrate_2_to_3(d: dict) -> dict:
+    """1.9.0: no built-in skills. The core set comes from the skill shop: the Settings app installs it at its
+    next start (p6mcp.core_skills.run_first_start, which needs the network, so not here) and sets
+    core_skills_installed; until then the bundled copy is offered. skills_disabled stays for that install."""
+    d = dict(d)
+    d["core_skills_installed"] = False
+    d["schema_version"] = 3
+    return d
+
+
+MIGRATIONS = {0: _migrate_0_to_1, 1: _migrate_1_to_2, 2: _migrate_2_to_3}  # from version -> version + 1
 
 
 def migrate(d: dict) -> tuple[dict, list[str]]:
@@ -174,7 +186,7 @@ def validate(d: dict) -> dict:
     if not isinstance(out["xer_confirmed"], bool):
         errs.append("xer_confirmed must be true or false")
     for key in ("allow_writes", "backup_before_write", "block_when_p6_running", "run_at_startup",
-                "start_minimized", "update_check", "auto_update", "shop_enabled"):
+                "start_minimized", "update_check", "auto_update", "shop_enabled", "core_skills_installed"):
         if not isinstance(out[key], bool):
             errs.append(f"{key} must be true or false, got {out[key]!r}")
     if not isinstance(out["backup_retention"], int) or isinstance(out["backup_retention"], bool) \

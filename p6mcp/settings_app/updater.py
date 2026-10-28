@@ -6,6 +6,10 @@ then installed silently as soon as no MCP client uses P6 MCP (no p6mcp-server.ex
 the files of a running server cannot be replaced). The tray app quits for the install and the
 installer starts it again. The Update button of the Settings window does the same at once, and can
 close the clients' servers when the user agrees.
+
+On the same schedule, auto_update also brings the skills installed from the skill shop to the shop's
+version, except the ones edited here (p6mcp.core_skills.run_updates: settings saved, clients' skill
+folders rewritten); skills_changed tells the tray, which reloads an open window without unsaved changes.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from p6mcp import __version__, config, updates
+from p6mcp import __version__, config, core_skills, updates
 from p6mcp.settings_app.common import Job, start
 
 log = logging.getLogger("p6mcp.updater")
@@ -40,6 +44,7 @@ class Updater(QObject):
     changed is emitted on every state change; info is the last check() result."""
 
     changed = Signal()
+    skills_changed = Signal(list)  # names of the skills the automatic skill update installed and saved
 
     def __init__(self, before_install: Callable[[str], None], parent=None, can_install: Optional[bool] = None,
                  auto: Callable[[], bool] = auto_enabled):
@@ -53,6 +58,8 @@ class Updater(QObject):
         self.install_when_ready = False  # set by auto mode or by a manual Update deferred until clients close
         self._ask: Optional[Callable[[list[dict]], Optional[bool]]] = None  # the Update button's question
         self.job: Optional[Job] = None
+        self.skills_job: Optional[Job] = None
+        self.skills_report: Optional[dict] = None  # the last run_updates() result
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._periodic)
         self.wait_timer = QTimer(self)
@@ -76,8 +83,30 @@ class Updater(QObject):
 
     # -- steps
     def _periodic(self) -> None:
-        if self.auto() and self.state in (IDLE, LATEST, ERROR, MANUAL):
+        if not self.auto():
+            return
+        if self.state in (IDLE, LATEST, ERROR, MANUAL):
             self.check(install=True)
+        self.update_skills()
+
+    def update_skills(self) -> None:
+        """Install the newer shop versions of the shop skills not edited here (shop turned off: nothing)."""
+        if self.skills_job is None:
+            self.skills_job = start(Job(lambda: core_skills.run_updates(), self._skills_updated))
+
+    def _skills_updated(self, res) -> None:
+        self.skills_job = None
+        if not isinstance(res, dict):
+            log.warning("skill update failed: %s", res)
+            return
+        self.skills_report = res
+        if res.get("edited"):
+            log.info("skills edited here, not updated: %s", ", ".join(res["edited"]))
+        if res.get("failed") or (res.get("error") and not res.get("skipped")):
+            log.warning("skill update: %s", res.get("failed") or res.get("error"))
+        if res.get("updated"):
+            log.info("skills updated from the shop: %s", ", ".join(res["updated"]))
+            self.skills_changed.emit(list(res["updated"]))
 
     def check(self, install: bool = False) -> None:
         """Ask GitHub for the latest release; install=True goes on to download and install it."""

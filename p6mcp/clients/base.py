@@ -208,8 +208,8 @@ class Adapter:
 
     # -- P6 skills (p6mcp.skills): a folder p6-<name> per skill in the client's skills folder
     def _skill_folders(self, profile: str, allow_writes: bool) -> dict[str, dict[str, str]]:
-        """folder name -> {relative path: content} of the skills offered under these settings (built-in ones
-        turned off and the user's own ones from the saved settings)."""
+        """folder name -> {relative path: content} of the skills offered under these settings (the skills of
+        the saved settings, or the bundled core set before it is installed: skills.all_skills)."""
         from p6mcp import skills
         return {skills.folder_name(s): skills.skill_files(s)
                 for s in skills.offered(profile, allow_writes, skills.saved_config())}

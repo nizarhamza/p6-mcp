@@ -38,6 +38,7 @@ def main(argv=None) -> int:
     if signal_running_instance():
         return 0
     runtime.setup_logging("tray")
+    _install_core_skills()
     _convert_commands()
     i18n.set_language((config.read_file()[0] or {}).get("language", "auto") if _readable() else "auto")
     tray = TrayApp(app)
@@ -45,6 +46,20 @@ def main(argv=None) -> int:
     if not minimized or tray.tray is None or asked_during_setup:
         tray.show_window()
     return app.exec()
+
+
+def _install_core_skills() -> None:
+    """P6 MCP 1.9 has no built-in skills: once, install the core set from the skill shop (else from the copy
+    bundled with the app), carry the skills turned off, save the settings and rewrite the clients' P6 skills."""
+    import logging
+    from p6mcp import core_skills
+    log = logging.getLogger("p6mcp.settings")
+    try:
+        done = core_skills.run_first_start()
+        if done is not None:
+            log.info("core skills installed: %s", done)
+    except Exception:  # never a reason not to start: the bundled copy stays offered and the next start retries
+        log.exception("installing the core skills failed")
 
 
 def _convert_commands() -> None:

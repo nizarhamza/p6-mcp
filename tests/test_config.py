@@ -55,10 +55,10 @@ def test_missing_database_file(clean_env, tmp_path):
 def test_migration_from_version_0(clean_env, golden):
     write(clean_env, {"db_path": golden, "allow_writes": True})
     data, steps = config.read_file()
-    assert steps == ["0->1", "1->2"] and data["schema_version"] == 2
+    assert steps == ["0->1", "1->2", "2->3"] and data["schema_version"] == 3
     assert data["databases"] == [{"name": "default", "kind": "sqlite", "path": golden, "confirmed": False}]
     st = config.load()
-    assert st.migrated == ("0->1", "1->2") and st.db_path == ""  # migrated but not confirmed
+    assert st.migrated == ("0->1", "1->2", "2->3") and st.db_path == ""  # migrated but not confirmed
 
 
 def test_migration_of_commands_to_skills(clean_env):
@@ -67,9 +67,21 @@ def test_migration_of_commands_to_skills(clean_env):
            "p6_float_analysis.", "enabled": False}
     write(clean_env, {"schema_version": 1, "custom_commands": [cmd], "commands_disabled": ["delay-whatif"]})
     data, steps = config.read_file()
-    assert steps == ["1->2"] and data["custom_skills"] == [dict(cmd, files=[])]
+    assert steps == ["1->2", "2->3"] and data["custom_skills"] == [dict(cmd, files=[])]
     assert data["skills_disabled"] == ["delay-whatif"] and "custom_commands" not in data
     assert data["shop_enabled"] is True
+
+
+def test_migration_to_shop_skills(clean_env):
+    """1.9.0: no built-in skills. In memory only the flag changes (the core set needs the network: the Settings
+    app installs it, p6mcp.core_skills); skills_disabled stays for that install."""
+    write(clean_env, {"schema_version": 2, "skills_disabled": ["delay-whatif"], "custom_skills": []})
+    data, steps = config.read_file()
+    assert steps == ["2->3"] and data["schema_version"] == 3 and data["core_skills_installed"] is False
+    assert data["skills_disabled"] == ["delay-whatif"]
+    assert config.validate({})["core_skills_installed"] is False  # no file: not installed either
+    with pytest.raises(config.ConfigError, match="core_skills_installed"):
+        config.validate({"core_skills_installed": "yes"})
 
 
 def test_newer_schema_version_is_reported_not_raised(clean_env):

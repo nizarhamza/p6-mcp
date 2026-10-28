@@ -8,8 +8,9 @@
   with a label and the catalog's GitHub Action checks it with check_shared (this module, stdlib only,
   imported by the workflow) and publishes it.
 - Without a GitHub account: export_zip / import_file (the zip is also Claude Desktop's skill upload file).
-- The catalog also lists the built-in skills (builtin_meta, flag builtin, written by the catalog's own tool):
-  status builtin, never fetched or installed, the app shows its own copy.
+- The core set (index entries flagged core, p6mcp.core_skills) is installed like any other skill.
+- Catalogs written for P6 MCP 1.8.2 also list its built-in skills (flag builtin): since 1.9 there is none, so
+  such an entry reads as needing a newer P6 MCP and is never fetched or installed.
 No Qt here: the Shop and Skills pages and the p6_shop_* tools drive it; the tests fake the network (opener).
 """
 
@@ -41,8 +42,7 @@ MAX_ZIP_ENTRIES = 20
 MAX_ZIP_BYTES = 1024 * 1024
 # shop status of a catalog skill on this PC
 AVAILABLE, INSTALLED, UPDATE, CONFLICT, NEWER_APP = "available", "installed", "update", "conflict", "newer_app"
-BUILTIN = "builtin"  # a built-in skill of P6 MCP, listed by the catalog: nothing to install
-BUILTIN_SINCE = "1.8.2"  # min_app_version of the built-in entries: older apps show them as newer_app
+BUILTIN = "builtin"  # status of a built-in skill of this P6 MCP listed by the catalog (none since 1.9)
 
 
 def _version(v: str) -> tuple:
@@ -67,29 +67,6 @@ def meta(item: dict, **extra) -> dict:
            "min_app_version": item.get("min_app_version") or __version__}
     out.update(extra)
     return out
-
-
-def builtin_meta(skill: skills.Skill) -> dict:
-    """p6mcp.json of a built-in skill in the catalog: its definition as this P6 MCP ships it (template in the
-    built-in str.format form, rules included through {rules}). The catalog adds version, author and license."""
-    tools = skill.tools()
-    return {"schema": SCHEMA, "kind": KIND, "builtin": True, "name": skill.name, "title": skill.title,
-            "description": skill.description,
-            "args": [{"name": a.name, "description": a.description, "default": a.default} for a in skill.args],
-            "template": skill.template, "files": [{"path": p, "text": t} for p, t in skill.files],
-            "tools": tools, "writes": _writes(tools), "min_app_version": BUILTIN_SINCE}
-
-
-def check_builtin(item) -> list[str]:
-    """Errors of a built-in entry of the catalog: a built-in skill of this P6 MCP, with the same definition."""
-    if not isinstance(item, dict) or item.get("builtin") is not True:
-        return ["not a built-in skill entry"]
-    skill = skills.BY_NAME.get(item.get("name"))
-    if skill is None:
-        return [f"{item.get('name')!r} is not a built-in skill of P6 MCP {__version__}"]
-    want = builtin_meta(skill)
-    diff = [k for k in want if item.get(k) != want[k]]
-    return [f"differs from the built-in skill of P6 MCP {__version__}: {', '.join(diff)}"] if diff else []
 
 
 def check_shared(item) -> list[str]:
@@ -200,9 +177,9 @@ def search(rows: list[dict], query: str = "") -> list[dict]:
 # ----------------------------------------------------------------- install on this PC
 
 def status(data: dict, entry: dict) -> str:
-    """available, installed (same version), update (a newer version), conflict (the name is a built-in
-    skill or one of the user's own), newer_app (needs a newer P6 MCP) or builtin (a built-in skill of this
-    P6 MCP, on or off on the Skills page)."""
+    """available, installed (same version), update (a newer version; also for a skill edited here, which the
+    automatic update leaves alone: skills.edited), conflict (the name is one of the user's own skills) or
+    newer_app (needs a newer P6 MCP; also the built-in entries of a 1.8.2 catalog)."""
     if entry.get("builtin"):
         return BUILTIN if entry["name"] in skills.BY_NAME else NEWER_APP
     mine = installed_as(data, entry["name"])
@@ -210,7 +187,7 @@ def status(data: dict, entry: dict) -> str:
         return INSTALLED if (mine.get("source") or {}).get("sha256") == entry.get("sha256") else UPDATE
     if needs_newer_app(entry):
         return NEWER_APP
-    if entry["name"] in skills.BY_NAME or any(c.get("name") == entry["name"] for c in data.get("custom_skills") or []):
+    if any(c.get("name") == entry["name"] for c in data.get("custom_skills") or []):
         return CONFLICT
     return AVAILABLE
 
@@ -224,11 +201,11 @@ def installed_as(data: dict, shop_name: str) -> Optional[dict]:
 def install(data: dict, item: dict, as_name: Optional[str] = None) -> dict:
     """data with the shop skill item (a fetch_skill result) added, or updated when it is installed already
     (under whatever name). A name held by another skill is refused unless as_name gives a free one. The
-    stored item keeps source {shop, version, sha256} so the Shop page sees updates."""
+    stored item keeps source {shop, version, sha256} so the Shop page sees updates, and content_sha (of the
+    content as stored) so an edit made here is seen (skills.edited)."""
     from p6mcp import settings_logic
     if item.get("builtin"):
-        raise ValueError(f"{item['name']} is built into P6 MCP: nothing to install (the Skills page turns it on "
-                         "or off)")
+        raise ValueError(f"{item['name']} is a built-in skill of P6 MCP 1.8: it is not installed from the shop")
     old = installed_as(data, item["name"]) if as_name is None else None
     name = as_name or (old["name"] if old else item["name"])
     if old is None and any(c.get("name") == name for c in data.get("custom_skills") or []):
@@ -237,8 +214,9 @@ def install(data: dict, item: dict, as_name: Optional[str] = None) -> dict:
     if old is not None:
         stored["enabled"] = bool(old.get("enabled", True))
     data = settings_logic.put_skill(data, stored, old_name=name if old is not None else None)
-    src = {"shop": item["name"], "version": int(item.get("version") or 1), "sha256": item.get("sha256")}
-    next(c for c in data["custom_skills"] if c["name"] == name)["source"] = src
+    new = next(c for c in data["custom_skills"] if c["name"] == name)
+    new["source"] = {"shop": item["name"], "version": int(item.get("version") or 1), "sha256": item.get("sha256"),
+                     "content_sha": skills.content_sha(new)}
     return data
 
 

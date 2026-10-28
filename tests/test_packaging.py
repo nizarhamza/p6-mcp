@@ -32,6 +32,44 @@ def test_semver_and_manifest():
     assert set(m["user_config"]) == {"database", "tool_profile", "allow_writes"}
 
 
+def test_core_skills_are_packaged_and_built_from_a_catalog(tmp_path):
+    """The core set shipped for offline first starts: package data, PyInstaller datas (both exes), and
+    tools/bundle_core_skills.py, which copies the catalog's bytes and refuses a file the index does not match."""
+    import hashlib
+    import json
+    from p6mcp import core_skills, shop
+    spec = open(os.path.join(ROOT, "packaging", "p6mcp.spec"), encoding="utf-8").read()
+    assert '"p6mcp", "data", "core_skills", "*.json"' in spec
+    assert '"data/core_skills/*.json"' in open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8").read()
+    assert "p6mcp/data/core_skills/*.json -text" in open(os.path.join(ROOT, ".gitattributes"), encoding="utf-8").read()
+
+    cat, entries = tmp_path / "catalog", []
+    for name in core_skills.names():  # a catalog checkout holding the bundled skills, one flagged core
+        raw = open(os.path.join(core_skills.BUNDLE_DIR, name + ".json"), "rb").read()
+        (cat / "skills" / name).mkdir(parents=True)
+        (cat / "skills" / name / shop.META).write_bytes(raw)
+        entries.append({"name": name, "sha256": hashlib.sha256(raw).hexdigest(),
+                        "core": name == core_skills.names()[0]})
+    (cat / shop.INDEX).write_text(json.dumps({"schema": 1, "skills": entries}), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("bundle_core_skills", os.path.join(ROOT, "tools",
+                                                                                      "bundle_core_skills.py"))
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "stale.json").write_text("{}", encoding="utf-8")
+    head = tool.build(str(cat), dest=str(out))  # the entries flagged core
+    assert [r["name"] for r in head["skills"]] == core_skills.names()[:1] and not (out / "stale.json").exists()
+    head = tool.build(str(cat), core_skills.names(), dest=str(out))
+    assert head["skills"] == core_skills.bundle()["skills"] and head["catalog"] == shop.REPO
+    for name in core_skills.names():
+        assert (out / f"{name}.json").read_bytes() == (cat / "skills" / name / shop.META).read_bytes()
+    first = cat / "skills" / core_skills.names()[0] / shop.META
+    first.write_bytes(first.read_bytes().replace(b"\n", b"\r\n"))  # a CRLF checkout: not the bytes GitHub serves
+    with pytest.raises(SystemExit, match="does not match the index sha256"):
+        tool.build(str(cat), core_skills.names(), dest=str(out))
+
+
 def test_unresolved_bundle_options_mean_unset(monkeypatch, tmp_path):
     monkeypatch.setenv("P6MCP_CONFIG", str(tmp_path / "none.json"))
     monkeypatch.setenv("P6_DB_PATH", "${user_config.database}")

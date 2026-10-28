@@ -231,7 +231,12 @@ def test_clients_page_offers_registers_and_ignores(qtbot, env, golden, tmp_path)
 def test_clients_page_installs_skills(qtbot, env, tmp_path):
     os.makedirs(tmp_path / "User" / ".cursor")
     os.makedirs(tmp_path / "Roaming" / "Claude")
-    w = make(qtbot, {"language": "en", "tool_profile": "basic"})
+    full_only = [{"name": n, "title": n, "description": f"{n} check. Use when asked.", "args": [],
+                  "template": f"Run {t}.", "enabled": True}
+                 for n, t in (("variance-check", "p6_compare_projects"), ("driving-check", "p6_driving_path"),
+                              ("import-check", "p6_import_xer"))]
+    w = make(qtbot, {"language": "en", "tool_profile": "basic", "core_skills_installed": True,
+                     "custom_skills": full_only})
     page = w.page(ClientsPage)
     page.select("cursor")
     assert not page.skill_btn.isHidden() and not page.skill_btn.isEnabled()  # Basic profile: no skill offered
@@ -242,11 +247,10 @@ def test_clients_page_installs_skills(qtbot, env, tmp_path):
     assert page.install_skills()
     qtbot.waitUntil(lambda: page.job is None, timeout=15000)
     folder = tmp_path / "User" / ".claude" / "skills"  # Cursor reads Claude Code's skills folder
-    assert sorted(os.listdir(folder)) == ["p6-baseline-variance", "p6-delay-whatif", "p6-export-dashboard",
-                                          "p6-schedule-quality-audit", "p6-weekly-update-review"]
+    assert sorted(os.listdir(folder)) == ["p6-driving-check", "p6-variance-check"]  # writes off: no import skill
     page.select("cursor")
     assert page.status().skills == "installed" and not page.skill_btn.isEnabled()
-    assert "p6-weekly-update-review" in page.skill_state.text()
+    assert "p6-variance-check" in page.skill_state.text()
     assert page.remove_skills()  # ask answers yes
     qtbot.waitUntil(lambda: page.job is None, timeout=15000)
     page.select("cursor")
@@ -360,6 +364,14 @@ def test_tray_app(qtbot, env):
         sup.state = supervisor.State(supervisor.RUNNING, 40200, 1)
         app.tick()
         assert "Running" in app.window.page(ServerPage).status.text()
+        config.save(dict(config.read_file()[0], p6_user="SKILLS"))  # the automatic skill update saved the file
+        app.updater.skills_changed.emit(["float-watch"])
+        assert app.window.data["p6_user"] == "SKILLS" and not app.window.dirty()  # reloaded: no unsaved change
+        app.window.set_data(dict(app.window.data, p6_user="TYPED"))
+        config.save(dict(config.read_file()[0], p6_user="AGAIN"))
+        app.updater.skills_changed.emit(["float-watch"])
+        assert app.window.data["p6_user"] == "TYPED"  # unsaved changes are kept (Save asks overwrite or reload)
+        app.window.set_data(dict(app.window.data, p6_user="AGAIN"))
         assert tray_mod.signal_running_instance()  # a second start would only show this window
         assert not tray_mod.make_icon(supervisor.RUNNING).isNull()
     finally:
@@ -436,7 +448,7 @@ def test_instructions_and_skills_pages(qtbot, win, env, monkeypatch):
     assert "your instructions" in win.banner.text()  # restart the client to read them
 
     cmds = win.page(SkillsPage)
-    assert cmds.table.rowCount() == 6 and cmds.preview.toPlainText().startswith("---\nname: p6-weekly-update-review")
+    assert cmds.table.rowCount() == 0 and cmds.preview.toPlainText() == ""  # no built-in rows: the config's only
     dlg = SkillDialog(cmds, win.data)
     qtbot.addWidget(dlg)
     dlg.name.setText("my-check")
@@ -451,13 +463,15 @@ def test_instructions_and_skills_pages(qtbot, win, env, monkeypatch):
                                                               "default": None}]
     assert dlg.result_data["custom_skills"][0]["files"] == [{"path": "ref/limits.md", "text": "Float under 5 days."}]
     monkeypatch.setattr(cmds, "edit_skill", lambda item, old: dlg.result_data)
-    assert cmds.add() and cmds.table.rowCount() == 7 and cmds.current()["name"] == "my-check"
-    assert cmds.table.item(6, 4).text() == "No: needs p6_update_activity"  # Basic profile
+    assert cmds.add() and cmds.table.rowCount() == 1 and cmds.current()["name"] == "my-check"
+    assert cmds.table.item(0, 4).text() == "No: needs p6_update_activity"  # Basic profile
+    assert cmds.table.item(0, 3).text() == "Yours"
     assert "Check <project> with" in cmds.preview.toPlainText() and "- ref/limits.md" in cmds.preview.toPlainText()
     cmds.table.item(0, 0).setCheckState(Qt.CheckState.Unchecked)
-    assert win.data["skills_disabled"] == ["weekly-update-review"]
-    cmds.table.setCurrentCell(6, 1)
-    assert cmds.remove() and cmds.table.rowCount() == 6
+    assert win.data["custom_skills"][0]["enabled"] is False and win.data["skills_disabled"] == []
+    assert cmds.table.item(0, 4).text() == "No (turned off)"
+    cmds.table.setCurrentCell(0, 1)
+    assert cmds.remove() and cmds.table.rowCount() == 0
 
 
 def test_skill_sharing_files_and_shop_page(qtbot, win, env, monkeypatch, tmp_path):
@@ -499,19 +513,71 @@ def test_skill_sharing_files_and_shop_page(qtbot, win, env, monkeypatch, tmp_pat
     assert "planner1" in sp.links.text() and "/issues/3" in sp.links.text()
     assert sp.install() and sp.table.item(0, 4).text() == "Installed" and sp.remove_btn.isEnabled()
     stored = next(c for c in win.data["custom_skills"] if c["name"] == "lookahead-plus")
-    assert stored["source"] == {"shop": "lookahead-plus", "version": 1, "sha256": "ab"}
-    assert win.page(SkillsPage).table.rowCount() == 9 and win.save()
+    from p6mcp import skills
+    assert stored["source"] == {"shop": "lookahead-plus", "version": 1, "sha256": "ab",
+                                "content_sha": skills.content_sha(stored)}
+    assert win.page(SkillsPage).table.rowCount() == 3 and win.save()
     assert sp.remove() and shop.installed_as(win.data, "lookahead-plus") is None
 
-    from p6mcp import skills
-    builtin = {k: v for k, v in shop.builtin_meta(skills.BY_NAME["delay-whatif"]).items()
-               if k not in ("args", "template", "files")} | {"version": 1, "author": "nizarhamza", "sha256": "cd"}
-    sp.index = {"skills": [entry, builtin], "error": None}
-    sp.filter.setCurrentIndex(shop_page.FILTERS.index("builtin"))  # refreshes the table
-    assert sp.table.rowCount() == 1 and sp.table.item(0, 4).text() == "Built-in" and sp.job is None
-    assert sp.preview.toPlainText().startswith("---\nname: p6-delay-whatif\n")  # this app's copy, no network
-    assert "nothing to install" in sp.links.text() and not sp.install_btn.isEnabled()
-    assert not sp.remove_btn.isEnabled() and not sp.install()
+    old = {"schema": 1, "kind": shop.KIND, "builtin": True, "name": "delay-whatif", "title": "Delay what-if",
+           "description": "Delay. Use when asked.", "tools": [], "writes": False, "min_app_version": "1.8.2",
+           "version": 1, "author": "nizarhamza", "sha256": "cd"}  # a built-in entry of a 1.8.2 catalog
+    sp.index = {"skills": [entry, old], "error": None}
+    assert shop_page.FILTERS == ("all", "read", "writes", "installed", "updates")  # no Built-in filter
+    sp.refresh()
+    sp.table.setCurrentCell(1, 0)
+    assert sp.table.item(1, 0).text() == "p6-delay-whatif" and sp.job is None  # never read from the catalog
+    assert sp.table.item(1, 4).text() == "Needs a newer P6 MCP" == sp.preview.toPlainText()
+    assert not sp.install_btn.isEnabled() and not sp.remove_btn.isEnabled() and not sp.install()
     win.set_data(dict(win.data, shop_enabled=False))
     sp.refresh()
     assert "turned off" in sp.state.text() and sp.table.rowCount() == 0
+
+
+def test_restore_core_skills_and_edited_shop_skills(qtbot, win, env, monkeypatch):
+    from p6mcp import core_skills, settings_logic, shop
+    from p6mcp.settings_app import guidance_pages, shop_page
+    from p6mcp.settings_app.guidance_pages import SkillsPage
+    from p6mcp.settings_app.shop_page import ShopPage
+    monkeypatch.setattr(guidance_pages, "ask", lambda *a, **k: True)
+    page, sp, names = win.page(SkillsPage), win.page(ShopPage), core_skills.names()
+    assert sp.restore_btn.text() == page.restore_btn.text() == "Restore core skills..."
+    assert page.restore_core() and not page.restore_btn.isEnabled()  # the shop is offline in these tests (env)
+    qtbot.waitUntil(lambda: page.job is None, timeout=15000)
+    assert [r["name"] for r in page.rows] == names and page.restore_btn.isEnabled() and win.dirty()
+    assert [page.table.item(i, 3).text() for i in range(len(names))] == ["Shop"] * len(names)
+    assert "copy shipped with P6 MCP" in win.statusBar().currentMessage()
+    stored = {c["name"]: c for c in win.data["custom_skills"]}
+    assert [stored[r["name"]]["source"]["sha256"] for r in core_skills.bundle()["skills"]] == \
+        [r["sha256"] for r in core_skills.bundle()["skills"]]  # the Shop page sees later updates
+
+    first = names[0]  # edited here: it keeps its source, the automatic update leaves it alone
+    win.set_data(settings_logic.put_skill(win.data, dict(stored[first], template="Mine p6_lookahead."), first))
+    page.refresh(first)
+    assert page.table.item(0, 3).text() == "Shop, edited here"
+    later = shop.meta(dict(core_skills.bundled(first), version=99), version=99, author="nizarhamza")
+    entry = {k: v for k, v in later.items() if k not in ("args", "template", "files")} | {"sha256": "v99"}
+    monkeypatch.setattr(shop, "fetch_index", lambda *a, **k: {"skills": [entry], "error": None, "url": ""})
+    monkeypatch.setattr(shop, "fetch_skill", lambda e, *a, **k: dict(later, sha256=e["sha256"]))
+    sp.load()
+    qtbot.waitUntil(lambda: sp.job is None and bool(sp.items), timeout=15000)
+    assert sp.table.item(0, 4).text() == "Update available, edited here" and sp.install_btn.text() == "Update"
+    asked = []
+    monkeypatch.setattr(shop_page, "ask", lambda *a, **k: asked.append(a[2]) or False)
+    assert not sp.install() and asked[0].startswith(f"You edited the skill {first} here")
+    assert next(c for c in win.data["custom_skills"] if c["name"] == first)["template"] == "Mine p6_lookahead."
+
+    sp.restore_btn.click()  # online now: the edited one gets the shop's version back, the others are current
+    qtbot.waitUntil(lambda: page.job is None, timeout=15000)
+    restored = next(c for c in win.data["custom_skills"] if c["name"] == first)
+    assert restored["source"]["version"] == 99 and restored["template"] == core_skills.bundled(first)["template"]
+    assert win.statusBar().currentMessage().startswith("Core skills restored from the shop: 1 installed")
+    assert sp.table.item(0, 4).text() == "Installed"  # the Shop page was refreshed
+
+    data = settings_logic.remove_skill(win.data, names[-1])  # one of the user's own takes a core name
+    win.set_data(settings_logic.put_skill(data, {"name": names[-1], "title": "Mine", "description": "Mine. Use "
+                                                 "when asked.", "args": [], "template": "Run p6_lookahead."}))
+    assert page.restore_core()
+    qtbot.waitUntil(lambda: page.job is None, timeout=15000)
+    assert f"Not restored: {names[-1]}" in env["warnings"][-1]
+    assert next(c for c in win.data["custom_skills"] if c["name"] == names[-1])["title"] == "Mine"

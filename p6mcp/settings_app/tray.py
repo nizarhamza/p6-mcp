@@ -131,6 +131,7 @@ class TrayApp(QObject):
         self.timer.timeout.connect(self.tick)
         self.timer.start(TICK_MS)
         self.updater = Updater(self._quit_for_update, self)
+        self.updater.skills_changed.connect(self._skills_updated)
         if self.tray is not None:
             self.updater.start()
         self.tick()
@@ -185,6 +186,13 @@ class TrayApp(QObject):
         self.window.setWindowState(self.window.windowState() & ~Qt.WindowState.WindowMinimized)
         self.window.raise_()
         self.window.activateWindow()
+
+    def _skills_updated(self, _names: list) -> None:
+        """The updater saved newer shop skills: an open window without unsaved changes reads them (one with
+        unsaved changes asks on Save, as for any change made by another program)."""
+        w = self.window
+        if w is not None and not w.load_error and not w.dirty():
+            w.reload()
 
     def _window_closed(self) -> bool:
         """Called when the window accepted its close: True keeps the app (window hidden)."""

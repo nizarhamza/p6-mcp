@@ -40,8 +40,11 @@ Planned, early and late dates and float are never written: P6 recalculates them 
 - The only network requests go to GitHub, and both can be turned off: the updates (releases of this
   repository; an update is installed only after its SHA256 matches the release's `SHA256SUMS.txt`, the
   installer is not code signed yet) and the skill shop (anonymous reads of the public catalog
-  nizarhamza/p6-mcp-shop under raw.githubusercontent.com, only when the Shop page or a `p6_shop_*` tool
-  asks; each skill file is checked against the catalog index's SHA256). P6 MCP never sends anything to the
+  nizarhamza/p6-mcp-shop under raw.githubusercontent.com, when the Shop page or a `p6_shop_*` tool asks, at
+  the first start of the Settings app and on Restore core skills for the core set, and with automatic updates
+  on for newer versions of the shop skills not edited locally; each skill file is checked against the
+  catalog index's SHA256; with the shop off, the core set comes from the copy shipped with P6 MCP). P6 MCP
+  never sends anything to the
   catalog: sharing a skill is a GitHub issue the user creates in the browser.
 - Skills are text only: SKILL.md and up to 5 text reference files (.md, .txt, .csv, .json); scripts are
   refused on import. A skill names tools; it gets no permission of its own: write tools keep the dry run and

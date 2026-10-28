@@ -121,10 +121,14 @@ from test_settings_app import env  # noqa: E402,F401  (fixture: fake profile and
 
 @pytest.fixture
 def fake(monkeypatch):
-    st = {"clients": [], "installed": [], "stopped": [], "quit": [], "newer": True}
+    st = {"clients": [], "installed": [], "stopped": [], "quit": [], "newer": True, "skill_runs": 0,
+          "skill_result": {"updated": [], "edited": [], "failed": [], "error": None}}
     monkeypatch.setattr(U.updates, "check", lambda *a, **k: {"current": "1.0.0", "latest": "9.9.9",
                                                              "newer": st["newer"], "url": "u", "assets": {},
                                                              "error": None})
+    # the skill update of the same schedule (p6mcp.core_skills.run_updates, tested in test_shop)
+    monkeypatch.setattr(U.core_skills, "run_updates",
+                        lambda: st.update(skill_runs=st["skill_runs"] + 1) or st["skill_result"])
     monkeypatch.setattr(U.updates, "download", lambda info: "C:/x/" + EXE)
     monkeypatch.setattr(U.updates, "client_servers", lambda: list(st["clients"]))
     monkeypatch.setattr(U.updates, "launch_install", lambda p: st["installed"].append(p) or "log")
@@ -157,7 +161,22 @@ def test_auto_update_waits_for_the_clients(qtbot, fake):
 def test_auto_off_never_checks(qtbot, fake):
     u = make_updater(fake, auto=False)
     u._periodic()
-    assert u.state == U.IDLE and u.job is None
+    assert u.state == U.IDLE and u.job is None and u.skills_job is None and fake["skill_runs"] == 0
+
+
+def test_auto_update_also_updates_the_shop_skills(qtbot, fake):
+    fake["newer"] = False
+    fake["skill_result"] = {"updated": ["float-watch"], "edited": ["mine"], "failed": [], "error": None}
+    u = make_updater(fake)
+    got = []
+    u.skills_changed.connect(got.append)
+    u._periodic()
+    qtbot.waitUntil(lambda: u.skills_job is None and u.state == U.LATEST, timeout=5000)
+    assert fake["skill_runs"] == 1 and got == [["float-watch"]] and u.skills_report["edited"] == ["mine"]
+    fake["skill_result"] = {"updated": [], "edited": [], "failed": [], "error": None}
+    u._periodic()  # nothing newer: no signal, the window is not reloaded
+    qtbot.waitUntil(lambda: u.skills_job is None and fake["skill_runs"] == 2, timeout=5000)
+    assert got == [["float-watch"]]
 
 
 def test_latest_and_portable(qtbot, fake):

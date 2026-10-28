@@ -2,21 +2,32 @@
 (a fake user profile: the real client folders are never touched)."""
 
 import asyncio
+import hashlib
 import inspect
 import json
 import os
-import re
 
 import pytest
 
-from p6mcp import clients, policy, skills
+from p6mcp import clients, core_skills, shop, skills
 from p6mcp.clients.__main__ import main as cli
 from p6mcp.clients.base import Launch
 
 LN = Launch(r"C:\Program Files\P6 MCP\p6mcp-server.exe", [])
-NAMES = [s.name for s in skills.BUILTIN]
-FOLDERS = [skills.PREFIX + n for n in NAMES]
 SHARED = ("User", ".claude", "skills")  # Claude Code, Cursor and VS Code read ~/.claude/skills
+
+
+def item(name: str, tool: str) -> dict:
+    return {"name": name, "title": name.replace("-", " ").capitalize(), "description": f"{name} of a project. Use "
+            "when asked.", "args": [{"name": "project", "description": "Project ID", "default": None}],
+            "template": f"Run {tool}(project=\"{{project}}\").", "files": [], "enabled": True}
+
+
+# skills of the config once the core set is installed (no bundled copy offered then)
+MINE = [item("weekly-check", "p6_project_summary"), item("import-check", "p6_import_xer"),
+        item("float-check", "p6_float_analysis"), item("delay-check", "p6_schedule_whatif")]
+NAMES = [i["name"] for i in MINE]
+FOLDERS = [skills.PREFIX + n for n in NAMES]
 
 
 @pytest.fixture
@@ -30,7 +41,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr("p6mcp.clients.base.launch", lambda: LN)
     monkeypatch.setattr("p6mcp.clients._running_names", lambda: set())
     from p6mcp import config
-    config.save({"tool_profile": "full", "allow_writes": True})
+    config.save({"tool_profile": "full", "allow_writes": True, "core_skills_installed": True, "custom_skills": MINE})
     return tmp_path
 
 
@@ -40,45 +51,88 @@ def frontmatter(text: str) -> dict:
             for k, v in (line.split(": ", 1) for line in head.strip().splitlines())}
 
 
-def test_texts_name_existing_tools_and_parameters(server):
-    for s in skills.BUILTIN:
-        text = skills.render(s, {a.name: "SAMPLE" for a in s.args})
-        assert text.isascii() and "--" not in text, s.name
-        assert s.tools() and all(t in policy.TOOL_KIND for t in s.tools()), s.name
-        for tool, args in re.findall(r"\b(p6_\w+)\(([^()]*)\)", text):
-            params = inspect.signature(server.REGISTERED[tool]).parameters
-            assert all(a in params for a in re.findall(r"(\w+)=", args)), (s.name, tool, args)
-        assert "{" not in skills.render(s, {}).replace('{"op"', ""), s.name  # every field filled
-        assert "Use when" in s.description and len(s.description) <= skills.MAX_DESCRIPTION, s.name
-        assert s.description.isascii() and skills._one_line(s.description), s.name
+def params(server):
+    return lambda tool: inspect.signature(server.REGISTERED[tool]).parameters
+
+
+def test_no_skill_is_built_in():
+    assert skills.BUILTIN == () and skills.BY_NAME == {}
+    assert skills.check_skill(item("weekly-update-review", "p6_lookahead"), strict=True) == []  # no name reserved
+
+
+def test_bundled_core_skills(server):
+    """The copy of the core set shipped for offline first starts: the catalog's bytes (core.json sha256), the
+    shop's rules of this version, and the house rules in SKILL.md and every reference file."""
+    head = core_skills.bundle()
+    assert head["catalog"] == shop.REPO and [r["name"] for r in head["skills"]] == core_skills.names()
+    assert core_skills.names(), "no bundled core skill"
+    for row in head["skills"]:
+        with open(os.path.join(core_skills.BUNDLE_DIR, row["name"] + ".json"), "rb") as fh:
+            raw = fh.read()
+        assert hashlib.sha256(raw).hexdigest() == row["sha256"], row["name"]  # .gitattributes: never converted
+        it = core_skills.bundled(row["name"])
+        assert it["version"] == row["version"] and it["sha256"] == row["sha256"] and shop.check_shared(it) == []
+    for s in core_skills.bundled_skills():
+        assert skills.house_problems(s, params(server)) == [], s.name
+        assert s.tools() and s.description.isascii() and skills._one_line(s.description), s.name
+        assert "{" not in skills.render(s, {a.name: "SAMPLE" for a in s.args}).replace('{"op"', ""), s.name
+
+
+def test_house_rules_read_the_reference_files_too(server):
+    bad = skills.from_config(dict(item("refs", "p6_lookahead"), files=[
+        {"path": "reference/a.md", "text": "Use p6_lookahead(project=\"X\", wekks=2) -- or p6_nope."},
+        {"path": "b.md", "text": "caf\u00e9 p6_sql_select(sql=\"SELECT COALESCE(a, 1) FROM T WHERE x=1\", limt=5), "
+                                 "then p6_sql_select(query=\"(\")"}]))
+    assert skills.house_problems(bad, params(server)) == [
+        "reference/a.md: a double hyphen", "reference/a.md: unknown tools p6_nope",
+        "reference/a.md: p6_lookahead() has no parameter wekks", "b.md: not ASCII",
+        "b.md: p6_sql_select() has no parameter limt", "b.md: p6_sql_select() has no parameter query"]
+    assert skills.house_problems(bad) == ["reference/a.md: a double hyphen", "reference/a.md: unknown tools p6_nope",
+                                          "b.md: not ASCII"]  # without the signatures: no parameter check
+    assert skills.tool_calls('p6_a(x="(", y=f(1)) and p6_b(open') == [("p6_a", 'x="(", y=f(1)')]
 
 
 def test_offered_follows_the_tool_settings():
-    assert skills.offered("basic", True) == []
-    assert [s.name for s in skills.offered("full", False)] == [n for n in NAMES if n != "update-import-safely"]
-    assert [s.name for s in skills.offered("full", True)] == NAMES
+    """Before the core set is installed (no config file, or core_skills_installed false) the bundled copy is
+    offered; afterwards only the skills of the config."""
+    bundled = core_skills.bundled_skills()
+    for profile, writes in (("basic", False), ("full", False), ("full", True)):
+        want = [s.name for s in bundled if skills.available(s, profile, writes)]
+        assert [s.name for s in skills.offered(profile, writes)] == want
+    first = bundled[0].name
+    pending = {"skills_disabled": [first], "custom_skills": [dict(item("mine", "p6_lookahead"))]}
+    assert [s.name for s in skills.offered("full", True, pending)] == [s.name for s in bundled[1:]] + ["mine"]
+    held = {"custom_skills": [dict(item(first, "p6_lookahead"))]}  # a skill of the config with a core name
+    assert [s.name for s in skills.all_skills(held)].count(first) == 1 and skills.all_skills(held)[-1].custom
+    done = dict(pending, core_skills_installed=True)
+    assert [s.name for s in skills.offered("full", True, done)] == ["mine"]
+    assert skills.offered("basic", True, {"core_skills_installed": True}) == []
 
 
 def test_server_offers_them_as_mcp_prompts(server):
-    assert sorted(server.PROMPTS) == sorted(NAMES)  # the server fixture: full profile, writes allowed
+    names = [s.name for s in skills.offered("full", True)]  # the server fixture: full profile, writes allowed
+    assert sorted(server.PROMPTS) == sorted(names)  # its config predates the core set install: the bundle
     if not hasattr(server.mcp, "list_prompts"):
         pytest.skip("this SDK has no prompt registry")
-    listed = asyncio.run(server.mcp.list_prompts())
-    assert sorted(p.name for p in listed) == sorted(NAMES)
-    wk = next(p for p in listed if p.name == "weekly-update-review")
-    assert [(a.name, a.required) for a in wk.arguments] == [("project", True), ("weeks", False)]
-    res = asyncio.run(server.mcp.get_prompt("weekly-update-review", {"project": "DEMO"}))
-    text = res.messages[0].content.text
-    assert res.messages[0].role == "user" and "project DEMO" in text and "weeks=3" in text
+    listed = {p.name: p for p in asyncio.run(server.mcp.list_prompts())}
+    assert sorted(listed) == sorted(names)
+    s = next(s for s in core_skills.bundled_skills() if any(a.default is None for a in s.args))
+    assert [(a.name, a.required) for a in listed[s.name].arguments] == [(a.name, a.default is None) for a in s.args]
+    values = {a.name: "DEMO-VALUE" for a in s.args if a.default is None}
+    res = asyncio.run(server.mcp.get_prompt(s.name, values))
+    assert res.messages[0].role == "user" and res.messages[0].content.text == skills.prompt_text(s, values)
 
 
 def test_skill_md_format():
-    s = skills.BY_NAME["weekly-update-review"]
+    s = skills.from_config({"name": "weekly-check", "title": "Weekly check", "description": "Checks. Use when asked.",
+                            "args": [{"name": "project", "description": "Project ID", "default": None},
+                                     {"name": "weeks", "description": "Look-ahead length in weeks", "default": "3"}],
+                            "template": "Review project {project} over {weeks} weeks.", "enabled": True})
     md = skills.skill_md(s)
     head = frontmatter(md)
-    assert head == {"name": "p6-weekly-update-review", "description": s.description}  # portable fields only
+    assert head == {"name": "p6-weekly-check", "description": s.description}  # portable fields only
     assert skills.folder_name(s) == head["name"] and skills.NAME_RE.match(s.name)
-    assert md.isascii() and skills.MARKER in md and "# Weekly update review" in md
+    assert md.isascii() and skills.MARKER in md and "# Weekly check" in md
     assert "- weeks: Look-ahead length in weeks (default 3)" in md and "project <project>" in md
     assert md.rstrip().endswith(skills.RULES.splitlines()[-1]) and skills.skill_files(s) == {"SKILL.md": md}
     assert skills.written_files(md) == ["SKILL.md"] and skills.written_files("no marker") == []
@@ -106,42 +160,42 @@ def test_install_update_and_remove_skills(home, cid, folder, legacy):
     ad = clients.get(cid)
     d = home.joinpath(*folder)
     assert ad.skills_dir() == str(d) and ad.skills_state() == clients.SKILLS_NONE
-    mine = d / "p6-baseline-variance"  # a skill of the user's with one of our names
+    mine = d / "p6-float-check"  # a skill of the user's with one of our names
     mine.mkdir(parents=True)
-    (mine / "SKILL.md").write_text("---\nname: p6-baseline-variance\n---\nmy own", encoding="utf-8")
+    (mine / "SKILL.md").write_text("---\nname: p6-float-check\n---\nmy own", encoding="utf-8")
     other = d / "notes"
     other.mkdir()
     old = home.joinpath(*legacy)  # command files of P6 MCP 1.7
     old.mkdir(parents=True)
-    (old / "p6-delay-whatif.md").write_text(skills.COMMAND_MARKER + "\nold", encoding="utf-8")
+    (old / "p6-delay-check.md").write_text(skills.COMMAND_MARKER + "\nold", encoding="utf-8")
     (old / "p6-mine.md").write_text("my command", encoding="utf-8")
-    assert ad.legacy_commands() == ["p6-delay-whatif.md"]
+    assert ad.legacy_commands() == ["p6-delay-check.md"]
 
     res = ad.install_skills("full", True)
     assert res["skipped"] == [mine.name] and len(res["written"]) == len(NAMES) - 1 and res["folder"] == str(d)
-    assert res["legacy_removed"] == ["p6-delay-whatif.md"] and os.listdir(old) == ["p6-mine.md"]
+    assert res["legacy_removed"] == ["p6-delay-check.md"] and os.listdir(old) == ["p6-mine.md"]
     assert (mine / "SKILL.md").read_text(encoding="utf-8").endswith("my own") and other.exists()
-    md = d / "p6-weekly-update-review" / "SKILL.md"
-    assert md.read_text(encoding="utf-8") == skills.skill_md(skills.BY_NAME["weekly-update-review"])
+    md = d / "p6-weekly-check" / "SKILL.md"
+    assert md.read_text(encoding="utf-8") == skills.skill_md(skills.from_config(MINE[0]))
     (mine / "SKILL.md").unlink()
     mine.rmdir()
     res = ad.install_skills("full", True)
     assert res["written"] == [mine.name] and ad.skills_state("full", True) == clients.SKILLS_INSTALLED
     assert ad.install_skills("full", True)["changed"] is False
 
-    imp = d / "p6-update-import-safely" / "SKILL.md"
+    imp = d / "p6-import-check" / "SKILL.md"
     imp.write_text(imp.read_text(encoding="utf-8") + "edited", encoding="utf-8")
     assert ad.skills_state("full", True) == clients.SKILLS_OUTDATED
     res = ad.install_skills("full", False)  # writes off: the import skill is no longer offered
-    assert res["removed"] == ["p6-update-import-safely"] and not imp.parent.exists()
+    assert res["removed"] == ["p6-import-check"] and not imp.parent.exists()
     assert ad.skills_state("full", False) == clients.SKILLS_INSTALLED
     assert ad.skills_state("full", True) == clients.SKILLS_OUTDATED
 
-    (d / "p6-delay-whatif" / "my-notes.md").write_text("kept", encoding="utf-8")  # a file of the user's
+    (d / "p6-delay-check" / "my-notes.md").write_text("kept", encoding="utf-8")  # a file of the user's
     res = ad.remove_skills()
     assert len(res["removed"]) == len(NAMES) - 1
-    assert sorted(os.listdir(d)) == ["notes", "p6-delay-whatif"]
-    assert os.listdir(d / "p6-delay-whatif") == ["my-notes.md"]
+    assert sorted(os.listdir(d)) == ["notes", "p6-delay-check"]
+    assert os.listdir(d / "p6-delay-check") == ["my-notes.md"]
 
 
 def test_reference_files_follow_the_skill(home):
@@ -182,10 +236,10 @@ def test_scan_reports_skill_state(home):
 def test_convert_legacy_commands(home):
     old = home / "User" / ".claude" / "commands"
     old.mkdir(parents=True)
-    (old / "p6-weekly-update-review.md").write_text(skills.COMMAND_MARKER, encoding="utf-8")
+    (old / "p6-weekly-check.md").write_text(skills.COMMAND_MARKER, encoding="utf-8")
     cline_old = home / "User" / "Documents" / "Cline" / "Workflows"
     cline_old.mkdir(parents=True)
-    (cline_old / "p6-delay-whatif.md").write_text(skills.COMMAND_MARKER, encoding="utf-8")
+    (cline_old / "p6-delay-check.md").write_text(skills.COMMAND_MARKER, encoding="utf-8")
     done = {d["client"]: d for d in clients.convert_legacy_commands()}
     assert set(done) == {"claude_code", "cline"} and sorted(done["claude_code"]["written"]) == sorted(FOLDERS)
     assert sorted(os.listdir(home / "User" / ".cline" / "skills")) == sorted(FOLDERS)

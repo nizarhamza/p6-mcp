@@ -33,7 +33,7 @@ version = { attr = "p6mcp.__version__" }
 include = ["p6mcp*"]
 
 [tool.setuptools.package-data]
-p6mcp = ["locales/*.json"]
+p6mcp = ["locales/*.json", "data/core_skills/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

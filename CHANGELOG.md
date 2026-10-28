@@ -3,6 +3,56 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] - 2026-10-28
+
+### Changed
+
+- No skill is built into P6 MCP any more: every P6 skill comes from the skill shop. At its first start the
+  Settings app installs the **core set** of skills from the shop (index entries flagged core), or, when
+  GitHub cannot be reached or the shop is turned off, from the copy of the core set shipped with P6 MCP
+  (`p6mcp/data/core_skills`, the catalog's files byte for byte). Either way the skills are stored like any
+  shop install, with their shop version, so the Skill shop page shows later updates. The skills you had
+  turned off in 1.8 are installed turned off, then the P6 skills of the clients that already had some are
+  rewritten (same `p6-<name>` folders). Until that first start the server offers the shipped copy as its MCP
+  prompts. A fresh install gets its `config.json` at that first start. Config schema 3 (new key
+  `core_skills_installed`; `skills_disabled` is emptied once carried over).
+- An edited shop skill keeps its source (1.8 made it one of your own): the Skills page shows it as **Shop,
+  edited here**, the Skill shop page shows its update, and Update asks before replacing your changes
+  (**Copy to my skills** keeps a copy of your own first).
+- The Skill shop page has no **Built-in** filter and the Skills page no built-in rows. The built-in entries
+  of a catalog written for 1.8.2 read as needing a newer P6 MCP and are never fetched or installed.
+
+### Added
+
+- Twelve detailed core skills in the shop, each with a fixed report template, a field glossary, a
+  checklist and a worked example; every figure of a report is a field of a tool result (no arithmetic by
+  the model), checked by the catalog's golden tests against independent SQL oracles.
+- New read tool `p6_milestones`: every start and finish milestone by date (or by variance), its baseline
+  date, variance in calendar and working days, late / early / on time, total float, critical; counts.
+- Report fields for the skills: working-day variances in `p6_project_summary` (and every baseline key
+  present, null without a baseline); start variance, duration delta, `slip_cause` and `name` in
+  `p6_compare_projects` (activity names on relationship rows); `critical`, forecast dates, weeks and
+  `critical_only` in `p6_lookahead`; `add_remaining_days` and `float_change` in `p6_schedule_whatif`;
+  `score` and the delayed activity's name in `p6_health_check`; EPS fields, `eps=` and `order='eps'` in
+  `p6_list_projects`, tree order and project counts in `p6_list_eps`; `bl_planned_pct` in `p6_list_wbs`;
+  `min_float_days` in `p6_critical_path`; `period_count` in `p6_progress_curve`; activity names in
+  `p6_redundant_links`, `p6_driving_path` and `p6_float_origin`, with fixed row shapes; every import
+  action per table in `p6_import_xer` counts; `cards[].text` (as Excel shows it) in `p6_export_dashboard`.
+- **Restore core skills** on the Skills and Skill shop pages: installs the core set again (shop, else the
+  shipped copy): missing skills come back, edited ones get the shop's version, current ones are kept, your
+  own skills are never touched (one with a core skill's name is reported).
+- With automatic updates on, the tray app also installs the newer shop versions of the skills installed
+  from the shop that were not edited here (each install records the SHA256 of the content it stored), on
+  the schedule of the app updates; an open Settings window without unsaved changes reloads them.
+- `tools/bundle_core_skills.py` writes the shipped copy from a checkout of the catalog (refuses a file that
+  does not match the index SHA256); the PyInstaller spec and the package data include it.
+- Skill house rules checked on the shipped core set, reference files included: ASCII, no double hyphen,
+  known tools, and every `name=` of a `p6_x(...)` call a parameter of that tool (`skills.house_problems`).
+
+### Removed
+
+- `shop.builtin_meta`, `shop.check_builtin` and `shop.BUILTIN_SINCE` (the catalog's built-in entries).
+
 ## [1.8.2] - 2026-10-28
 
 ### Added

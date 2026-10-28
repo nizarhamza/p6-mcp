@@ -3,7 +3,8 @@
 The catalog is read only when the page is first shown or on Refresh (nothing when the shop is turned off on
 the Tools and safety page), and each skill only when it is selected; reads run on the thread pool. Install,
 Update and Remove edit win.data like the Skills page: they take effect after Save (and Install skills on the
-Clients page for the clients' skills folders).
+Clients page for the clients' skills folders). Restore core skills is the Skills page's action. Built-in
+entries of a 1.8.2 catalog show as needing a newer P6 MCP and are never read.
 """
 
 from __future__ import annotations
@@ -18,9 +19,8 @@ from p6mcp.i18n import tr
 from p6mcp.settings_app.common import Job, ask, group, note, pill, start
 from p6mcp.settings_app.guidance_pages import SkillsPage, _preview_box
 
-FILTERS = ("all", "read", "writes", "installed", "updates", "builtin")
-STATUS_LEVEL = {shop.INSTALLED: "ok", shop.UPDATE: "warn", shop.CONFLICT: "warn", shop.NEWER_APP: "warn",
-                shop.BUILTIN: "ok"}
+FILTERS = ("all", "read", "writes", "installed", "updates")
+STATUS_LEVEL = {shop.INSTALLED: "ok", shop.UPDATE: "warn", shop.CONFLICT: "warn", shop.NEWER_APP: "warn"}
 
 
 class ShopPage(QWidget):
@@ -74,6 +74,9 @@ class ShopPage(QWidget):
         row.addWidget(self.install_btn)
         row.addWidget(self.remove_btn)
         row.addStretch(1)
+        self.restore_btn = QPushButton(tr("skill.restore"))
+        self.restore_btn.clicked.connect(lambda: self.win.page(SkillsPage).restore_core())
+        row.addWidget(self.restore_btn)
         tl.addLayout(row)
         lay.addWidget(box)
 
@@ -128,11 +131,11 @@ class ShopPage(QWidget):
         for e in rows:
             st = shop.status(self.win.data, e)
             keep = {"all": True, "read": not e.get("writes"), "writes": bool(e.get("writes")),
-                    "installed": st in (shop.INSTALLED, shop.UPDATE), "updates": st == shop.UPDATE,
-                    "builtin": st == shop.BUILTIN}[f]
+                    "installed": st in (shop.INSTALLED, shop.UPDATE), "updates": st == shop.UPDATE}[f]
             if not keep:
                 continue
-            out.append(dict(e, status=st))
+            mine = shop.installed_as(self.win.data, e["name"])
+            out.append(dict(e, status=st, edited=bool(mine and skills.edited(mine))))
         return out
 
     def refresh(self) -> None:
@@ -149,8 +152,9 @@ class ShopPage(QWidget):
         self.rows = self.entries() if self.enabled() else []
         self.table.setRowCount(len(self.rows))
         for i, e in enumerate(self.rows):
+            here = tr("shop.status." + e["status"]) + (tr("shop.edited") if e["edited"] else "")
             for c, text in enumerate((skills.PREFIX + e["name"], e.get("title") or "", e.get("author") or "",
-                                      str(e.get("version") or ""), tr("shop.status." + e["status"]))):
+                                      str(e.get("version") or ""), here)):
                 self.table.setItem(i, c, QTableWidgetItem(text))
         idx = next((i for i, e in enumerate(self.rows) if cur and e["name"] == cur["name"]), 0 if self.rows else -1)
         if idx >= 0:
@@ -176,15 +180,11 @@ class ShopPage(QWidget):
         links = [f'<a href="https://github.com/{e["author"]}">{e["author"]}</a>'] if e.get("author") else []
         if e.get("issue"):
             links.append(f'<a href="{shop.REPO_URL}/issues/{e["issue"]}">{tr("shop.discussion")}</a>')
-        if st == shop.BUILTIN:
-            links.append(tr("shop.builtin_note"))
         self.links.setText(" | ".join(links))
         tools = ", ".join(e.get("tools") or []) or tr("shop.no_tools")
         self.tools.setText(tr("shop.tools.writes" if e.get("writes") else "shop.tools", tools=tools))
         item = self.items.get((e["name"], e.get("sha256")))
-        if st == shop.BUILTIN:  # this P6 MCP's own copy: nothing to read from the catalog
-            self.preview.setPlainText(skills.skill_md(skills.BY_NAME[e["name"]]))
-        elif e.get("builtin"):  # a built-in skill of a newer P6 MCP
+        if e.get("builtin"):  # a built-in skill of P6 MCP 1.8.2 in an older catalog: nothing to read
             self.preview.setPlainText(tr("shop.status." + shop.NEWER_APP))
         elif item is not None:
             self.preview.setPlainText(skills.skill_md(skills.from_config(shop.to_stored(item))))
@@ -212,10 +212,14 @@ class ShopPage(QWidget):
         if item is None or e["status"] not in (shop.AVAILABLE, shop.UPDATE, shop.CONFLICT):
             return False
         as_name = None
+        mine = shop.installed_as(self.win.data, e["name"])
         if e["status"] == shop.CONFLICT:
             as_name = self.ask_name(e["name"])
             if not as_name:
                 return False
+        elif mine is not None and skills.edited(mine) and not ask(
+                self, tr("shop.update"), tr("shop.update.edited", name=mine["name"]), warning=True):
+            return False  # the automatic update leaves an edited skill alone: replacing it is the user's choice
         elif item.get("writes") and not ask(self, tr("shop.install"), tr("shop.install.writes", name=e["name"]),
                                             warning=False):
             return False

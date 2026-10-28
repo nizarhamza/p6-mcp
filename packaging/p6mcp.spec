@@ -11,7 +11,9 @@ ASSETS = os.path.join(SPECPATH, "build")
 BRAND = os.path.join(ROOT, "assets", "brand")
 ICON = os.path.join(BRAND, "ico", "p6mcp.ico")
 
-datas = [(os.path.join(ROOT, "p6mcp", "locales", "*.json"), os.path.join("p6mcp", "locales"))]
+# the core skills bundled for offline first starts (p6mcp.core_skills): both exes offer them as MCP prompts
+datas = [(os.path.join(ROOT, "p6mcp", "locales", "*.json"), os.path.join("p6mcp", "locales")),
+         (os.path.join(ROOT, "p6mcp", "data", "core_skills", "*.json"), os.path.join("p6mcp", "data", "core_skills"))]
 for dist in ("mcp", "pydantic", "pydantic_core", "uvicorn", "starlette", "anyio", "keyring", "jsonschema",
              "sse-starlette", "httpx2", "p6mcp"):
     try:

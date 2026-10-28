@@ -1,10 +1,11 @@
 """The Instructions and Skills pages of the Settings window.
 
 Instructions: the text every MCP client receives when it connects (p6mcp.instructions), built-in lines
-that can be turned off and the user's own lines. Skills: the P6 skills (p6mcp.skills), built-in ones that can
-be turned off and the user's own ones (with reference files; shared on GitHub through p6mcp.shop, or as a zip
-file). Both edit win.data through win.set_data(); the server reads them when it starts, so a change takes
-effect after Save and a restart of the MCP client (skills folders: Install skills on the Clients page).
+that can be turned off and the user's own lines. Skills: the P6 skills (p6mcp.skills), the ones installed from
+the skill shop (the core set included, Restore core skills reinstalls it: p6mcp.core_skills) and the user's own
+ones (with reference files; shared on GitHub through p6mcp.shop, or as a zip file). Both edit win.data through
+win.set_data(); the server reads them when it starts, so a change takes effect after Save and a restart of the
+MCP client (skills folders: Install skills on the Clients page).
 """
 
 from __future__ import annotations
@@ -18,9 +19,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QFi
                                QHeaderView, QInputDialog, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
                                QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from p6mcp import instructions, settings_logic, shop, skills
+from p6mcp import core_skills, instructions, settings_logic, shop, skills
 from p6mcp.i18n import tr
-from p6mcp.settings_app.common import ask, group, note
+from p6mcp.settings_app.common import Job, ask, group, note, start
 
 CHECKED = {True: Qt.CheckState.Checked, False: Qt.CheckState.Unchecked}
 
@@ -372,6 +373,7 @@ class SkillsPage(QWidget):
         self.win = win
         self.rows: list[dict] = []
         self._loading = False
+        self.job: Optional[Job] = None  # Restore core skills (reads the shop)
         lay = QVBoxLayout(self)
         lay.addWidget(note(tr("skill.intro")))
 
@@ -386,7 +388,7 @@ class SkillsPage(QWidget):
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         for c in (0, 1, 3, 4):
             hh.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setMinimumHeight(self.fontMetrics().height() * 14)  # the built-in skills and a few more
+        self.table.setMinimumHeight(self.fontMetrics().height() * 14)  # the core skills and a few more
         self.table.itemChanged.connect(self._toggled)
         self.table.currentCellChanged.connect(lambda *_a: self._selected())
         self.table.cellDoubleClicked.connect(lambda *_a: self.edit())
@@ -414,6 +416,9 @@ class SkillsPage(QWidget):
         for b in (self.share_btn, self.export_btn, self.import_btn):
             row.addWidget(b)
         row.addStretch(1)
+        self.restore_btn = QPushButton(tr("skill.restore"))
+        self.restore_btn.clicked.connect(self.restore_core)
+        row.addWidget(self.restore_btn)
         tl.addLayout(row)
         tl.addWidget(note(tr("skill.share.note")))
         lay.addWidget(box)
@@ -440,7 +445,8 @@ class SkillsPage(QWidget):
             self.table.setItem(i, 0, on)
             self.table.setItem(i, 1, QTableWidgetItem(skills.PREFIX + r["name"]))
             self.table.setItem(i, 2, QTableWidgetItem(r["title"]))
-            kind = "skill.kind.shop" if r["source"] else "skill.kind.custom" if r["custom"] else "skill.kind.builtin"
+            kind = ("skill.kind.shop_edited" if r["edited"] else "skill.kind.shop") if r["source"] else \
+                "skill.kind.custom"
             self.table.setItem(i, 3, QTableWidgetItem(tr(kind)))
             if r["offered"]:
                 offered = tr("common.yes")
@@ -504,19 +510,11 @@ class SkillsPage(QWidget):
         return next((c for c in self.win.data.get("custom_skills") or [] if c.get("name") == name), None)
 
     def _item(self, r: dict) -> dict:
-        """The selected skill as an editable item (a built-in text becomes editable)."""
-        stored = self._stored(r["name"]) if r["custom"] else None
-        if stored:
-            return dict(stored)
-        skill = r["skill"]
-        template = skill.template.replace("{rules}", "").rstrip()
-        template = template.replace("{{", "{").replace("}}", "}")  # built-in texts double them for str.format
-        return {"name": skill.name, "title": skill.title, "description": skill.description,
-                "args": [{"name": a.name, "description": a.description, "default": a.default} for a in skill.args],
-                "template": template, "files": [{"path": p, "text": t} for p, t in skill.files], "enabled": True}
+        """The selected skill as an editable item."""
+        return dict(self._stored(r["name"]) or {})
 
     def _new_name(self, base: str) -> str:
-        names = {s.name for s in skills.BUILTIN} | {c.get("name") for c in self.win.data.get("custom_skills") or []}
+        names = {c.get("name") for c in self.win.data.get("custom_skills") or []}
         name, n = base, 2
         while name in names:
             name, n = f"{base}-{n}", n + 1
@@ -562,6 +560,38 @@ class SkillsPage(QWidget):
             return False
         self._apply(settings_logic.remove_skill(self.win.data, r["name"]))
         return True
+
+    # -- the core set (p6mcp.core_skills)
+    def restore_core(self) -> bool:
+        """Reinstall the core skills (from the shop, else the copy shipped with P6 MCP) on the thread pool; the
+        result edits win.data like the other actions (Save). Also the Shop page's button."""
+        if self.job is not None or not ask(self, tr("skill.restore"), tr("skill.restore.ask"), warning=False):
+            return False
+        data = self.win.data
+        self.restore_btn.setEnabled(False)
+        self.win.flash(tr("skill.restore.running"))
+        self.job = start(Job(lambda: core_skills.install(data), self._restored))
+        return True
+
+    def _restored(self, res) -> None:
+        self.job = None
+        self.restore_btn.setEnabled(True)
+        if not isinstance(res, tuple):
+            self.win.error(tr("skill.restore.failed", err=res))
+            return
+        data, rep = res
+        self._apply(data)
+        from p6mcp.settings_app.shop_page import ShopPage  # imports this module: loaded on use
+        self.win.page(ShopPage).refresh()
+        n = len(rep["shop"]) + len(rep["bundle"])
+        done = tr("skill.restore.done", n=n, kept=len(rep["kept"])) if not rep["bundle"] else \
+            tr("skill.restore.done.offline", n=n, kept=len(rep["kept"]), err=rep["error"] or "")
+        problems = rep["conflicts"] or rep["failed"]
+        if problems:
+            names = ", ".join(rep["conflicts"] + [f["name"] for f in rep["failed"]])
+            self.win.error(done + " " + tr("skill.restore.partial", names=names))
+        else:
+            self.win.flash(done)
 
     # -- sharing (GitHub) and files (no account needed)
     def open_url(self, url: str) -> None:

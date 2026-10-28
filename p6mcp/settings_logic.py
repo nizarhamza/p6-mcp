@@ -199,9 +199,7 @@ def move_instruction(data: dict, index: int, step: int) -> dict:
 
 
 def set_skill_enabled(data: dict, name: str, on: bool) -> dict:
-    """Turn a built-in skill or one of the user's own skills on or off."""
-    if name in skills.BY_NAME:
-        return _toggle(data, "skills_disabled", name, not on)
+    """Turn a skill of the config on or off."""
     data = copy.deepcopy(data)
     item = next((c for c in data.get("custom_skills") or [] if c.get("name") == name), None)
     if item is None:
@@ -230,15 +228,15 @@ def clean_skill(item: dict) -> dict:
 
 def put_skill(data: dict, item: dict, old_name: Optional[str] = None) -> dict:
     """Add the user's own skill (old_name None) or replace skill old_name. Raises ValueError with every
-    problem found (the strict rules of skills.check_skill). item's source (a shop skill) is kept only while
-    the content is unchanged: an edited shop skill becomes the user's own."""
+    problem found (the strict rules of skills.check_skill). item's source (a shop skill) is kept, also when
+    the content changed: its content_sha then tells that it was edited here (skills.edited), so the automatic
+    update leaves it alone. Copy to my skills drops the source."""
     source = item.get("source")
     item = clean_skill(item)
     data = copy.deepcopy(data)
     items = data.setdefault("custom_skills", [])
     others = tuple(c.get("name") for c in items if c.get("name") != old_name)
-    old = next((c for c in items if c.get("name") == old_name), None) if old_name else None
-    if source is not None and (old is None or skills.shared_item(clean_skill(old)) == skills.shared_item(item)):
+    if source is not None:
         item["source"] = source
     errs = skills.check_skill(item, others, strict=True)
     if errs:
@@ -260,20 +258,18 @@ def remove_skill(data: dict, name: str) -> dict:
 
 
 def skill_rows(data: dict) -> list[dict]:
-    """Every skill (built-in first, then the user's own) with whether clients get it under the saved tool
-    settings of data: {name, title, description, custom, enabled, offered, missing_tools, skill, source}."""
+    """Every skill of the config (shop skills, the core set included, and the user's own) with whether clients
+    get it under the saved tool settings of data: {name, title, description, custom, enabled, offered,
+    missing_tools, skill, source, edited (a shop skill changed here)}."""
     profile, writes = data.get("tool_profile", "basic"), bool(data.get("allow_writes")) and \
         data.get("data_source") != "xer"
-    off = set(data.get("skills_disabled") or [])
     rows = []
-    items = [(s, s.name not in off, None) for s in skills.BUILTIN]
-    items += [(skills.from_config(it), bool(it.get("enabled", True)), it.get("source"))
-              for it in data.get("custom_skills") or []]
-    for skill, on, source in items:
+    for it in data.get("custom_skills") or []:
+        skill, on = skills.from_config(it), bool(it.get("enabled", True))
         missing = skills.missing_tools(skill, profile, writes)
         rows.append({"name": skill.name, "title": skill.title, "description": skill.description,
                      "custom": skill.custom, "enabled": on, "offered": on and not missing, "missing_tools": missing,
-                     "skill": skill, "source": source})
+                     "skill": skill, "source": it.get("source"), "edited": skills.edited(it)})
     return rows
 
 

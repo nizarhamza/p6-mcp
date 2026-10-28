@@ -63,6 +63,7 @@ from collections import Counter
 from contextlib import closing, contextmanager
 from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from time import monotonic
 from typing import (Annotated, Any, Callable, Iterable, Literal, Mapping, Optional, Sequence, TypedDict,
                     Union, get_args)
@@ -216,6 +217,8 @@ ThresholdCheck = Literal[tuple(c for c in get_args(DcmaCheck) if c != "critical_
 Thresholds = Annotated[dict[ThresholdCheck, float], Field(description="Threshold per check, e.g. {'hard_constraints': 1}.")]
 SampleSize = Annotated[int, Field(ge=0, le=50, description="Sample rows per check (max 50).")]
 GroupBy = Literal["status", "task_type", "wbs", "code"]
+EpsOrder = Literal["seq", "tree"]  # p6_list_eps: P6 sequence order, or the tree (each node before its children)
+ProjOrder = Literal["project", "eps"]  # p6_list_projects: by Project ID, or by EPS (tree order) then Project ID
 Period = Literal["month", "week"]
 Measure = Literal["units", "cost"]
 Level = Annotated[int, Field(ge=1, description="Hierarchy level (1 = top).")]
@@ -563,8 +566,9 @@ PROMPTS: dict[str, Callable[..., str]] = {}  # P6 skill -> its MCP prompt functi
 
 
 def _register_prompts() -> None:
-    """Offer the P6 skills (p6mcp.skills: built-in ones left on and the user's own) whose tools are all
-    offered, as MCP prompts (reference files inline)."""
+    """Offer the P6 skills (p6mcp.skills.offered: the skills installed and turned on, from the shop or the
+    user's own; the bundled core set until the first start has installed it) whose tools are all offered,
+    as MCP prompts (reference files inline)."""
     for cmd in _skills.offered(STARTUP.tool_profile, STARTUP.allow_writes, STARTUP.raw):
         def fn(_cmd=cmd, **values) -> str:
             return _skills.prompt_text(_cmd, values)
@@ -1966,27 +1970,64 @@ def _code_filter(con, pid: int, code_type: Optional[str], code_value: Optional[s
 # ----------------------------------------------------------------- read tools
 
 @_tool()
-def p6_list_projects(include_baselines: bool = False, offset: Offset = 0, limit: Limit = 200) -> dict:
+def p6_list_projects(include_baselines: bool = False, exclude_templates: bool = False, eps: Optional[str] = None,
+                     order: ProjOrder = "project", offset: Offset = 0, limit: Limit = 200) -> dict:
     """Projects, one page: {total, offset, returned, next_offset, rows}. Row: Project ID, name, data
-    date, planned start, scheduled finish, status (of the project WBS node). EPS nodes are never
-    listed; baselines only with include_baselines=True (baseline_of is set)."""
+    date, planned start, scheduled finish, status (of the project WBS node), baseline_of, and the EPS
+    node holding it: eps_id, eps_name, eps_path (EPS names from the top, joined with ' > '); all three
+    None for a project outside every EPS node. EPS nodes are never listed; baselines only with
+    include_baselines=True (baseline_of is set); exclude_templates=True leaves out the P6 template
+    projects (status WS_Template, or no EPS node). eps= an EPS ID: the projects of that EPS node and of
+    every EPS below it. order: 'project' (Project ID) or 'eps' (EPS tree order as p6_list_eps
+    order='tree', then Project ID; projects outside every EPS node last)."""
+    if order not in get_args(ProjOrder):
+        raise ValueError(f"order must be one of {list(get_args(ProjOrder))}")
+    eps_id = eps  # the EPS ID asked (eps then holds the EPS tree)
     con = _connect()
     want = ["proj_id", "proj_short_name", "last_recalc_date", "plan_start_date", "scd_end_date"]
     have = [c for c in want if c in _cols(con, "PROJECT")]
     status = "w.status_code" if "status_code" in _cols(con, "PROJWBS") else "NULL"
+    con.execute("BEGIN")  # EPS tree and page from one snapshot
+    eps = _eps_tree(con)
+    ids = ", ".join(str(int(n["wbs_id"])) for n in eps) or "NULL"
+    keep = ""
+    if eps_id is not None:
+        top = next((n for n in eps if n["eps_id"] == eps_id), None)
+        if top is None:
+            con.rollback()
+            raise ValueError(f"EPS {eps_id!r} not found: {[n['eps_id'] for n in eps]}")
+        under, k = [top], eps.index(top) + 1
+        while k < len(eps) and eps[k]["depth"] > top["depth"]:  # tree order: the subtree follows its node
+            under.append(eps[k])
+            k += 1
+        keep = f" AND w.parent_wbs_id IN ({', '.join(str(int(n['wbs_id'])) for n in under)})"
+    rank = "CASE w.parent_wbs_id " + " ".join(f"WHEN {int(n['wbs_id'])} THEN {i}" for i, n in enumerate(eps)) \
+        + f" ELSE {len(eps)} END" if eps else "0"
     q = (f"SELECT {', '.join('p.' + c + ' AS ' + c for c in have)}, w.wbs_name AS project_name, "
-         f"{status} AS status_code, o.proj_short_name AS baseline_of "
+         f"{status} AS status_code, o.proj_short_name AS baseline_of, "
+         f"CASE WHEN w.parent_wbs_id IN ({ids}) THEN w.parent_wbs_id END AS eps_wbs_id "
          "FROM PROJECT p LEFT JOIN PROJWBS w ON w.proj_id = p.proj_id AND w.proj_node_flag = 'Y'"
          + _alive(con, "PROJWBS", "w") + " LEFT JOIN PROJECT o ON o.proj_id = p.orig_proj_id "
          "WHERE COALESCE(p.project_flag, 'Y') = 'Y'" + _alive(con, "PROJECT", "p")
          + ("" if include_baselines else " AND p.orig_proj_id IS NULL")
-         + " ORDER BY p.proj_short_name, p.proj_id")
-    return _page(con, q, (), offset, limit)
+         + (f" AND w.parent_wbs_id IN ({ids}) AND {status} IS NOT 'WS_Template'" if exclude_templates else "") + keep
+         + (f" ORDER BY {rank}, p.proj_short_name, p.proj_id" if order == "eps" else " ORDER BY p.proj_short_name, p.proj_id"))
+    at = {n["wbs_id"]: n for n in eps}
+
+    def row(r: sqlite3.Row) -> dict:
+        d = _dict(r)
+        e = at.get(d.pop("eps_wbs_id"))
+        return {**d, "eps_id": e and e["eps_id"], "eps_name": e and e["eps_name"], "eps_path": e and e["path"]}
+    try:
+        return _page(con, q, (), offset, limit, row)
+    finally:
+        con.rollback()
 
 
 @_tool()
 def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Optional[Depth] = None,
-                rollups: bool = True, offset: Offset = 0, limit: Limit = 100) -> dict:
+                rollups: bool = True, baseline: Optional[ProjectId] = None, offset: Offset = 0,
+                limit: Limit = 100) -> dict:
     """WBS tree in P6 order (each node before its children), one page: {total, offset, returned,
     next_offset, rows, root}. Row: wbs_id, parent_wbs_id, depth (project node 0), wbs_code (as P6
     shows it, e.g. 'PRJ.5.1'), wbs_short_name, wbs_name, children (direct), and with rollups=True
@@ -1994,9 +2035,13 @@ def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Opt
     out), not_started, in_progress, completed, min_tf_d and negative_float (open activities, days
     of each calendar), start, finish (actual, else
     early), budget_units, actual_units (labor plus nonlabor), units_pct (actual / at completion, as
-    P6 Units % Complete). parent= starts at that WBS code, full or relative to the project node
-    ('5.1'); max_depth counts levels below the start node. root repeats the start node (unplaced =
-    activities outside the tree, when it is the project node)."""
+    P6 Units % Complete) and bl_planned_pct: baseline planned units at the data date / baseline budget
+    units of the subtree, x 100 (the baseline's labor and nonlabor assignments placed by the Activity ID
+    of the current activities, linear between their planned dates as p6_progress_curve and the
+    dashboard; None without a baseline, a data date or baseline units). baseline= a Project ID (default:
+    the project baseline); the result says which one (baseline). parent= starts at that WBS code, full
+    or relative to the project node ('5.1'); max_depth counts levels below the start node. root repeats
+    the start node (unplaced = activities outside the tree, when it is the project node)."""
     if max_depth is not None and int(max_depth) < 0:
         raise ValueError("max_depth must be 0 or more")
     con = _connect()
@@ -2008,11 +2053,20 @@ def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Opt
         if not nodes:
             raise ValueError(f"Project {project} has no project WBS node.")
         own: dict[int, dict] = {}
+        bpl: dict[int, dict] = {}
+        bid = _baseline_pid(con, pid, baseline)
         if rollups:
             own = {r["wbs_id"]: {k: r[k] for k in r.keys() if k != "wbs_id"} for r in con.execute(
                 f"SELECT t.wbs_id AS wbs_id, {_act_agg_sql(con)} FROM TASK t LEFT JOIN CALENDAR c "
                 "ON c.clndr_id = t.clndr_id WHERE t.proj_id = ?" + _alive(con, "TASK", "t") + " GROUP BY t.wbs_id",
                 (pid,))}
+            dd = (_db_dt(con.execute("SELECT last_recalc_date FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()[0])
+                  if "last_recalc_date" in _cols(con, "PROJECT") else None)
+            if bid is not None and dd is not None:  # Activity ID -> WBS as the dashboard (the last one in its order)
+                bpl = _bl_planned_by_wbs(con, bid, dd, {r[0]: r[1] for r in con.execute(
+                    "SELECT t.task_code, t.wbs_id FROM TASK t WHERE t.proj_id = ?" + _alive(con, "TASK", "t")
+                    + " ORDER BY COALESCE(t.act_start_date, t.early_start_date), t.task_code, t.task_id", (pid,))})
+        bname = bid and con.execute("SELECT proj_short_name FROM PROJECT WHERE proj_id = ?", (bid,)).fetchone()[0]
         stored = con.execute("SELECT COUNT(*) FROM PROJWBS WHERE proj_id = ?" + _alive(con, "PROJWBS"),
                              (pid,)).fetchone()[0]
     finally:
@@ -2036,22 +2090,29 @@ def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Opt
     kids = Counter(n["parent_wbs_id"] for n in nodes)
     ids = {n["wbs_id"] for n in nodes}
     roll: dict[int, dict] = {}
+    proll: dict[int, dict] = {}
     if rollups:
         for n in reversed(nodes):  # descendants come first in reverse pre-order
             w, par = n["wbs_id"], n["parent_wbs_id"]
             roll[w] = _merge_agg(roll.get(w, {}), own.get(w, {}))
+            proll[w] = _merge_agg(proll.get(w, {}), bpl.get(w, {}))
             if par in ids:
                 roll[par] = _merge_agg(roll.get(par, {}), roll[w])
+                proll[par] = _merge_agg(proll.get(par, {}), proll[w])
 
     def row(n: dict) -> dict:
         out = {**n, "children": kids[n["wbs_id"]]}
         if rollups:
-            out["rollup"] = _rollup(roll[n["wbs_id"]])
+            pl = proll[n["wbs_id"]]
+            out["rollup"] = {**_rollup(roll[n["wbs_id"]]), "bl_planned_pct": round(100 * pl["bl_plan"] / pl["bl_budget"], 2)
+                             if pl.get("bl_budget") else None}
         return out
 
     res = _slice(sub, offset, limit)
     res["rows"] = [row(n) for n in res["rows"]]
     res["root"] = row(nodes[i])
+    res["baseline"] = bname and {"project": bname, "source": "baseline=" if baseline else
+                                 "project baseline (PROJECT.sum_base_proj_id)"}
     if rollups and i == 0:
         res["root"]["unplaced"] = sum(v["n"] for k, v in own.items() if k not in ids)
     if stored != len(nodes):
@@ -2545,12 +2606,14 @@ def _critical_clause(con, pid: int, mode: str, threshold_days: Optional[float]
 @_tool()
 def p6_critical_path(project: ProjectId, mode: CpMode = "project", float_threshold_days: Optional[float] = None,
                      include_completed: bool = False, fields: Optional[ActFields] = None,
-                     offset: Offset = 0, limit: Limit = 50) -> dict:
+                     min_float_days: Optional[float] = None, offset: Offset = 0, limit: Limit = 50) -> dict:
     """Critical activities of the last P6 schedule run (F9), one page: {total, offset, returned,
     next_offset, rows, definition, mode_used, threshold_h, counts, schedule_state, note}.
     mode: project (default) follows the project setting (total float <= its hours threshold, or
     longest path); total_float uses that hours threshold; longest_path uses P6's driving path flag.
-    float_threshold_days forces total float <= that many days (not with longest_path). LOE and WBS
+    float_threshold_days forces total float <= that many days (not with longest_path); min_float_days
+    keeps only total float > that many days (days of each activity's calendar, not with longest_path):
+    min_float_days=0 with float_threshold_days=10 lists the near critical activities. LOE and WBS
     summary activities are left out (even when P6 flags them), completed ones too unless
     include_completed=True. Order: total float then start, or float path order for the longest
     path. counts (open activities except LOE and WBS summary, any page): open, total_float,
@@ -2561,6 +2624,14 @@ def p6_critical_path(project: ProjectId, mode: CpMode = "project", float_thresho
     pid = _project_id(con, project)
     cond, args, definition, thr_h, used = _critical_clause(con, pid, mode, float_threshold_days)
     tf_cond, tf_args = _critical_clause(con, pid, "total_float", float_threshold_days)[:2]
+    if min_float_days is not None:
+        lo = _num(min_float_days)
+        if lo is None or not math.isfinite(lo):
+            raise ValueError("min_float_days must be a number of days")
+        if used == "longest_path":
+            raise ValueError("min_float_days applies to total float, not to the longest path")
+        cond, args = f"({cond}) AND t.total_float_hr_cnt > ? * {HPD_SQL}", [*args, lo]
+        definition += f"; total float > {lo:g} d (days of each activity's calendar)"
     definition += "; LOE and WBS summary activities left out"
     tcols = _cols(con, "TASK")
     types, open_ = f" AND t.task_type NOT IN {SUMMARY_TYPES}", " AND t.status_code <> 'TK_Complete'"
@@ -2927,7 +2998,7 @@ def _dcma(con, pid: int, bid: Optional[int], cfg: dict, baseline_dates: str, bas
         why = "no baseline: pass baseline= or set a project baseline in P6" if bid is None else "no data date"
         checks["missed_tasks"] = _chk(None, None, thr["missed_tasks"], "max", note=why)
         bei = _chk(None, None, thr["bei"], "ratio", note=why)
-    checks["critical_path_test"] = _chk(None, None, None, None, note=(
+    checks["critical_path_test"] = _chk(None, None, None, None, activity=None, activity_name=None, note=(
         "not run here: full reports only (CPM engine, see p6_cpm_validate)"))
     checks["cpli"] = _cpli(con, prj, thr["cpli"])
     checks["bei"] = bei
@@ -3193,6 +3264,10 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
            "summary": {k: [c for c, v in checks.items() if v["pass"] is ok] for k, ok in
                        (("failed", False), ("passed", True), ("not_evaluated", None))},
            "threshold_source": cfg["source"]}
+    sm = res["summary"]
+    ev = len(sm["passed"]) + len(sm["failed"])
+    res["score"] = {"passed": len(sm["passed"]), "failed": len(sm["failed"]), "not_evaluated": len(sm["not_evaluated"]),
+                    "evaluated": ev, "pct_passed": round(100 * len(sm["passed"]) / ev, 1) if ev else None}
     if thresholds:
         res["thresholds_overridden"] = sorted(thresholds)
     if cfg["notes"]:
@@ -3573,7 +3648,8 @@ class _Net:
         p, s = self.t[lk["pred"]], self.t[lk["succ"]]
         o = self.t[lk[other]]
         hpd = (s if other == "pred" else p)["hpd"] or 8.0
-        return {("predecessor" if other == "pred" else "successor"): o["task_code"],
+        key = "predecessor" if other == "pred" else "successor"
+        return {key: o["task_code"], f"{key}_name": o["task_name"],
                 **({"other_project": o["project"]} if o["proj_id"] != self.pid else {}),
                 "task_pred_id": lk["id"], "type": REL_TYPES_REV.get(lk["type"], lk["type"]),
                 "lag_d": _days(lk["lag"], self.lag_hpd(p, s)), "gap_h": None if gap is None else round(gap, 2),
@@ -3615,7 +3691,7 @@ def _net_snapshot(con, pid: int) -> _Net:
 
 def _root_driver(net: _Net, d: dict, hidden: list) -> dict:
     """What starts the driving chain at d (no listed driving predecessor)."""
-    base = {"task_code": d["task_code"], "date": d["early_start_date"]}
+    base = {"task_code": d["task_code"], "task_name": d["task_name"], "date": d["early_start_date"]}
     cs = net.cstr_hits(d, EARLY_CSTR, late=False)
     if cs:
         return {**base, "type": "constraint", **cs[0]}
@@ -3645,7 +3721,8 @@ def p6_driving_path(project: ProjectId, target: ActivityId, max_depth: Annotated
     followed (several can drive), down to max_depth levels. Page of rows, one per activity, by level (0 =
     target): task_code, name, early dates, total_float_d, calendar, constraint, and the link it drives
     through (successor, type, lag_d, gap_h, gap_d; also_drives for other path activities it drives).
-    drivers_at_root: what starts each chain (data_date, constraint, actual_date, open_start,
+    drivers_at_root: what starts each chain (task_code, task_name, date; type data_date, constraint,
+    actual_date, open_start,
     completed_predecessor, unexplained). Completed activities are left out unless include_completed
     (P6 places them too, retained logic). Read only; values of the last F9."""
     max_depth = int(max_depth)
@@ -3685,13 +3762,13 @@ def p6_driving_path(project: ProjectId, target: ActivityId, max_depth: Annotated
     rows = []
     for tid, lv in level.items():
         d = net.t[tid]
-        row = {"level": lv, **net.act_view(d)}
+        row = {"level": lv, **net.act_view(d), **dict.fromkeys(("successor", "successor_name", "task_pred_id", "type",
+                                                                    "lag_d", "gap_h", "gap_d")), "also_drives": []}
         es = sorted((e for e in edges.get(tid, []) if e[0]["succ"] in level),
                     key=lambda e: (level[e[0]["succ"]], net.t[e[0]["succ"]]["task_code"]))
-        if es:
+        if es:  # the level 0 row (the target) keeps null link keys
             row.update(net.link_view(es[0][0], es[0][1], "succ"))
-            if len(es) > 1:
-                row["also_drives"] = [net.link_view(lk, g, "succ") for lk, g in es[1:]]
+            row["also_drives"] = [net.link_view(lk, g, "succ") for lk, g in es[1:]]
         rows.append(row)
     rows.sort(key=lambda r: (r["level"], r["early_finish"] or "", r["task_code"]))
     res = _slice(rows, offset, limit)
@@ -3704,17 +3781,24 @@ def p6_driving_path(project: ProjectId, target: ActivityId, max_depth: Annotated
 
 def _late_origin(net: _Net, d: dict) -> list[dict]:
     """Origins of the late dates of d when no successor link controls them."""
-    out = [{"type": "activity_constraint", "task_code": d["task_code"], **c} for c in net.cstr_hits(d, LATE_CSTR, late=True)]
+    out = _cstr_sources(net, d)
     if out:
         return out
+    who = {"task_code": d["task_code"], "task_name": d["task_name"]}
     if net.must and net.zero(d["cal"], d["lf"], net.must):
-        return [{"type": "project_must_finish", "task_code": d["task_code"], "date": net.prj["plan_end_date"],
+        return [{"type": "project_must_finish", **who, "date": net.prj["plan_end_date"],
                  "detail": "PROJECT.plan_end_date (Must Finish By)"}]
     if net.end and net.zero(d["cal"], d["lf"], net.end) or net.zero(d["cal"], d["lf"], d["ef"]):
-        return [{"type": "open_end", "task_code": d["task_code"], "date": d["late_end_date"],
+        return [{"type": "open_end", **who, "date": d["late_end_date"],
                  "detail": "no controlling successor: late finish at the project finish (or its own early finish)"}]
-    return [{"type": "unexplained", "task_code": d["task_code"], "date": d["late_end_date"],
+    return [{"type": "unexplained", **who, "date": d["late_end_date"],
              "detail": "no successor link with a zero late gap, no constraint, must finish or project finish date"}]
+
+
+def _cstr_sources(net: _Net, d: dict) -> list[dict]:
+    """Late-date origins of d from its own constraints (date = the constraint date)."""
+    return [{"type": "activity_constraint", "task_code": d["task_code"], "task_name": d["task_name"], **c,
+             "date": c["cstr_date"]} for c in net.cstr_hits(d, LATE_CSTR, late=True)]
 
 
 @_tool()
@@ -3726,8 +3810,10 @@ def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annota
     every controlling successor, until the source. origin: type activity_constraint (a constraint
     bounding late dates: start/finish on, on or before, mandatory), project_must_finish
     (PROJECT.plan_end_date), open_end (no controlling successor: project finish), unexplained, or mixed
-    (several sources, all in sources), or none (max_depth reached before any source), with date,
-    activity and constraint; explanation says it in
+    (several sources, all in sources), or none (max_depth reached before any source); task_code,
+    task_name and date always present (null unless there is exactly one source; the constraint date for
+    a constraint), the constraint keys with a constraint; every source carries task_code, task_name and
+    date; explanation says it in
     words. own_constraint: the activity's own constraint and whether it controls. Page of chain rows by
     level (0 = the activity): late dates, total_float_d, and the controlled_by link (successor, type,
     lag_d, gap). Read only."""
@@ -3747,7 +3833,7 @@ def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annota
         d = net.t[n]
         ctl = [(lk, g) for lk in net.by_pred.get(n, []) for g in (net.gap(lk, late=True),)
                if g is not None and abs(g) <= GAP_TOL_H]  # completed successors too: P6 places them (retained logic)
-        own = [{"type": "activity_constraint", "task_code": d["task_code"], **c} for c in net.cstr_hits(d, LATE_CSTR, True)]
+        own = _cstr_sources(net, d)
         sources += own
         if not ctl and not own:
             sources += _late_origin(net, d)
@@ -3763,12 +3849,12 @@ def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annota
     for tid, lv in level.items():
         row = {"level": lv, **net.act_view(net.t[tid], late=True)}
         vs = sorted(via.get(tid, []), key=lambda e: (level.get(e[0]["succ"], 0), net.t[e[0]["succ"]]["task_code"]))
-        if vs:
-            row["controlled_by"] = [net.link_view(lk, g, "succ") for lk, g in vs]
+        row["controlled_by"] = [net.link_view(lk, g, "succ") for lk, g in vs]  # [] at the source
         rows.append(row)
     rows.sort(key=lambda r: (r["level"], r["task_code"]))
     kinds = sorted({s["type"] for s in sources})
-    origin = {"type": kinds[0] if len(kinds) == 1 else "mixed" if kinds else "none", "sources": sources}
+    origin = {"type": kinds[0] if len(kinds) == 1 else "mixed" if kinds else "none", "task_code": None,
+              "task_name": None, "date": None, "sources": sources}
     if len(sources) == 1:
         origin.update({k: v for k, v in sources[0].items() if k != "type"})
     own = [{"cstr_type": ty, "cstr_label": _cstr_label(ty), "cstr_date": dt,
@@ -3923,7 +4009,8 @@ def p6_redundant_links(project: ProjectId, categories: Optional[list[RedundantCa
         g = net.gap(lk)
         open_s = s["status_code"] != "TK_Complete" and not net.summary(s)
         open_p = p["status_code"] != "TK_Complete" and not net.summary(p)
-        rows.append({"task_pred_id": i, "predecessor": p["task_code"], "successor": s["task_code"],
+        rows.append({"task_pred_id": i, "predecessor": p["task_code"], "predecessor_name": p["task_name"],
+                     "successor": s["task_code"], "successor_name": s["task_name"],
                      **({"pred_project": p["project"]} if p["proj_id"] != pid else {}),
                      "type": REL_TYPES_REV.get(lk["type"], lk["type"]), "lag_d": _days(lk["lag"], net.lag_hpd(p, s)),
                      "categories": [c for c in REDUNDANT_CATEGORIES if c in cs], "detail": cs,
@@ -4348,8 +4435,9 @@ WhatIfOp = Literal["add_link", "delete_link", "update_link", "duration", "constr
 
 class WhatIfEdit(TypedDict, total=False):
     """One what-if edit. op add_link / delete_link / update_link: predecessor_code, successor_code,
-    rel_type, lag_days, current_type (or task_pred_id for delete / update); op duration: task_code,
-    remaining_days and/or original_days; op constraint: task_code, constraint (as p6_update_activity),
+    rel_type, lag_days, current_type (or task_pred_id for delete / update); op duration: task_code and
+    remaining_days, original_days (not started only) or add_remaining_days (days added to the current
+    remaining duration, any status); op constraint: task_code, constraint (as p6_update_activity),
     constraint_date."""
     op: WhatIfOp
     predecessor_code: str
@@ -4361,6 +4449,7 @@ class WhatIfEdit(TypedDict, total=False):
     task_code: str
     remaining_days: float
     original_days: float
+    add_remaining_days: float
     constraint: CstrName
     constraint_date: str
 
@@ -4422,19 +4511,31 @@ def _whatif_apply(cpm: _Cpm, e: Mapping) -> str:
     d = act(e.get("task_code"))
     if op == "duration":
         ch = []
-        for k in ("remaining_days", "original_days"):
-            if e.get(k) is not None:
-                v = _num(e[k])
-                if v is None or v < 0:
-                    raise ValueError(f"{k} must be 0 or more")
-        if e.get("remaining_days") is not None:
+        given = [k for k in ("remaining_days", "original_days", "add_remaining_days") if e.get(k) is not None]
+        if "add_remaining_days" in given and len(given) > 1:
+            raise ValueError("add_remaining_days cannot be combined with remaining_days or original_days")
+        for k in given:
+            v = _num(e[k])
+            if v is None or (v < 0 and k != "add_remaining_days"):
+                raise ValueError(f"{k} must be 0 or more" if k != "add_remaining_days" else f"{k} must be a number")
+        if e.get("add_remaining_days") is not None:
+            hpd = d["hpd"] or 8.0
+            old = d["rem"] or 0.0
+            new = old + float(e["add_remaining_days"]) * hpd
+            if new < 0:
+                raise ValueError(f"add_remaining_days {e['add_remaining_days']:g}: the remaining duration of "
+                                 f"{d['task_code']} is {old / hpd:g} d")
+            d["rem"] = new
+            ch.append(f"remaining {old / hpd:g} d {float(e['add_remaining_days']):+g} d = {new / hpd:g} d")
+        elif e.get("remaining_days") is not None:
             d["rem"] = float(e["remaining_days"]) * (d["hpd"] or 8.0)
             ch.append(f"remaining {e['remaining_days']:g} d")
         elif e.get("original_days") is not None and d["status_code"] == "TK_NotStart":
             d["rem"] = float(e["original_days"]) * (d["hpd"] or 8.0)  # not started: remaining follows the original
             ch.append(f"original {e['original_days']:g} d (remaining follows)")
         if not ch:
-            raise ValueError("duration: give remaining_days (or original_days for a not started activity)")
+            raise ValueError("duration: give remaining_days, add_remaining_days (or original_days for a not started "
+                             "activity)")
         fixed = cpm.duration_fixed(d)
         if fixed:
             ch.append(f"no effect on its dates ({fixed})")
@@ -4462,7 +4563,10 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     last F9 as stored) or 'engine' (the engine on the unchanged network: isolates the edits from any
     engine difference). project_finish {before, after, delta_cd (calendar days), delta_wd (working days
     of the finish activity)}; milestones (given, else the finish activity and every constrained
-    activity) with finish and total float before / after; page of changed activities (early dates or
+    activity) with finish and total float before / after; float_change: open activities (LOE and WBS
+    summary left out) critical and with negative float before and after under the project's total float
+    threshold (total float <= 0 h when the project uses the longest path), became_critical (count and up
+    to 50 rows by float after) and no_longer_critical; page of changed activities (early dates or
     total float moved by more than a minute), largest finish change first. engine: match rate of the
     unchanged network against the F9 (trusted at 0.99). Changes to make for real: the write tools,
     then F9 in P6."""
@@ -4475,6 +4579,7 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     con.execute("BEGIN")
     try:
         base = _Cpm(con, pid)
+        thr_h, used = _critical_clause(con, pid, "project", None)[3:5]
     finally:
         con.rollback()
     state = _schedule_state(con, pid)
@@ -4526,12 +4631,32 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
                             "finish_delta_cd": delta(b["ef"], a["ef"]),
                             "total_float_d_before": _days(b["tf_h"], d["hpd"]), "total_float_d_after": _days(a["tf_h"], d["hpd"])})
     changed.sort(key=lambda r: (-abs(r["finish_delta_cd"] or 0), r["task_code"]))
+    lim = float(thr_h or 0) if used == "total_float" else 0.0
+    is_open = lambda d: d["status_code"] != "TK_Complete" and d["task_type"] not in SUMMARY_TYPES  # noqa: E731
+    crit = lambda tf: tf is not None and tf <= lim + CPM_TF_TOL_H  # noqa: E731
+    neg = lambda tf: tf is not None and tf < -CPM_TF_TOL_H  # noqa: E731
+    opn = [n for n, d in T.items() if is_open(d)]
+    became = sorted(({"task_code": T[n]["task_code"], "task_name": T[n]["task_name"],
+                      "total_float_d_before": _days(before[n]["tf_h"], T[n]["hpd"]),
+                      "total_float_d_after": _days(r1[n]["tf_h"], T[n]["hpd"])}
+                     for n in opn if crit(r1[n]["tf_h"]) and not crit(before[n]["tf_h"])),
+                    key=lambda r: (r["total_float_d_after"], r["task_code"]))
+    float_change = {"definition": (f"total float <= {lim:g} h" if used == "total_float" else
+                                   "total float <= 0 h (the project uses the longest path, which the engine does not "
+                                   "compute)") + "; open activities, LOE and WBS summary left out",
+                    "critical_before": sum(crit(before[n]["tf_h"]) for n in opn),
+                    "critical_after": sum(crit(r1[n]["tf_h"]) for n in opn),
+                    "negative_float_before": sum(neg(before[n]["tf_h"]) for n in opn),
+                    "negative_float_after": sum(neg(r1[n]["tf_h"]) for n in opn),
+                    "became_critical": len(became), "became_critical_rows": became[:ACT_LINKS_CAP],
+                    "no_longer_critical": sum(crit(before[n]["tf_h"]) and not crit(r1[n]["tf_h"]) for n in opn)}
     out = _slice(changed, offset, limit)
     out.update(project=project, edits=done, compare_to=compare_to,
                project_finish={"before": fin_before and _fmt_dt(fin_before), "after": _fmt_dt(fin_after),
                                "delta_cd": delta(fin_before, fin_after), "delta_wd": wd(fin_before, fin_after),
                                "finish_activity": fm and fm["task_code"]},
-               milestones=ms, engine={"match_rate": chk["match_rate"], "trusted": chk["match_rate"] is not None
+               milestones=ms, float_change=float_change,
+               engine={"match_rate": chk["match_rate"], "trusted": chk["match_rate"] is not None
                                       and chk["match_rate"] >= CPM_TRUST, "open_mismatched": chk["counts"]["open_mismatched"]},
                schedule_state=state, note="In memory only: nothing was written. "
                + ("" if compare_to == "engine" else "Before = P6's last F9; with an engine mismatch, compare_to='engine' "
@@ -4542,7 +4667,8 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
 def _cpt(con, pid: int) -> dict:
     """DCMA critical path test with the engine: delay the earliest most critical open activity by 100
     working days and check that the project finish moves as much (90 % or more of its own shift)."""
-    out = {"count": None, "denominator": None, "pct": None, "threshold": None, "pass": None, "sample": []}
+    out = {"count": None, "denominator": None, "pct": None, "threshold": None, "pass": None, "activity": None,
+           "activity_name": None, "sample": []}  # activity keys always present (null when not run)
     try:
         base = _Cpm(con, pid)
         r0 = base.run()
@@ -4568,31 +4694,56 @@ def _cpt(con, pid: int) -> dict:
     act_shift = (r1[d["task_id"]]["ef"] - r0[d["task_id"]]["ef"]).total_seconds() / 86400
     fin_shift = (f1 - f0).total_seconds() / 86400
     if act_shift <= 0:
-        return {**out, "activity": d["task_code"], "engine_match_rate": chk["match_rate"],
+        return {**out, "activity": d["task_code"], "activity_name": d["task_name"], "engine_match_rate": chk["match_rate"],
                 "note": f"not evaluated: delaying {d['task_code']} did not move its own finish"}
     ok = fin_shift >= 0.9 * act_shift
-    return {**out, "pass": ok, "activity": d["task_code"], "delay_d": 100,
+    return {**out, "pass": ok, "activity": d["task_code"], "activity_name": d["task_name"], "delay_d": 100,
             "activity_finish_shift_cd": round(act_shift, 2), "project_finish_shift_cd": round(fin_shift, 2),
             "engine_match_rate": chk["match_rate"]}
 
 
 def _cmp_acts(con, dates: str) -> str:
-    """CTEs a (project :pid) and b (other :oid) of the activity comparison: finish = actual, else early
-    ('planned' takes b's planned finish), hpd, original duration and total float hours."""
-    def side(p: str, fin: str) -> str:
+    """CTEs a (project :pid) and b (other :oid) of the activity comparison: start and finish = actual,
+    else early ('planned' takes b's planned dates), hpd, original duration and total float hours."""
+    def side(p: str, st: str, fin: str) -> str:
         return (f"SELECT t.task_id, t.task_code, t.task_name, t.status_code, t.clndr_id, {HPD_SQL} AS hpd, "
-                f"t.target_drtn_hr_cnt AS orig_h, t.total_float_hr_cnt AS tf_h, {fin} AS fin FROM TASK t "
+                f"t.target_drtn_hr_cnt AS orig_h, t.total_float_hr_cnt AS tf_h, {st} AS st, {fin} AS fin FROM TASK t "
                 f"LEFT JOIN CALENDAR c ON c.clndr_id = t.clndr_id WHERE t.proj_id = :{p}" + _alive(con, "TASK", "t"))
-    cur = "COALESCE(t.act_end_date, t.early_end_date)"
-    return (f"WITH a AS {MAT_SQL}({side('pid', cur)}), "
-            f"b AS {MAT_SQL}({side('oid', cur if dates == 'current' else 't.target_end_date')}) ")
+    cur = ("COALESCE(t.act_start_date, t.early_start_date)", "COALESCE(t.act_end_date, t.early_end_date)")
+    oth = cur if dates == "current" else ("t.target_start_date", "t.target_end_date")
+    return f"WITH a AS {MAT_SQL}({side('pid', *cur)}), b AS {MAT_SQL}({side('oid', *oth)}) "
+
+
+SLIP_CAUSES = ("late_start", "longer_duration", "late_start_and_longer_duration", "on_time", "earlier")
+
+
+def _slip(cal: Optional["_Cal"], s, f, bs, bf) -> tuple[Optional[float], Optional[float], Optional[str]]:
+    """(start_variance_wd, duration_delta_wd, slip_cause) of an activity against the other project, in
+    working days of its calendar: start variance = other start to start, duration delta = (start to
+    finish) minus (other start to other finish); they add up to the finish variance exactly (working
+    time is additive). slip_cause (SLIP_CAUSES): a finish later by more than GAP_TOL_H is late_start,
+    longer_duration or both (each part above GAP_TOL_H; else the larger part), on_time within GAP_TOL_H,
+    else earlier. All None without a readable calendar or a date."""
+    s, f, bs, bf = (_db_dt(x) for x in (s, f, bs, bf))
+    if cal is None or cal.error or not (s and f and bs and bf):
+        return None, None, None
+    sv, fv = cal.work_hours(bs, s), cal.work_hours(bf, f)
+    dv = fv - sv
+    if fv > GAP_TOL_H:
+        late, longer = sv > GAP_TOL_H, dv > GAP_TOL_H
+        cause = ("late_start_and_longer_duration" if late and longer else "late_start" if late else "longer_duration"
+                 if longer else "late_start" if sv >= dv else "longer_duration")
+    else:
+        cause = "on_time" if fv >= -GAP_TOL_H else "earlier"
+    return round(sv / cal.hpd, 2) + 0.0, round(dv / cal.hpd, 2) + 0.0, cause
 
 
 def _cmp_links(con) -> str:
     """CTEs la (project :pid) and lb (other :oid): links whose successor is in the project, keyed on
     (pred, succ, type, pred_project); pred_project is NULL when the predecessor is in that project."""
     def side(p: str) -> str:
-        return ("SELECT r.task_pred_id AS rid, pt.task_code AS pred, st.task_code AS succ, r.pred_type AS type, "
+        return ("SELECT r.task_pred_id AS rid, pt.task_code AS pred, st.task_code AS succ, pt.task_name AS pred_name, "
+                "st.task_name AS succ_name, r.pred_type AS type, "
                 f"CASE WHEN pt.proj_id = :{p} THEN NULL ELSE pp.proj_short_name END AS pred_project, r.lag_hr_cnt AS lag_h, "
                 "COALESCE(NULLIF(cp.day_hr_cnt, 0), 8) AS pred_hpd, COALESCE(NULLIF(cs.day_hr_cnt, 0), 8) AS succ_hpd "
                 "FROM TASKPRED r JOIN TASK st ON st.task_id = r.task_id JOIN TASK pt ON pt.task_id = r.pred_task_id "
@@ -4601,8 +4752,8 @@ def _cmp_links(con) -> str:
                 + _alive(con, "TASKPRED", "r") + _alive(con, "TASK", "st") + _alive(con, "TASK", "pt"))
 
     def one(p: str) -> str:  # a key linked twice counts once: the lowest id (bare columns follow MIN)
-        return (f"SELECT MIN(rid) AS rid, pred, succ, type, pred_project, lag_h, pred_hpd, succ_hpd FROM ({side(p)}) "
-                "GROUP BY pred, succ, type, pred_project")
+        return (f"SELECT MIN(rid) AS rid, pred, succ, pred_name, succ_name, type, pred_project, lag_h, pred_hpd, "
+                f"succ_hpd FROM ({side(p)}) GROUP BY pred, succ, type, pred_project")
     return f"WITH la AS {MAT_SQL}({one('pid')}), lb AS {MAT_SQL}({one('oid')}) "
 
 
@@ -4619,10 +4770,15 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
     finishing later or earlier (finish = actual, else early; dates='planned' takes the other's
     planned finish), average and maximum variance in calendar days, status, original duration and
     name changes; relationships added, removed and with a changed lag; project data date and finish
-    dates. Then one page of section: 'activities' (added and removed first, then by absolute
-    variance; matched ones only from min_variance_days calendar days; variance_cd in calendar days,
-    variance_wd in working days of the activity's calendar) or 'relationships' (added, removed,
-    lag_changed; lag days under each project's lag rule)."""
+    dates; slip_causes counts the matched activities per slip_cause (slip_cause_unknown: no readable
+    calendar or a date missing). Then one page of section: 'activities' (added and removed first, then
+    by absolute variance; matched ones only from min_variance_days calendar days; name = the project's
+    activity name, the other's for a removed activity; start and finish =
+    actual, else early; variance_cd in calendar days, variance_wd in working days of the activity's
+    calendar; start_variance_wd + duration_delta_wd = variance_wd (start-to-finish span in working days
+    of the same calendar); slip_cause late_start, longer_duration, late_start_and_longer_duration,
+    on_time or earlier) or 'relationships' (added, removed, lag_changed; pred_name and succ_name of the project, of the other one for a removed link; lag days
+    under each project's lag rule)."""
     if section not in get_args(CompareSection):
         raise ValueError(f"section must be one of {list(get_args(CompareSection))}")
     if dates not in get_args(BaselineDates):
@@ -4659,20 +4815,23 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
                         "FROM a LEFT JOIN b ON b.task_code = a.task_code)", args).fetchone()
         removed = con.execute(acts + "SELECT COUNT(*) FROM b WHERE NOT EXISTS (SELECT 1 FROM a WHERE a.task_code = "
                               "b.task_code)", args).fetchone()[0]
+        cals = _calendars(con)
+        causes = Counter(_slip(cals.get(r[0]), *r[1:])[2] for r in con.execute(
+            acts + "SELECT a.clndr_id, a.st, a.fin, b.st, b.fin FROM a JOIN b ON b.task_code = a.task_code", args))
         lsum = con.execute(lnk + "SELECT (SELECT COUNT(*) FROM la JOIN lb ON " + LINK_KEY + "), "
                            "(SELECT COUNT(*) FROM la WHERE NOT EXISTS (SELECT 1 FROM lb WHERE " + LINK_KEY + ")), "
                            "(SELECT COUNT(*) FROM lb WHERE NOT EXISTS (SELECT 1 FROM la WHERE " + LINK_KEY + ")), "
                            "(SELECT COUNT(*) FROM la JOIN lb ON " + LINK_KEY + " WHERE COALESCE(la.lag_h, 0) <> "
                            "COALESCE(lb.lag_h, 0))", args).fetchone()
         if section == "activities":
-            cals = _calendars(con)
             q = acts + ("SELECT * FROM (SELECT CASE WHEN b.task_id IS NULL THEN 'added' ELSE 'matched' END AS change, "
                         "a.task_id AS tid, a.task_code, a.task_name, b.task_name AS other_name, a.status_code, "
                         "b.status_code AS other_status, a.clndr_id, a.hpd, b.hpd AS other_hpd, a.orig_h, b.orig_h AS other_orig_h, "
-                        f"a.tf_h, b.tf_h AS other_tf_h, a.fin, b.fin AS other_fin, {var} AS v FROM a LEFT JOIN b "
+                        f"a.tf_h, b.tf_h AS other_tf_h, a.st, b.st AS other_st, a.fin, b.fin AS other_fin, {var} AS v, "
+                        "julianday(a.st) - julianday(b.st) AS sv FROM a LEFT JOIN b "
                         "ON b.task_code = a.task_code UNION ALL SELECT 'removed', b.task_id, b.task_code, NULL, b.task_name, "
-                        "NULL, b.status_code, NULL, NULL, b.hpd, NULL, b.orig_h, NULL, b.tf_h, NULL, b.fin, NULL FROM b "
-                        "WHERE NOT EXISTS (SELECT 1 FROM a WHERE a.task_code = b.task_code)) "
+                        "NULL, b.status_code, NULL, NULL, b.hpd, NULL, b.orig_h, NULL, b.tf_h, NULL, b.st, NULL, b.fin, NULL, "
+                        "NULL FROM b WHERE NOT EXISTS (SELECT 1 FROM a WHERE a.task_code = b.task_code)) "
                         "WHERE change <> 'matched' OR :minv <= 0 OR ABS(v) >= :minv "
                         "ORDER BY change = 'matched', ROUND(ABS(COALESCE(v, 0)), 6) DESC, task_code, tid")
 
@@ -4680,18 +4839,26 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
                 cal = cals.get(r["clndr_id"])
                 a, b = _db_dt(r["fin"]), _db_dt(r["other_fin"])
                 wd = round(cal.work_days(b, a), 2) if cal is not None and not cal.error and a and b else None
+                sv, dv, cause = _slip(cal, r["st"], r["fin"], r["other_st"], r["other_fin"])
                 return {"change": r["change"], "task_code": r["task_code"], "task_name": r["task_name"],
-                        "other_task_name": r["other_name"], "status": r["status_code"], "other_status": r["other_status"],
-                        "finish": r["fin"], "other_finish": r["other_fin"],
+                        "other_task_name": r["other_name"],
+                        "name": r["task_name"] if r["task_name"] is not None else r["other_name"],
+                        "status": r["status_code"], "other_status": r["other_status"],
+                        "start": r["st"], "other_start": r["other_st"],
+                        "start_variance_cd": None if r["sv"] is None else round(r["sv"], 2) + 0.0,
+                        "start_variance_wd": sv, "finish": r["fin"], "other_finish": r["other_fin"],
                         "variance_cd": None if r["v"] is None else round(r["v"], 2), "variance_wd": wd,
+                        "duration_delta_wd": dv, "slip_cause": cause,
                         "orig_dur_d": _days(r["orig_h"], r["hpd"]), "other_orig_dur_d": _days(r["other_orig_h"], r["other_hpd"]),
                         "total_float_d": _days(r["tf_h"], r["hpd"]), "other_total_float_d": _days(r["other_tf_h"], r["other_hpd"])}
         else:
             q = lnk + ("SELECT * FROM (SELECT CASE WHEN lb.rid IS NULL THEN 'added' ELSE 'lag_changed' END AS change, "
-                       "la.rid, la.pred, la.succ, la.type, la.pred_project, la.lag_h, lb.lag_h AS other_lag_h, la.pred_hpd, "
+                       "la.rid, la.pred, la.succ, la.pred_name, la.succ_name, la.type, la.pred_project, la.lag_h, "
+                       "lb.lag_h AS other_lag_h, la.pred_hpd, "
                        "la.succ_hpd, lb.pred_hpd AS other_pred_hpd, lb.succ_hpd AS other_succ_hpd FROM la LEFT JOIN lb ON "
                        + LINK_KEY + " WHERE lb.rid IS NULL OR COALESCE(la.lag_h, 0) <> COALESCE(lb.lag_h, 0) UNION ALL "
-                       "SELECT 'removed', lb.rid, lb.pred, lb.succ, lb.type, lb.pred_project, NULL, lb.lag_h, NULL, NULL, "
+                       "SELECT 'removed', lb.rid, lb.pred, lb.succ, lb.pred_name, lb.succ_name, lb.type, lb.pred_project, "
+                       "NULL, lb.lag_h, NULL, NULL, "
                        "lb.pred_hpd, lb.succ_hpd FROM lb WHERE NOT EXISTS (SELECT 1 FROM la WHERE " + LINK_KEY + ")) "
                        "ORDER BY change, succ, pred, type, rid")
 
@@ -4699,7 +4866,8 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
                 return None if ph is None else _days(h or 0, _lag_hpd(con, {"hpd": ph}, {"hpd": sh}, p, rule[p])[0])
 
             def row_fn(r: sqlite3.Row) -> dict:
-                return {"change": r["change"], "pred_code": r["pred"], "succ_code": r["succ"],
+                return {"change": r["change"], "pred_code": r["pred"], "pred_name": r["pred_name"],
+                        "succ_code": r["succ"], "succ_name": r["succ_name"],
                         "type": REL_TYPES_REV.get(r["type"], r["type"]), "pred_project": r["pred_project"],
                         "lag_d": lag_d(r["lag_h"], r["pred_hpd"], r["succ_hpd"], pid),
                         "other_lag_d": lag_d(r["other_lag_h"], r["other_pred_hpd"], r["other_succ_hpd"], oid),
@@ -4714,7 +4882,9 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
            "summary": {"activities": {"matched": s[0], "added": s[1] or 0, "removed": removed, "later": s[2] or 0,
                                       "earlier": s[3] or 0, "same_finish": s[4] or 0, "later_avg_cd": r2(s[5]),
                                       "later_max_cd": r2(s[6]), "earlier_max_cd": r2(s[7]), "status_changed": s[8] or 0,
-                                      "orig_dur_changed": s[9] or 0, "name_changed": s[10] or 0},
+                                      "orig_dur_changed": s[9] or 0, "name_changed": s[10] or 0,
+                                      "slip_causes": {k: causes.get(k, 0) for k in SLIP_CAUSES},
+                                      "slip_cause_unknown": causes.get(None, 0)},
                        "relationships": {"matched": lsum[0], "added": lsum[1], "removed": lsum[2], "lag_changed": lsum[3]}},
            "projects": {k: {"project": pa[k], "other": pb[k]} for k in pf},
            "basis": ("finish = actual, else early finish; other: " + ("same" if dates == "current" else "planned finish")
@@ -4824,18 +4994,23 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
                  from_date: Optional[DateTimeStr] = None, include_in_progress: bool = True,
                  include_completed: bool = False, wbs_name_contains: Optional[str] = None,
                  code_type: Optional[str] = None, code_value: Optional[str] = None, include_child_codes: bool = True,
-                 fields: Optional[ActFields] = None, offset: Offset = 0, limit: Limit = 50) -> dict:
-    """Look-ahead of a project, one page: {total, offset, returned, next_offset, rows, window,
-    data_date, counts, schedule_state, note}. The window starts at the data date (or from_date; a
+                 critical_only: bool = False, fields: Optional[ActFields] = None, offset: Offset = 0,
+                 limit: Limit = 50) -> dict:
+    """Look-ahead of a project, one page: {total, offset, returned, next_offset, rows, window, weeks,
+    data_date, counts, critical_definition, schedule_state, note}. The window starts at the data date (or from_date; a
     date alone starts at 00:00), lasts days= (default 14) or weeks= calendar days and is half-open
     [from, to). Listed: not started activities starting in it, open ones finishing in it, not
     started ones spanning it (start before, finish after), every in-progress activity
     (include_in_progress=False keeps those finishing in the window) and, with include_completed=True,
     completed ones whose actual dates overlap it. Open activities use their remaining dates (early
     when empty) of the last F9. LOE and WBS summary activities are left out. Each row has window: the
-    categories it meets (in_progress, starting, finishing, spanning, completed); counts gives them
-    over all pages. wbs_name_contains, code_type / code_value / include_child_codes and fields= as in
-    p6_query_activities. Order: start, finish, Activity ID."""
+    categories it meets (in_progress, starting, finishing, spanning, completed), critical (open and
+    critical under the project definition, as p6_critical_path), fcst_start (actual start, else remaining
+    start), fcst_finish (actual finish when completed, else remaining finish) and start_week /
+    finish_week: the week of the window holding that date (1 = the first 7 days from the window start,
+    None outside the window; weeks lists each one's from and to). critical_only=True lists the critical
+    ones only. counts gives the categories and critical over all pages. wbs_name_contains, code_type / code_value / include_child_codes and fields=
+    as in p6_query_activities. Order: start, finish, Activity ID."""
     if days is not None and weeks is not None:
         raise ValueError("give days or weeks, not both")
     n = int(days) if days is not None else 7 * int(weeks) if weeks is not None else LOOKAHEAD_DAYS
@@ -4853,6 +5028,7 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
         raise ValueError(f"{project} has no data date: pass from_date")
     to = frm + timedelta(days=n)
     cflt, cargs, cinfo = _code_filter(con, pid, code_type, code_value, include_child_codes)
+    crit, crit_args, crit_def = _critical_clause(con, pid, "project", None)[:3]
     f, e = f"'{_fmt_dt(frm)}'", f"'{_fmt_dt(to)}'"  # strftime output: safe as SQL literals
     rs, rf = "COALESCE(t.restart_date, t.early_start_date)", "COALESCE(t.reend_date, t.early_end_date)"
     cat = {"in_progress": "t.status_code = 'TK_Active'",
@@ -4862,21 +5038,36 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
            "completed": f"t.status_code = 'TK_Complete' AND t.act_start_date < {e} AND t.act_end_date >= {f}"}
     on = [k for k in cat if {"in_progress": include_in_progress, "completed": include_completed}.get(k, True)]
     inner = (_act_from(con) + f" AND t.task_type NOT IN {SUMMARY_TYPES}" + cflt
-             + (" AND w.wbs_name LIKE ?" if wbs_name_contains else "") + " AND (" + " OR ".join(f"({cat[k]})" for k in on) + ")")
-    args = [pid, *cargs] + ([f"%{wbs_name_contains}%"] if wbs_name_contains else [])
-    q = (f"SELECT t.*, {', '.join(f'({c}) AS w_{k}' for k, c in cat.items())} FROM ({inner}) t "
-         f"ORDER BY COALESCE(t.act_start_date, {rs}), {rf}, t.task_code, t.task_id")
+             + (" AND w.wbs_name LIKE ?" if wbs_name_contains else "") + " AND (" + " OR ".join(f"({cat[k]})" for k in on) + ")"
+             + (f" AND t.status_code <> 'TK_Complete' AND COALESCE({crit}, 0)" if critical_only else ""))
+    args = ([pid, *cargs] + ([f"%{wbs_name_contains}%"] if wbs_name_contains else [])
+            + (list(crit_args) if critical_only else []))
+    is_crit = f"(t.status_code <> 'TK_Complete' AND COALESCE({crit}, 0))"
+    q = (f"SELECT t.*, {', '.join(f'({c}) AS w_{k}' for k, c in cat.items())}, {is_crit} AS w_crit, "
+         f"COALESCE(t.act_start_date, {rs}) AS f_st, CASE WHEN t.status_code = 'TK_Complete' THEN t.act_end_date "
+         f"ELSE {rf} END AS f_fin FROM ({inner}) t ORDER BY COALESCE(t.act_start_date, {rs}), {rf}, t.task_code, t.task_id")
+
+    def week(v) -> Optional[int]:
+        d = _db_dt(v)
+        return int((d - frm).total_seconds() // (7 * 86400)) + 1 if d is not None and frm <= d < to else None
 
     def row(r: sqlite3.Row) -> dict:
-        return {**row_fn(r), "window": [k for k in cat if r[f"w_{k}"]]}
+        return {**row_fn(r), "window": [k for k in cat if r[f"w_{k}"]], "critical": bool(r["w_crit"]),
+                "fcst_start": r["f_st"], "fcst_finish": r["f_fin"], "start_week": week(r["f_st"]),
+                "finish_week": week(r["f_fin"])}
     try:
-        res = _page(con, q, args, offset, limit, row)
-        c = con.execute("SELECT " + ", ".join(f"SUM({x})" for x in cat.values()) + f" FROM ({inner}) t", args).fetchone()
+        res = _page(con, q, [*crit_args, *args], offset, limit, row)
+        c = con.execute("SELECT " + ", ".join(f"SUM({x})" for x in [*cat.values(), is_crit]) + f" FROM ({inner}) t",
+                        [*crit_args, *args]).fetchone()
     finally:
         con.rollback()
+    weeks = [{"week": k + 1, "from": _fmt_dt(frm + timedelta(days=7 * k)),
+              "to": _fmt_dt(min(to, frm + timedelta(days=7 * k + 7)))}
+             for k in range((n + 6) // 7)]
     res.update(window={"from": _fmt_dt(frm), "to": _fmt_dt(to), "days": n,
                        "basis": "calendar days, half-open [from, to), from " + ("from_date" if from_date else "the data date")},
-               data_date=dd, counts={k: c[i] or 0 for i, k in enumerate(cat)})
+               weeks=weeks, data_date=dd, counts={**{k: c[i] or 0 for i, k in enumerate(cat)}, "critical": c[len(cat)] or 0},
+               critical_definition=crit_def + "; open activities")
     if cinfo:
         res["code_filter"] = cinfo
     res.update(schedule_state=_schedule_state(con, pid),
@@ -5006,7 +5197,8 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
     periods: per period and cumulative values with % of the budget for baseline (baseline= Project
     ID, default the project baseline; its planned dates), planned (the project's current planned
     dates), actual (actual quantities, up to the data date) and forecast (actuals, then remaining
-    from the data date). to_date: exact values at the data date: baseline planned (planned value),
+    from the data date); period_count = the number of periods. to_date: exact values at the data date:
+    baseline planned (planned value),
     planned, actual and actual %, earned and earned % (earned value: budget x activity % complete
     by its percent complete type, P6 earned value with 'activity percent complete'), variance
     (earned - baseline planned), spi (earned / baseline planned) and spi_actual (actual / baseline
@@ -5072,7 +5264,8 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
     r2 = lambda v: None if v is None else round(v, 2)  # noqa: E731
     periods = []
     for i, a in enumerate(edges[:-1]):
-        row = {"period": f"{a:%Y-%m}" if period == "month" else f"{a:%Y-%m-%d}", "start": f"{a:%Y-%m-%d}"}
+        row = {"period": f"{a:%Y-%m}" if period == "month" else f"{a:%Y-%m-%d}", "start": f"{a:%Y-%m-%d}",
+               **({} if base else {"baseline": None, "baseline_cum": None, "baseline_pct": None})}
         for k, c in cums.items():
             done = k != "actual" or a <= dd  # no actuals after the data date
             row[k] = r2(c[i + 1] - c[i]) if done else None
@@ -5105,7 +5298,7 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
                         "actual_pct": r2(100 * act / cur["budget"]), "earned": r2(ev), "earned_pct": r2(100 * ev / cur["budget"]),
                         "variance": r2(None if bp is None else ev - bp), "spi": round(ev / bp, 4) if bp else None,
                         "spi_actual": round(act / bp, 4) if bp else None},
-            "periods": periods,
+            "periods": periods, "period_count": len(periods),
             "earned_points": sorted([point(project, dd, cur)] + [point(u, d, c) for u, d, c in pts],
                                     key=lambda p: p["data_date"] or ""),
             "checks": {"totals_reached": reached, "clipped_actuals": cur["clipped"], "clamped_remaining": cur["clamped"],
@@ -5114,11 +5307,107 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
             "schedule_state": _schedule_state(con, pid), "note": note}
 
 
+MS_VS = ("late", "early", "on_time")  # p6_milestones vs_baseline
+MsOrder = Literal["date", "variance"]
+
+
+@_tool()
+def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, baseline_dates: BaselineDates = "current",
+                  open_only: bool = False, order: MsOrder = "date", offset: Offset = 0, limit: Limit = 50) -> dict:
+    """Milestones of a project (TT_Mile start milestones, TT_FinMile finish milestones), one page by date
+    then Activity ID (order='variance': the largest variance in working days first, calendar days when the
+    calendar is unreadable, milestones without a baseline date last, then date): {total, offset, returned, next_offset, rows, counts, baseline, must_finish,
+    critical_definition, schedule_state, note}. A milestone has one date: the start of a start milestone,
+    the finish of a finish milestone, actual else early (date_kind actual or forecast). Row: task_code,
+    task_name, task_type, status_code, wbs_name, date, date_kind, baseline_date (the baseline activity with
+    the same Activity ID, same date rule; baseline_dates='planned' takes its planned date; None when it is
+    not in the baseline), variance_cd (date - baseline date, calendar days, positive = later), variance_wd
+    (working days of the milestone's calendar; None when it is unreadable), vs_baseline (late, early or
+    on_time within 5 minutes of working time; None without a baseline date), total_float_d (days of its
+    calendar; None when completed), critical (open and critical under the project definition, as
+    p6_critical_path), constraint cstr_type / cstr_label / cstr_date. counts over every milestone listed:
+    milestones, completed, open, critical, late, early, on_time, no_baseline, open_late. baseline= a
+    Project ID (default: the project baseline). open_only=True leaves completed milestones out."""
+    if baseline_dates not in get_args(BaselineDates):
+        raise ValueError(f"baseline_dates must be one of {list(get_args(BaselineDates))}")
+    if order not in get_args(MsOrder):
+        raise ValueError(f"order must be one of {list(get_args(MsOrder))}")
+    con = _connect()
+    pid = _project_id(con, project)
+    con.execute("BEGIN")  # milestones, baseline and settings from one snapshot
+    try:
+        bid = _baseline_pid(con, pid, baseline)
+        crit, cargs, cdef = _critical_clause(con, pid, "project", None)[:3]
+        q = (_act_from(con).replace("SELECT t.*,", f"SELECT t.*, (t.status_code <> 'TK_Complete' AND "
+                                    f"COALESCE({crit}, 0)) AS is_crit,", 1)
+             + " AND t.task_type IN ('TT_Mile', 'TT_FinMile')" + (" AND t.status_code <> 'TK_Complete'" if open_only else ""))
+        ms = [_dict(r) for r in con.execute(q + " ORDER BY t.task_id", [*cargs, pid])]
+        bl: dict[str, dict] = {}
+        if bid is not None:
+            for r in con.execute("SELECT task_code, act_start_date, act_end_date, early_start_date, early_end_date, "
+                                 "target_start_date, target_end_date FROM TASK WHERE proj_id = ?" + _alive(con, "TASK")
+                                 + " ORDER BY task_id DESC", (bid,)):
+                bl[r["task_code"]] = _dict(r)  # the lowest task_id wins
+        bname = bid and con.execute("SELECT proj_short_name FROM PROJECT WHERE proj_id = ?", (bid,)).fetchone()[0]
+        must = (con.execute("SELECT plan_end_date FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()[0]
+                if "plan_end_date" in _cols(con, "PROJECT") else None)
+        cals = _calendars(con)
+    finally:
+        con.rollback()
+
+    def one(m: Mapping, task_type: str, planned: bool = False) -> tuple[Optional[str], Optional[str]]:
+        k = "start" if task_type == "TT_Mile" else "end"
+        if planned:
+            return m.get(f"target_{k}_date"), "planned"
+        return (m[f"act_{k}_date"], "actual") if m.get(f"act_{k}_date") else (m.get(f"early_{k}_date"), "forecast")
+    rows = []
+    for m in ms:
+        date, kind = one(m, m["task_type"])
+        b = bl.get(m["task_code"])
+        bdate = one(b, m["task_type"], baseline_dates == "planned")[0] if b else None
+        cal = cals.get(m["clndr_id"])
+        ok = cal is not None and not cal.error
+        d, bd = _db_dt(date), _db_dt(bdate)
+        vs = vcd = vwd = None
+        if d and bd:
+            vcd = round((d - bd).total_seconds() / 86400, 2) + 0.0
+            wh = cal.work_hours(bd, d) if ok else (d - bd).total_seconds() / 3600
+            vwd = round(wh / cal.hpd, 2) + 0.0 if ok else None
+            vs = "late" if wh > GAP_TOL_H else "early" if wh < -GAP_TOL_H else "on_time"
+        done = m["status_code"] == "TK_Complete"
+        rows.append({"task_code": m["task_code"], "task_name": m["task_name"], "task_type": m["task_type"],
+                     "status_code": m["status_code"], "wbs_name": m.get("wbs_name"), "date": date, "date_kind": kind,
+                     "baseline_date": bdate, "variance_cd": vcd, "variance_wd": vwd, "vs_baseline": vs,
+                     "total_float_d": None if done else _days(m.get("total_float_hr_cnt"), m.get("hpd")),
+                     "critical": bool(m["is_crit"]), "cstr_type": m.get("cstr_type"),
+                     "cstr_label": _cstr_label(m.get("cstr_type")), "cstr_date": m.get("cstr_date"), "_tid": m["task_id"]})
+    rows.sort(key=lambda r: (_db_dt(r["date"]) or datetime.max, r["task_code"], r["_tid"]))
+    if order == "variance":  # stable: equal variances keep the date order
+        rows.sort(key=lambda r: (r["variance_cd"] is None, -(r["variance_wd"] if r["variance_wd"] is not None
+                                                              else r["variance_cd"] or 0)))
+    for r in rows:
+        del r["_tid"]
+    n_open = sum(r["status_code"] != "TK_Complete" for r in rows)
+    counts = {"milestones": len(rows), "completed": len(rows) - n_open, "open": n_open,
+              "critical": sum(r["critical"] for r in rows), **{k: sum(r["vs_baseline"] == k for r in rows) for k in MS_VS},
+              "no_baseline": sum(r["vs_baseline"] is None for r in rows),
+              "open_late": sum(r["vs_baseline"] == "late" and r["status_code"] != "TK_Complete" for r in rows)}
+    res = _slice(rows, offset, limit)
+    res.update(counts=counts, baseline=bname and {"project": bname, "dates": baseline_dates,
+                                                    "source": "baseline=" if baseline else
+                                                    "project baseline (PROJECT.sum_base_proj_id)"},
+               must_finish=must, critical_definition=cdef + "; open activities", schedule_state=_schedule_state(con, pid),
+               note="Dates of the last F9 (actual, else early). Variance = date - baseline date: positive = later."
+                    + ("" if bid is not None else " No baseline: pass baseline= or set a project baseline in P6."))
+    return res
+
+
 @_tool()
 def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None) -> dict:
     """One-call overview of a project (values of the last F9): project (name, calendar), dates (data
     date, planned start, must finish by, scheduled finish, last schedule run, first start and last
-    finish of the activities, scheduled finish minus must finish by in calendar days), activities (by
+    finish of the activities, scheduled finish minus must finish by in calendar days and in working days
+    of the project calendar (None when it is unreadable)), activities (by
     status, by type, open, open milestones), relationships (successor in the project; from and to
     other projects), critical (counts of open activities, LOE and WBS summary left out, as
     p6_critical_path), percent_complete (primary = units: actual / at completion units, labor plus
@@ -5126,7 +5415,9 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
     physical: physical % weighted by budget units; duration; activities completed;
     units_vs_physical_mismatch: activities with units whose physical % and units % differ by more
     than 0.01 point), baseline (the project baseline, baselines attached, the one used: baseline=
-    else the project baseline; finish variance in calendar days, baseline planned units % at the
+    else the project baseline, its scheduled finish and data date; every key present, null without a
+    baseline; finish variance = scheduled finish minus the baseline's scheduled finish in
+    calendar days and in working days of the project calendar, baseline planned units % at the
     data date and spi_units = earned units / baseline planned units, earned value and linear spread
     as p6_progress_curve), counts (WBS, assignments, resources, calendars, code assignments) and
     schedule_state."""
@@ -5159,6 +5450,7 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
                            (pid,)).fetchone()
         cal = con.execute(f"SELECT c.clndr_name, {HPD_SQL} FROM CALENDAR c WHERE c.clndr_id = ?" + al("CALENDAR", "c"),
                           (p["clndr_id"],)).fetchone()
+        pcal = _calendars(con, int(p["clndr_id"])).get(int(p["clndr_id"])) if p["clndr_id"] is not None else None
         by = {k: {r[0]: r[1] for r in con.execute(f"SELECT t.{k}, COUNT(*) {acts} GROUP BY t.{k} ORDER BY t.{k}", (pid,))}
               for k in ("status_code", "task_type")}
         a = con.execute(f"SELECT COUNT(*), SUM({op}), SUM({op} AND t.task_type IN ('TT_Mile', 'TT_FinMile')), "
@@ -5186,8 +5478,10 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
         name_of = lambda b: b and one("SELECT proj_short_name FROM PROJECT WHERE proj_id = ?", (b,))  # noqa: E731
         bl, dd = None, _db_dt(p["last_recalc_date"])
         if bid is not None:
-            bfin = _db_dt(one("SELECT scd_end_date FROM PROJECT WHERE proj_id = ?", (bid,))) if "scd_end_date" in pc else None
-            bl = {"finish": bfin, "items": _curve_items(_measure_rows(con, bid, "units"), dd) if dd else None,
+            braw = {c: (one(f"SELECT {c} FROM PROJECT WHERE proj_id = ?", (bid,)) if c in pc else None)
+                    for c in ("scd_end_date", "last_recalc_date")}
+            bfin = _db_dt(braw["scd_end_date"])
+            bl = {"finish": bfin, "raw": braw, "items": _curve_items(_measure_rows(con, bid, "units"), dd) if dd else None,
                   "cur": _curve_items(_measure_rows(con, pid, "units"), dd) if dd else None}
         names = (name_of(pbid), name_of(bid))
     finally:
@@ -5201,12 +5495,17 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
     primary = "units" if pct["units"] is not None else "duration"
     sf, mf = _db_dt(p["scd_end_date"]), _db_dt(p["plan_end_date"])
     cd = lambda x, y: r2((x - y).total_seconds() / 86400) if x and y else None  # noqa: E731
+    ok = pcal is not None and not pcal.error
+    wd = lambda x, y: round(pcal.work_days(y, x), 2) + 0.0 if ok and x and y else None  # noqa: E731
     base = {"project_baseline": names[0], "attached": attached, "used": names[1],
-            "source": None if bid is None else "baseline=" if baseline else "project baseline (PROJECT.sum_base_proj_id)"}
+            "source": None if bid is None else "baseline=" if baseline else "project baseline (PROJECT.sum_base_proj_id)",
+            "finish": None, "data_date": None, "finish_variance_cd": None, "finish_variance_wd": None,
+            "planned_units_pct_at_data_date": None, "spi_units": None}
     if bl:
+        base.update(finish=bl["raw"]["scd_end_date"], data_date=bl["raw"]["last_recalc_date"])
         bp = _value_at(bl["items"]["planned"], dd) if bl["items"] else None
         bb = bl["items"]["budget"] if bl["items"] else 0
-        base.update(finish_variance_cd=cd(sf, bl["finish"]),
+        base.update(finish_variance_cd=cd(sf, bl["finish"]), finish_variance_wd=wd(sf, bl["finish"]),
                     planned_units_pct_at_data_date=r4(100 * bp / bb) if bp is not None and bb else None,
                     spi_units=round(bl["cur"]["earned"] / bp, 4) if bp else None)
     notes = ["Values of the last F9 and of the last progress update."]
@@ -5217,7 +5516,7 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
             "dates": {"data_date": p["last_recalc_date"], "planned_start": p["plan_start_date"],
                       "must_finish_by": p["plan_end_date"], "scheduled_finish": p["scd_end_date"],
                       "last_schedule_run": p["last_schedule_date"], "activity_start": a[15], "activity_finish": a[16],
-                      "finish_vs_must_finish_by_cd": cd(sf, mf)},
+                      "finish_vs_must_finish_by_cd": cd(sf, mf), "finish_vs_must_finish_by_wd": wd(sf, mf)},
             "activities": {"total": a[0], "by_status": by["status_code"], "by_type": by["task_type"], "open": a[1] or 0,
                            "milestones_open": a[2] or 0},
             "relationships": {"total": rel[0], "from_other_projects": rel[1] or 0, "to_other_projects": rel_out},
@@ -7067,6 +7366,30 @@ def _eps_nodes(con) -> list[dict]:
         + " ORDER BY w.seq_num, w.wbs_short_name, w.wbs_id")]
 
 
+def _eps_tree(con) -> list[dict]:
+    """EPS nodes in tree order (each node before its children, siblings in _eps_nodes order) with depth (0 =
+    top level) and path (names from the top, joined with ' > '). A node whose parent is not an EPS node is a
+    top-level node; a cycle is cut (depth cap 50)."""
+    nodes = _eps_nodes(con)
+    ids = {n["wbs_id"] for n in nodes}
+    kids: dict = {}
+    for n in nodes:
+        kids.setdefault(n["parent_wbs_id"] if n["parent_wbs_id"] in ids else None, []).append(n)
+    out: list[dict] = []
+    seen: set = set()
+
+    def walk(parent, depth: int, path: list[str]) -> None:
+        for n in kids.get(parent, []):
+            if n["wbs_id"] in seen or depth > 50:
+                continue
+            seen.add(n["wbs_id"])
+            p = path + [n["eps_name"] or n["eps_id"]]
+            out.append({**n, "depth": depth, "path": " > ".join(p)})
+            walk(n["wbs_id"], depth + 1, p)
+    walk(None, 0, [])
+    return out
+
+
 def _eps_wbs_id(con, eps: Optional[str]) -> int:
     nodes = _eps_nodes(con)
     if not nodes:
@@ -7088,10 +7411,35 @@ def _guid() -> str:
 
 
 @_tool()
-def p6_list_eps(offset: Offset = 0, limit: Limit = 200) -> dict:
+def p6_list_eps(order: EpsOrder = "seq", offset: Offset = 0, limit: Limit = 200) -> dict:
     """EPS nodes, one page: {total, offset, returned, next_offset, rows}. eps_id is the short name
-    used by p6_import_xer and p6_create_eps; parent_wbs_id links a node to its parent EPS."""
-    return _slice(_eps_nodes(_connect()), offset, limit)
+    used by p6_import_xer and p6_create_eps; parent_wbs_id links a node to its parent EPS; depth (0 = top
+    level) and path (EPS names from the top, joined with ' > '), projects (projects directly under the
+    node) and projects_subtree (under the node and every EPS below it); baselines and template projects
+    (status WS_Template) are not counted. order: 'seq' (P6 sequence, then EPS ID) or 'tree' (each node
+    before its children, siblings in 'seq' order)."""
+    if order not in get_args(EpsOrder):
+        raise ValueError(f"order must be one of {list(get_args(EpsOrder))}")
+    con = _connect()
+    con.execute("BEGIN")  # nodes, tree and counts from one snapshot
+    try:
+        nodes, tree = _eps_nodes(con), _eps_tree(con)
+        status = "w.status_code" if "status_code" in _cols(con, "PROJWBS") else "NULL"
+        direct = Counter(r[0] for r in con.execute(
+            "SELECT w.parent_wbs_id FROM PROJECT p JOIN PROJWBS w ON w.proj_id = p.proj_id AND w.proj_node_flag = 'Y'"
+            + _alive(con, "PROJWBS", "w") + " WHERE COALESCE(p.project_flag, 'Y') = 'Y' AND p.orig_proj_id IS NULL"
+            + _alive(con, "PROJECT", "p") + f" AND {status} IS NOT 'WS_Template'"))
+    finally:
+        con.rollback()
+    sub = {n["wbs_id"]: direct.get(n["wbs_id"], 0) for n in tree}
+    for n in reversed(tree):  # children come after their parent: add them up from the bottom
+        if n["parent_wbs_id"] in sub:
+            sub[n["parent_wbs_id"]] += sub[n["wbs_id"]]
+    tree = [{**n, "projects": direct.get(n["wbs_id"], 0), "projects_subtree": sub[n["wbs_id"]]} for n in tree]
+    if order == "seq":
+        at = {n["wbs_id"]: n for n in tree}
+        tree = [at[n["wbs_id"]] for n in nodes if n["wbs_id"] in at]
+    return _slice(tree, offset, limit)
 
 
 def _create_eps(con, eps_id: str, eps_name: str, parent_wbs: Optional[int], now: str) -> int:
@@ -7639,6 +7987,9 @@ XER_MATCH = {
 XER_SKIP_COLS = {"create_date", "create_user", "update_date", "update_user",
                  "delete_session_id", "delete_date", "guid"}
 _XER_DATE = re.compile(r"\d{4}-\d\d-\d\d \d\d:\d\d")
+# p6_import_xer counts: the actions every table row carries (0 when none)
+IMPORT_ACTIONS = ("matched", "inserted", "updated", "unchanged", "restored", "deleted", "kept_existing", "skipped_external",
+                  "skipped_duplicate", "skipped_unmapped")  # unchanged / restored: PROJPROP's schedule options row
 _XER_NL = "\x7f\x7f"  # P6 writes line breaks inside memo fields as two DEL characters
 
 
@@ -7881,6 +8232,12 @@ class _XerImport:
     def count(self, table: str, what: str, n: int = 1) -> None:
         self.stats.setdefault(table, {}).setdefault(what, 0)
         self.stats[table][what] += n
+
+    def counts(self) -> dict[str, dict[str, int]]:
+        """stats with every IMPORT_ACTIONS key per table (0 when none), then any other key (PROJPROP's schedule
+        options action)."""
+        return {t: {**{a: v.get(a, 0) for a in IMPORT_ACTIONS}, **{k: n for k, n in v.items() if k not in IMPORT_ACTIONS}}
+                for t, v in self.stats.items()}
 
     def prep(self, table: str, xrow: dict) -> dict:
         """XER row -> database row: ids remapped, foreign ids not in the XER cleared."""
@@ -8381,7 +8738,7 @@ def p6_import_xer(
                       log=[{"operation": f"import_xer_{mode}", "proj_id": pid, "table": None,
                             "keys": {"proj_id": pid, "file": os.path.abspath(path), "xer_project": xp["proj_short_name"]},
                             "after": {"counts": imp.stats}, "summary": plan[0]}])
-        res.update({"counts": imp.stats, "warnings": imp.warnings, "data_date": data_date, "preflight": pf})
+        res.update({"counts": imp.counts(), "warnings": imp.warnings, "data_date": data_date, "preflight": pf})
         if missing is not None:
             res["missing_from_xer"] = missing
         res["schedule_options"] = {"imported": sched is not None, "action": sched and sched["action"],
@@ -8694,6 +9051,32 @@ def _all_rows(fn: Callable[..., dict], cap: int, **kw) -> tuple[dict, list[dict]
     return first, rows[:cap], len(rows) > cap or res["next_offset"] is not None
 
 
+def _bl_planned_by_wbs(con, bid: int, dd: datetime, wbs_of: Mapping[str, int]) -> dict[int, dict]:
+    """Baseline planned units at the data date dd per WBS node of the current project: the baseline's
+    labor and nonlabor assignments, placed by the Activity ID of the current activities (wbs_of: Activity
+    ID -> wbs_id; an Activity ID not in it is left out), spread linearly between their planned dates as
+    p6_progress_curve. {wbs_id: {bl_plan, bl_budget}} of the activities' own WBS (roll up with _merge_agg)."""
+    out: dict[int, dict] = {}
+    if not _cols(con, "TASKRSRC"):
+        return out
+    al = functools.partial(_alive, con)
+    rtype = "COALESCE(tr.rsrc_type, r.rsrc_type)" if "rsrc_type" in _cols(con, "TASKRSRC") else "r.rsrc_type"
+    for code, q, s_, e in con.execute(
+            "SELECT x.task_code, COALESCE(tr.target_qty, 0), tr.target_start_date, tr.target_end_date FROM TASKRSRC tr "
+            "JOIN TASK x ON x.task_id = tr.task_id LEFT JOIN RSRC r ON r.rsrc_id = tr.rsrc_id" + al("RSRC", "r")
+            + f" WHERE x.proj_id = ? AND {rtype} IN ('RT_Labor', 'RT_Equip')" + al("TASKRSRC", "tr") + al("TASK", "x"),
+            (bid,)):
+        w = wbs_of.get(code)
+        if w is None or not q:
+            continue
+        s_, e = _db_dt(s_), _db_dt(e)
+        acc = out.setdefault(w, {"bl_plan": 0.0, "bl_budget": 0.0})
+        acc["bl_budget"] += float(q)
+        if s_ and e:
+            acc["bl_plan"] += _value_at([(float(q), s_, max(s_, e))], dd)
+    return out
+
+
 def _dash_read(con, pid: int, bid: Optional[int], codes: Optional[Sequence[str]], baseline_dates: str) -> dict:
     """What the dashboard reads itself, in the caller's snapshot: the project and baseline dates; every
     activity (baseline dates of the baseline activity with the same Activity ID, slip in working days of
@@ -8780,22 +9163,8 @@ def _dash_read(con, pid: int, bid: Optional[int], codes: Optional[Sequence[str]]
     # baseline planned units at the data date per WBS (baseline assignments by the Activity ID of the current
     # activities, linear between their planned dates as p6_progress_curve), rolled up below
     bpl: dict[int, dict] = {}
-    if bid is not None and dd is not None and _cols(con, "TASKRSRC"):
-        wbs_of = {a["task_code"]: a["wbs_id"] for a in acts}
-        rtype = "COALESCE(tr.rsrc_type, r.rsrc_type)" if "rsrc_type" in _cols(con, "TASKRSRC") else "r.rsrc_type"
-        for code, q, s, e in con.execute(
-                "SELECT x.task_code, COALESCE(tr.target_qty, 0), tr.target_start_date, tr.target_end_date FROM TASKRSRC tr "
-                "JOIN TASK x ON x.task_id = tr.task_id LEFT JOIN RSRC r ON r.rsrc_id = tr.rsrc_id" + al("RSRC", "r")
-                + f" WHERE x.proj_id = ? AND {rtype} IN ('RT_Labor', 'RT_Equip')" + al("TASKRSRC", "tr") + al("TASK", "x"),
-                (bid,)):
-            w = wbs_of.get(code)
-            if w is None or not q:
-                continue
-            s, e = _db_dt(s), _db_dt(e)
-            acc = bpl.setdefault(w, {"bl_plan": 0.0, "bl_budget": 0.0})
-            acc["bl_budget"] += float(q)
-            if s and e:
-                acc["bl_plan"] += _value_at([(float(q), s, max(s, e))], dd)
+    if bid is not None and dd is not None:
+        bpl = _bl_planned_by_wbs(con, bid, dd, {a["task_code"]: a["wbs_id"] for a in acts})
     # band values of every WBS: its activities and the WBS below it
     lows, highs = ("bl_s", "s", "as", "ps", "os"), ("bl_f", "f", "af", "pf", "of")
 
@@ -8886,6 +9255,28 @@ def _dash_read(con, pid: int, bid: Optional[int], codes: Optional[Sequence[str]]
     return {"project": prj, "baseline": base, "bl_finish": bl_finish, "rows": rows[:DASH_WBS_ROWS], "rows_cut": cut,
             "milestones": out_ms, "ms_note": ms_note, "calendar": pcal.name if pcal else None,
             "hpd": pcal.hpd if pcal else 8.0, "kpi": kpi, "acts": acts, "wd_notes": sorted(wd_notes)}
+
+
+def _xl_shown(value, fmt: str) -> str:
+    """A card value as Excel shows it with the dashboard's number formats (halves away from zero, as Excel);
+    None is "n/a"."""
+    if value is None:
+        return "n/a"
+    if isinstance(value, datetime):
+        return value.strftime("%d-%b-%y") if fmt == "dd-mmm-yy" else _fmt_dt(value)
+    def num(v, nd: int) -> str:
+        q = Decimal(repr(float(v))).quantize(Decimal(1).scaleb(-nd), rounding=ROUND_HALF_UP)
+        return f"{q:,.{nd}f}" if "," in fmt else f"{q:.{nd}f}"
+    if fmt == '0.00"%"':
+        return num(value, 2) + "%"
+    if fmt.startswith('+0.0"%"'):
+        t = num(abs(value), 1)
+        return ("+" if value > 0 else "-" if value < 0 else "") + t + "%"  # Excel picks the section by the value
+    if fmt in ('0" d"', '0.0" d"'):
+        return num(value, 0 if fmt == '0" d"' else 1) + " d"
+    if fmt in ("#,##0", "0"):
+        return num(value, 0)
+    return str(value)
 
 
 def _dash_book(d: dict) -> tuple[Any, dict, list]:
@@ -9333,8 +9724,8 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
     for rr, hh in ((5, 20), (6, 18), (7, 18), (8, 30), (9, 8)):
         ws.row_dimensions[rr].height = hh
     card_values = [{"card": title, "value": value.strftime("%Y-%m-%d") if isinstance(value, datetime)
-                    else round(value, 2) if isinstance(value, float) else value, "detail": sub}
-                   for _, title, value, _, sub, _, _ in cards]
+                    else round(value, 2) if isinstance(value, float) else value, "text": _xl_shown(value, fmt),
+                    "detail": sub} for _, title, value, fmt, sub, _, _ in cards]
 
     def rows_cm(r0: int, r1: int) -> float:  # height of rows r0 to r1, less a margin, in cm
         return sum(row_px(ws.row_dimensions[rr].height) for rr in range(r0, r1 + 1)) / 37.8 - 0.4
@@ -9708,8 +10099,8 @@ def p6_shop_search(query: str = "", offset: int = 0, limit: int = 50) -> dict:
     """Search the P6 MCP skill shop: P6 skills (ready-made workflows) shared by users on GitHub and approved
     by the maintainer. query: words found in the name, title, description or author (empty = all). Rows:
     name, title, description, author, version, tools it calls, writes (it uses write tools), status on this
-    PC (available, installed, update, conflict = the name is taken here, newer_app = needs a newer P6 MCP,
-    builtin = part of P6 MCP, nothing to install). Read a skill with p6_shop_get before installing it."""
+    PC (available, installed, update, conflict = the name is taken here, newer_app = needs a newer P6 MCP).
+    Read a skill with p6_shop_get before installing it."""
     _check_page(offset, limit)
     idx = _shop.fetch_index()
     if idx["error"]:
@@ -9727,21 +10118,8 @@ def p6_shop_get(name: str) -> dict:
     in and its status on this PC. Show the user what it does before p6_shop_install."""
     entry = _shop_entry(name)
     _path, data = _shop_settings()
-    if _shop.status(data, entry) == _shop.BUILTIN:  # this P6 MCP's own copy, not the catalog's
-        skill = _skills.BY_NAME[name]
-        return {"name": name, "title": skill.title, "description": skill.description,
-                "args": [{"name": a.name, "description": a.description, "default": a.default} for a in skill.args],
-                "template": _skills.render(skill, {a.name: f"<{a.name}>" for a in skill.args}),
-                "files": [{"path": p, "text": t} for p, t in skill.files], "author": entry.get("author"),
-                "version": entry.get("version"), "license": entry.get("license"), "tools": skill.tools(),
-                "writes": entry.get("writes"),
-                "missing_tools": _skills.missing_tools(skill, SETTINGS.tool_profile, SETTINGS.allow_writes),
-                "issue_url": None, "status": _shop.BUILTIN, "installed_as": None,
-                "enabled": name not in (data.get("skills_disabled") or []),
-                "note": "Built into P6 MCP: nothing to install. The Skills page of P6 MCP Settings turns it on or "
-                        "off."}
-    if entry.get("builtin"):
-        raise ValueError(f"{name} is a built-in skill of a newer P6 MCP: update P6 MCP to get it.")
+    if entry.get("builtin"):  # an entry of a catalog older than P6 MCP 1.9 (built-in skills of 1.8)
+        raise ValueError(f"{name} is a built-in skill of P6 MCP 1.8 in an older catalog: nothing to read here.")
     item = _shop.fetch_skill(entry)
     skill = _skills.from_config(_shop.to_stored(item))
     mine = _shop.installed_as(data, name)
@@ -9759,10 +10137,8 @@ def p6_shop_install(name: str, install_as: Optional[str] = None, confirm: bool =
     is offered as an MCP prompt once the MCP client restarts. install_as: another name when the skill's name
     is taken here. Changes P6 MCP's settings only, never the P6 database."""
     entry = _shop_entry(name)
-    if entry.get("builtin"):
-        raise ValueError(f"{name} is built into P6 MCP: nothing to install. The Skills page of P6 MCP Settings "
-                         "turns it on or off." if name in _skills.BY_NAME else
-                         f"{name} is a built-in skill of a newer P6 MCP: update P6 MCP to get it.")
+    if entry.get("builtin"):  # an entry of a catalog older than P6 MCP 1.9 (built-in skills of 1.8)
+        raise ValueError(f"{name} is a built-in skill of P6 MCP 1.8 in an older catalog: nothing to install.")
     item = _shop.fetch_skill(entry)
     path, data = _shop_settings()
     if _shop.status(data, entry) == _shop.NEWER_APP:

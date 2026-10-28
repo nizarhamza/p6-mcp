@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from p6mcp import clients, config, instructions, settings_logic, skills
+from p6mcp import clients, config, core_skills, instructions, settings_logic, skills
 from p6mcp.clients.base import Launch
 
 LN = Launch(r"C:\Program Files\P6 MCP\p6mcp-server.exe", [])
@@ -70,8 +70,8 @@ def test_custom_command_render_and_checks():
     md = skills.skill_md(cmd)
     assert "name: p6-float-report\n" in md and "of <project>" in md and skills.MARKER in md
 
-    for bad, why in ((dict(MINE, name="weekly-update-review"), "built-in"), (dict(MINE, name="Bad Name"), "name"),
-                     (dict(MINE, template=" "), "empty"),
+    assert settings_logic.put_skill(config.DEFAULTS, dict(MINE, name="weekly-update-review"))  # no name reserved
+    for bad, why in ((dict(MINE, name="Bad Name"), "name"), (dict(MINE, template=" "), "empty"),
                      (dict(MINE, args=[{"name": "rules"}]), "rules"),
                      (dict(MINE, args=[{"name": "a"}, {"name": "a"}]), "twice")):
         with pytest.raises(ValueError, match=why):
@@ -86,31 +86,35 @@ def test_custom_command_render_and_checks():
 
 
 def test_offered_with_turned_off_and_custom_commands():
-    data = settings_logic.put_skill(config.DEFAULTS, MINE)
+    data = dict(config.DEFAULTS, core_skills_installed=True)  # the core set is in custom_skills like any skill
+    data = settings_logic.put_skill(data, MINE)
     data = settings_logic.put_skill(data, dict(MINE, name="free-text", template="Summarise the project."))
-    data = settings_logic.set_skill_enabled(data, "baseline-variance", False)
-    names = [c.name for c in skills.offered("full", True, data)]
-    assert "baseline-variance" not in names and names[-2:] == ["float-report", "free-text"]
-    # Basic profile: the built-in ones need Full tools, p6_float_analysis is a Basic tool, free-text names none
+    data = settings_logic.put_skill(data, dict(MINE, name="variance", template="Run p6_compare_projects."))
+    data = settings_logic.set_skill_enabled(data, "variance", False)
+    assert [c.name for c in skills.offered("full", True, data)] == ["float-report", "free-text"]
+    # Basic profile: p6_float_analysis is a Basic tool, free-text names none
     assert [c.name for c in skills.offered("basic", False, data)] == ["float-report", "free-text"]
     data = settings_logic.set_skill_enabled(data, "float-report", False)
     assert "float-report" not in [c.name for c in skills.offered("full", True, data)]
     rows = {r["name"]: r for r in settings_logic.skill_rows(dict(data, tool_profile="basic"))}
-    assert rows["weekly-update-review"]["missing_tools"] and not rows["weekly-update-review"]["offered"]
-    assert rows["free-text"]["offered"] and not rows["float-report"]["enabled"]
-    assert settings_logic.set_skill_enabled(data, "baseline-variance", True)["skills_disabled"] == []
+    assert list(rows) == ["float-report", "free-text", "variance"]  # only the skills of the config
+    assert rows["variance"]["missing_tools"] == ["p6_compare_projects"] and not rows["variance"]["offered"]
+    assert rows["free-text"]["offered"] and not rows["float-report"]["enabled"] and not rows["free-text"]["edited"]
+    with pytest.raises(ValueError, match="No skill"):
+        settings_logic.set_skill_enabled(data, "weekly-update-review", False)  # not a built-in skill any more
     assert skills.offered("full", True) == skills.offered("full", True, config.DEFAULTS)
 
 
 def test_server_registers_custom_prompts_and_instructions(server, monkeypatch):
+    core = [s.name for s in core_skills.bundled_skills()]  # offered until the core set is installed
     raw = config.validate(settings_logic.put_instruction(settings_logic.put_skill(
-        dict(config.DEFAULTS, tool_profile="full", allow_writes=True, skills_disabled=["delay-whatif"]), MINE),
+        dict(config.DEFAULTS, tool_profile="full", allow_writes=True, skills_disabled=core[:1]), MINE),
         ACT))
     monkeypatch.setattr(server, "STARTUP", dataclasses.replace(server.STARTUP, raw=raw))
     monkeypatch.setattr(server, "PROMPTS", {})
     monkeypatch.setattr(server, "mcp", server.FastMCP("primavera-p6", instructions=instructions.build(raw)))
     server._register_prompts()
-    assert "float-report" in server.PROMPTS and "delay-whatif" not in server.PROMPTS
+    assert sorted(server.PROMPTS) == sorted(core[1:] + ["float-report"])  # the 1.8 skills_disabled still apply
     assert server.mcp.instructions.endswith(ACT)
     if not hasattr(server.mcp, "list_prompts"):
         pytest.skip("this SDK has no prompt registry")
@@ -143,7 +147,7 @@ def test_strict_rules_for_new_skills_only(server):
     data = config.validate({"custom_skills": [typo]})  # stored: loads
     skill = skills.custom_skills(data)[0]
     assert skills.missing_tools(skill, "full", True) == ["p6_not_a_tool"] and not skills.available(skill, "full", True)
-    assert [s.name for s in skills.offered("full", True, data)] == [s.name for s in skills.BUILTIN]
+    assert [s.name for s in skills.offered("full", True, data)] == [s.name for s in core_skills.bundled_skills()]
     rows = {r["name"]: r for r in settings_logic.skill_rows(dict(data, tool_profile="full", allow_writes=True))}
     assert rows["typo"]["missing_tools"] == ["p6_not_a_tool"] and not rows["typo"]["offered"]
     for bad, why in ((dict(typo, description="Fine."), "unknown tools p6_not_a_tool"),
@@ -162,17 +166,23 @@ def test_strict_rules_for_new_skills_only(server):
     assert ok["custom_skills"][0]["files"] == [{"path": "ref/Notes.md", "text": "n"}]
 
 
-def test_edited_shop_skill_becomes_the_users_own():
-    src = {"shop": "float-report", "version": 2, "sha256": "ab"}
+def test_edited_shop_skill_keeps_its_source_and_is_marked_edited():
+    """1.9: an edited shop skill keeps its source (it was dropped in 1.8): its content_sha tells the automatic
+    update to leave it alone, and the Shop page still offers the update."""
+    stored = settings_logic.put_skill(config.DEFAULTS, MINE)["custom_skills"][0]
+    src = {"shop": "float-report", "version": 2, "sha256": "ab", "content_sha": skills.content_sha(stored)}
     data = settings_logic.put_skill(config.DEFAULTS, dict(MINE, source=src))
-    assert data["custom_skills"][0]["source"] == src
+    assert data["custom_skills"][0]["source"] == src and not skills.edited(data["custom_skills"][0])
     data = settings_logic.set_skill_enabled(data, "float-report", False)
-    assert data["custom_skills"][0]["source"] == src  # turned off, not edited
-    same = settings_logic.put_skill(data, dict(data["custom_skills"][0]), "float-report")
-    assert same["custom_skills"][0]["source"] == src
+    assert not skills.edited(data["custom_skills"][0])  # turned off, not edited
+    renamed = settings_logic.put_skill(data, dict(data["custom_skills"][0], name="my-floats"), "float-report")
+    assert not skills.edited(renamed["custom_skills"][0])  # the name is not content
     edited = settings_logic.put_skill(data, dict(data["custom_skills"][0], template="Other p6_lookahead."),
                                       "float-report")
-    assert "source" not in edited["custom_skills"][0]
+    assert edited["custom_skills"][0]["source"] == src and skills.edited(edited["custom_skills"][0])
+    assert settings_logic.skill_rows(edited)[0]["edited"]
+    assert skills.edited(dict(stored, source={"shop": "x"}))  # no content_sha recorded: never replaced
+    assert not skills.edited(stored)  # the user's own skill
 
 
 def test_restart_needed_for_instructions_and_commands():
