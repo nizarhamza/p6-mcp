@@ -233,6 +233,9 @@ Tests run on a synthetic P6 database and synthetic XER files built by the tests
 (`tests/fixtures/make_db.py`). Never commit a real schedule, database, XER file or log. Building the
 installer and releasing: [docs/RELEASING.md](docs/RELEASING.md).
 
+To contribute, start with an issue: see [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[code of conduct](CODE_OF_CONDUCT.md). Accessibility: [ACCESSIBILITY.md](ACCESSIBILITY.md).
+
 ## License
 
 [Apache License 2.0](LICENSE). Copyright 2026 Nizar Hamza. See [NOTICE](NOTICE).
