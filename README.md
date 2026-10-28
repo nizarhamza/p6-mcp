@@ -139,8 +139,9 @@ reads it only when you open the page or ask your AI client (tools `p6_shop_searc
 Read a skill before installing it: it is instructions for the AI, and a skill that uses write tools can
 change your schedule once you confirm the change. Turn the shop off under **Tools and safety**.
 
-To share one of your skills, select it on the Skills page and click **Share on GitHub**: your browser opens
-a GitHub issue with the skill filled in (a free GitHub account is needed; nothing is sent by P6 MCP itself).
+To share one of your skills, select it on the Skills page and click **Share on GitHub**: P6 MCP copies the
+skill to the clipboard and your browser opens the GitHub share form; sign in if asked (a free GitHub account
+is needed), paste the skill in the Skill field and click Create (nothing is sent by P6 MCP itself).
 The maintainer reviews it and, once approved, a GitHub Action checks it and publishes it in the catalog
 under the Apache-2.0 license. Without a GitHub account, **Export** the skill to a zip file and send it;
 **Import** adds a zip (or any skill folder with a `SKILL.md` and text files) after you review it.

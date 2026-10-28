@@ -3,6 +3,14 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.8.1] - Unreleased
+
+### Fixed
+
+- Share on GitHub: the link carried the whole skill, and GitHub's sign-in (with Google in particular) failed
+  on that long return link with a Server Error, so no issue was created. The link now opens only the share
+  form, and the skill is always copied to the clipboard to paste in its Skill field.
+
 ## [1.8.0] - 2026-10-28
 
 ### Changed

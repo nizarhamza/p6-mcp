@@ -93,12 +93,12 @@ def test_fetch_checks_the_index_hash():
 def test_share_url():
     url, clip = shop.share_url(SKILL)
     q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
-    assert url.startswith(f"{shop.REPO_URL}/issues/new?") and clip is None
-    assert q["template"] == [shop.ISSUE_TEMPLATE] and q["title"] == ["Share: float-watch"]
-    assert json.loads(q[shop.ISSUE_FIELD][0]) == shop.meta(SKILL)
+    assert url.startswith(f"{shop.REPO_URL}/issues/new?") and json.loads(clip) == shop.meta(SKILL)
+    assert q == {"template": [shop.ISSUE_TEMPLATE], "title": ["Share: float-watch"]}
     long = dict(SKILL, template="Use p6_lookahead. " + "x" * 7500)
     url, clip = shop.share_url(long)
-    assert shop.ISSUE_FIELD + "=" not in url and len(url) < 200 and json.loads(clip)["template"] == long["template"]
+    # never the skill in the link: GitHub's sign-in with Google fails on a long return URL
+    assert len(url) < 150 and json.loads(clip)["template"] == long["template"]
     with pytest.raises(ValueError, match="description"):
         shop.share_url(dict(SKILL, description=""))
 

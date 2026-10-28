@@ -3,9 +3,10 @@
 - The catalog is the public repository nizarhamza/p6-mcp-shop: index.json and one folder per skill
   (skills/<name>/p6mcp.json = the whole skill, plus SKILL.md and its reference files to browse). Reads are
   anonymous, from raw.githubusercontent.com (no API rate limit), only when the Shop page or a shop tool asks.
-- Sharing opens a prefilled GitHub issue in the browser (share_url): no token in the app, GitHub asks the
-  user to sign in. The maintainer approves it with a label and the catalog's GitHub Action checks it with
-  check_shared (this module, stdlib only, imported by the workflow) and publishes it.
+- Sharing opens the GitHub issue form in the browser and puts the skill on the clipboard (share_url): no
+  token in the app, GitHub asks the user to sign in, the user pastes the skill. The maintainer approves it
+  with a label and the catalog's GitHub Action checks it with check_shared (this module, stdlib only,
+  imported by the workflow) and publishes it.
 - Without a GitHub account: export_zip / import_file (the zip is also Claude Desktop's skill upload file).
 No Qt here: the Shop and Skills pages and the p6_shop_* tools drive it; the tests fake the network (opener).
 """
@@ -28,11 +29,9 @@ REPO_URL = f"https://github.com/{REPO}"
 RAW_PREFIX = f"https://raw.githubusercontent.com/{REPO}/main/"  # every read is under this prefix
 INDEX = "index.json"
 ISSUE_TEMPLATE = "share-skill.yml"
-ISSUE_FIELD = "skill"  # id of the issue form's JSON field
 LICENSE = "Apache-2.0"
 TIMEOUT = 8
 MAX_BYTES = 256 * 1024  # one catalog file
-MAX_URL = 7000  # longer prefilled issue URLs are refused by GitHub (414): the JSON goes to the clipboard
 SCHEMA = 1
 KIND = "p6mcp-skill"
 META = "p6mcp.json"
@@ -90,17 +89,15 @@ def issue_json(item: dict) -> str:
     return json.dumps(meta(item), indent=2, ensure_ascii=False)
 
 
-def share_url(item: dict) -> tuple[str, Optional[str]]:
-    """(URL of the prefilled share issue, text for the clipboard or None). A skill too long for a URL opens
-    the form empty: the user pastes the clipboard into its Skill field."""
+def share_url(item: dict) -> tuple[str, str]:
+    """(URL of the share issue form, the skill JSON for the clipboard). The URL never carries the skill:
+    GitHub's sign-in (with Google in particular) fails on a long return URL, so the user pastes it."""
     errs = check_shared(meta(item))
     if errs:
         raise ValueError("; ".join(errs))
-    text = issue_json(item)
-    base = f"{REPO_URL}/issues/new?" + urllib.parse.urlencode(
+    url = f"{REPO_URL}/issues/new?" + urllib.parse.urlencode(
         {"template": ISSUE_TEMPLATE, "title": f"Share: {item['name']}"})
-    url = base + "&" + urllib.parse.urlencode({ISSUE_FIELD: text})
-    return (url, None) if len(url) <= MAX_URL else (base, text)
+    return url, issue_json(item)
 
 
 # ----------------------------------------------------------------- catalog reads

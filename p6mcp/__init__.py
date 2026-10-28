@@ -3,4 +3,4 @@
 Not affiliated with, endorsed by or sponsored by Oracle. Primavera and P6 are trademarks of Oracle.
 """
 
-__version__ = "1.8.0"
+__version__ = "1.8.1"

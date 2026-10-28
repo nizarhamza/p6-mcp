@@ -475,7 +475,8 @@ def test_skill_sharing_files_and_shop_page(qtbot, win, env, monkeypatch, tmp_pat
     opened = []
     monkeypatch.setattr(page, "open_url", opened.append)
     assert page.share_btn.isEnabled() and page.share()
-    assert opened[0].startswith(shop.REPO_URL + "/issues/new?template=share-skill.yml")
+    assert opened[0] == shop.REPO_URL + "/issues/new?template=share-skill.yml&title=Share%3A+float-watch"
+    assert json.loads(QGuiApplication.clipboard().text())["name"] == "float-watch"  # pasted in the form
     path = str(tmp_path / "p6-float-watch.zip")
     monkeypatch.setattr(page, "save_path", lambda name: path)
     assert page.export() == path and os.path.exists(path)

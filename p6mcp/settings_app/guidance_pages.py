@@ -589,10 +589,9 @@ class SkillsPage(QWidget):
             return False
         if not ask(self, tr("skill.share"), tr("skill.share.ask", name=r["name"], repo=shop.REPO), warning=False):
             return False
-        if clip:
-            QGuiApplication.clipboard().setText(clip)
-            self.win.error(tr("skill.share.clipboard"))
+        QGuiApplication.clipboard().setText(clip)  # pasted by the user: a long link breaks GitHub's sign-in
         self.open_url(url)
+        self.win.flash(tr("skill.share.copied"))
         return True
 
     def export(self) -> Optional[str]:

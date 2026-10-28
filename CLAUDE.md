@@ -149,8 +149,8 @@ stay outside this repository.
   version, author, license, issue; SKILL.md and reference files beside it to browse). Reads only under
   `RAW_PREFIX` (raw.githubusercontent.com: no API rate limit), 256 KB cap, never raise for the index
   (`error`), `fetch_skill` checks the index sha256 (one index re-read on a mismatch: the raw cache lags).
-  `share_url` = a prefilled issue (`template=share-skill.yml`, field `skill`); above `MAX_URL` the JSON goes
-  to the clipboard. `export_bytes` / `import_bytes`: zip `p6-<name>/` with SKILL.md, reference files and
+  `share_url` = (short link to the issue form `template=share-skill.yml`, the skill JSON for the clipboard):
+  never the skill in the link (1.8.1: GitHub's Google sign-in fails on a long return_to, Server Error). `export_bytes` / `import_bytes`: zip `p6-<name>/` with SKILL.md, reference files and
   p6mcp.json (also a Claude Desktop skill upload); import also takes a plain skill folder (SKILL.md + text
   files) or a p6mcp.json; unsafe paths and non-text files refused. `install` keeps `source {shop, version,
   sha256}` (an edited shop skill becomes the user's own: `put_skill` drops `source` when the content
@@ -184,7 +184,7 @@ stay outside this repository.
   the network or start an installer in tests.
 - Public repository: https://github.com/nizarhamza/p6-mcp (Apache 2.0, Copyright 2026 Nizar Hamza; LICENSE,
   NOTICE, SECURITY.md, CHANGELOG.md, issue templates; README screenshots in `docs/images`, rendered from the
-  synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release; 1.0.1 = fixes of the 2026-10-20 server review; 1.1.0 = assignment units tools and the XER export of schedule options; 1.2.0 = UDF tools (list, filter and columns, set and clear activity values); 1.3.0 = automatic updates; 1.6.0 = Excel dashboard (`p6_export_dashboard`); 1.7.0 = `export-dashboard` command (dashboard result gives `cards` and `dcma_failed`); 1.8.0 = P6 commands became skills (SKILL.md folders) and the skill shop on GitHub.
+  synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release; 1.0.1 = fixes of the 2026-10-20 server review; 1.1.0 = assignment units tools and the XER export of schedule options; 1.2.0 = UDF tools (list, filter and columns, set and clear activity values); 1.3.0 = automatic updates; 1.6.0 = Excel dashboard (`p6_export_dashboard`); 1.7.0 = `export-dashboard` command (dashboard result gives `cards` and `dcma_failed`); 1.8.0 = P6 commands became skills (SKILL.md folders) and the skill shop on GitHub; 1.8.1 = share through the clipboard (short link).
 
 ## Running
 
