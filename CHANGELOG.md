@@ -3,6 +3,16 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.8.2] - 2026-10-28
+
+### Added
+
+- The skill shop lists the built-in skills of P6 MCP (weekly update review, schedule quality audit, update
+  import, delay what-if, baseline variance, Excel dashboard) with the status **Built-in**: nothing to
+  install, the Skills page turns them on or off. A **Built-in** filter on the Shop page; `p6_shop_search`
+  reports the status `builtin`, `p6_shop_get` returns the built-in text of this P6 MCP, `p6_shop_install`
+  explains that there is nothing to install. P6 MCP 1.8.0 and 1.8.1 show them as needing a newer P6 MCP.
+
 ## [1.8.1] - 2026-10-28
 
 ### Fixed

@@ -502,6 +502,16 @@ def test_skill_sharing_files_and_shop_page(qtbot, win, env, monkeypatch, tmp_pat
     assert stored["source"] == {"shop": "lookahead-plus", "version": 1, "sha256": "ab"}
     assert win.page(SkillsPage).table.rowCount() == 9 and win.save()
     assert sp.remove() and shop.installed_as(win.data, "lookahead-plus") is None
+
+    from p6mcp import skills
+    builtin = {k: v for k, v in shop.builtin_meta(skills.BY_NAME["delay-whatif"]).items()
+               if k not in ("args", "template", "files")} | {"version": 1, "author": "nizarhamza", "sha256": "cd"}
+    sp.index = {"skills": [entry, builtin], "error": None}
+    sp.filter.setCurrentIndex(shop_page.FILTERS.index("builtin"))  # refreshes the table
+    assert sp.table.rowCount() == 1 and sp.table.item(0, 4).text() == "Built-in" and sp.job is None
+    assert sp.preview.toPlainText().startswith("---\nname: p6-delay-whatif\n")  # this app's copy, no network
+    assert "nothing to install" in sp.links.text() and not sp.install_btn.isEnabled()
+    assert not sp.remove_btn.isEnabled() and not sp.install()
     win.set_data(dict(win.data, shop_enabled=False))
     sp.refresh()
     assert "turned off" in sp.state.text() and sp.table.rowCount() == 0

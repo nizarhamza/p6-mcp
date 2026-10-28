@@ -22,13 +22,16 @@ SKILL = {"name": "float-watch", "title": "Float watch", "description": "Activiti
 class Catalog:
     """index.json and skills/<name>/p6mcp.json served from memory."""
 
-    def __init__(self, *items, author="planner1"):
+    def __init__(self, *items, author="planner1", builtins=()):
         self.files: dict[str, bytes] = {}
         self.calls: list[str] = []
         entries = []
-        for n, it in enumerate(items, 1):
-            body = json.dumps(shop.meta(it, version=it.get("version", 1), author=author, license=shop.LICENSE,
-                                        issue=n), indent=2).encode("utf-8")
+        metas = [shop.meta(it, version=it.get("version", 1), author=author, license=shop.LICENSE, issue=n)
+                 for n, it in enumerate(items, 1)]
+        metas += [dict(shop.builtin_meta(skills.BY_NAME[b]), version=1, author="nizarhamza", license=shop.LICENSE)
+                  for b in builtins]
+        for it in metas:
+            body = json.dumps(it, indent=2).encode("utf-8")
             self.files[f"skills/{it['name']}/{shop.META}"] = body
             entries.append({k: v for k, v in json.loads(body).items() if k not in ("args", "template", "files")}
                            | {"sha256": hashlib.sha256(body).hexdigest()})
@@ -166,6 +169,31 @@ def test_install_update_and_conflicts():
     assert shop.status(config.validate({}), dict(entry, min_app_version="99.0.0")) == shop.NEWER_APP
 
 
+def test_builtin_entries():
+    skill = skills.BY_NAME["update-import-safely"]
+    m = shop.builtin_meta(skill)
+    assert m["builtin"] is True and m["template"] == skill.template and m["tools"] == skill.tools()
+    assert m["writes"] is True and m["min_app_version"] == shop.BUILTIN_SINCE == __version__  # p6_import_xer
+    assert shop.check_builtin(m) == [] and shop.check_builtin(dict(m, version=3, author="x")) == []
+    assert shop.check_builtin(dict(m, template="Other.")) == [
+        f"differs from the built-in skill of P6 MCP {__version__}: template"]
+    assert "not a built-in skill of P6 MCP" in shop.check_builtin(dict(m, name="float-watch"))[0]
+    assert shop.check_builtin(shop.meta(SKILL)) == ["not a built-in skill entry"]
+    assert any("built-in" in e for e in shop.check_shared(m))  # never published through a share issue
+
+    cat = Catalog(SKILL, builtins=("update-import-safely",))
+    entry = cat.entry("update-import-safely")
+    assert entry["builtin"] is True and "template" not in entry
+    data = config.validate({})
+    assert shop.status(data, entry) == shop.BUILTIN
+    assert shop.status(dict(data, skills_disabled=["update-import-safely"]), entry) == shop.BUILTIN
+    assert shop.status(data, dict(entry, name="future-skill")) == shop.NEWER_APP  # built into a newer P6 MCP
+    with pytest.raises(ValueError, match="never installed from the shop"):
+        shop.fetch_skill(entry, cat.opener)
+    with pytest.raises(ValueError, match="nothing to install"):
+        shop.install(data, m)
+
+
 # ----------------------------------------------------------------- p6_shop_* tools
 
 @pytest.fixture
@@ -174,7 +202,8 @@ def shop_server(server, p6, tmp_path, monkeypatch):
         (tmp_path / sub).mkdir(exist_ok=True)
         monkeypatch.setenv(var, str(tmp_path / sub))  # the clients' skills folders of a fake profile
     cat = Catalog(SKILL, dict(SKILL, name="bulk-update", title="Bulk update", template="Use p6_update_activity.",
-                              description="Updates activities. Use when asked to update many."))
+                              description="Updates activities. Use when asked to update many."),
+                  builtins=("delay-whatif",))
     index, fetch = shop.fetch_index, shop.fetch_skill  # server._shop is this module: keep the real functions
     monkeypatch.setattr(server._shop, "fetch_index", lambda opener=None: index(cat.opener))
     monkeypatch.setattr(server._shop, "fetch_skill", lambda entry, opener=None: fetch(entry, cat.opener))
@@ -191,6 +220,14 @@ def test_shop_tools(shop_server, server, tmp_path):
     assert got["issue_url"].endswith("/issues/1") and got["status"] == "available"
     with pytest.raises(ValueError, match="close names: float-watch"):
         p6.call("p6_shop_get", name="float-watc")
+    row = p6.call("p6_shop_search", query="delaying")["rows"]
+    assert [(r["name"], r["status"], r["author"]) for r in row] == [("delay-whatif", "builtin", "nizarhamza")]
+    got = p6.call("p6_shop_get", name="delay-whatif")
+    assert got["status"] == "builtin" and got["enabled"] and got["issue_url"] is None
+    text = got["template"]  # rendered, rules included
+    assert "<task_code>" in text and "{rules}" not in text and '[{"op": "duration"' in text
+    with pytest.raises(ValueError, match="built into P6 MCP: nothing to install"):
+        p6.call("p6_shop_install", name="delay-whatif")
 
     skills_dir = tmp_path / "User" / ".claude" / "skills"
     from p6mcp import clients
@@ -206,7 +243,7 @@ def test_shop_tools(shop_server, server, tmp_path):
     saved = config.read_file()[0]["custom_skills"]
     assert saved[0]["name"] == "float-watch" and saved[0]["source"]["shop"] == "float-watch"
     assert (skills_dir / "p6-float-watch" / "reference" / "limits.md").exists()
-    assert p6.call("p6_shop_search")["rows"][1]["status"] == "installed"
+    assert {r["name"]: r["status"] for r in p6.call("p6_shop_search")["rows"]}["float-watch"] == "installed"
 
     p6.set(shop_enabled=False)
     with pytest.raises(ValueError, match="skill shop is turned off"):

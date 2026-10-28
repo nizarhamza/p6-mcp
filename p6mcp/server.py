@@ -9708,8 +9708,8 @@ def p6_shop_search(query: str = "", offset: int = 0, limit: int = 50) -> dict:
     """Search the P6 MCP skill shop: P6 skills (ready-made workflows) shared by users on GitHub and approved
     by the maintainer. query: words found in the name, title, description or author (empty = all). Rows:
     name, title, description, author, version, tools it calls, writes (it uses write tools), status on this
-    PC (available, installed, update, conflict = the name is taken here, newer_app = needs a newer P6 MCP).
-    Read a skill with p6_shop_get before installing it."""
+    PC (available, installed, update, conflict = the name is taken here, newer_app = needs a newer P6 MCP,
+    builtin = part of P6 MCP, nothing to install). Read a skill with p6_shop_get before installing it."""
     _check_page(offset, limit)
     idx = _shop.fetch_index()
     if idx["error"]:
@@ -9726,8 +9726,23 @@ def p6_shop_get(name: str) -> dict:
     which ones the current settings do not offer), author, version, license, the GitHub issue it was shared
     in and its status on this PC. Show the user what it does before p6_shop_install."""
     entry = _shop_entry(name)
-    item = _shop.fetch_skill(entry)
     _path, data = _shop_settings()
+    if _shop.status(data, entry) == _shop.BUILTIN:  # this P6 MCP's own copy, not the catalog's
+        skill = _skills.BY_NAME[name]
+        return {"name": name, "title": skill.title, "description": skill.description,
+                "args": [{"name": a.name, "description": a.description, "default": a.default} for a in skill.args],
+                "template": _skills.render(skill, {a.name: f"<{a.name}>" for a in skill.args}),
+                "files": [{"path": p, "text": t} for p, t in skill.files], "author": entry.get("author"),
+                "version": entry.get("version"), "license": entry.get("license"), "tools": skill.tools(),
+                "writes": entry.get("writes"),
+                "missing_tools": _skills.missing_tools(skill, SETTINGS.tool_profile, SETTINGS.allow_writes),
+                "issue_url": None, "status": _shop.BUILTIN, "installed_as": None,
+                "enabled": name not in (data.get("skills_disabled") or []),
+                "note": "Built into P6 MCP: nothing to install. The Skills page of P6 MCP Settings turns it on or "
+                        "off."}
+    if entry.get("builtin"):
+        raise ValueError(f"{name} is a built-in skill of a newer P6 MCP: update P6 MCP to get it.")
+    item = _shop.fetch_skill(entry)
     skill = _skills.from_config(_shop.to_stored(item))
     mine = _shop.installed_as(data, name)
     return {**_skills.shared_item(item), "author": item.get("author"), "version": item.get("version"),
@@ -9744,6 +9759,10 @@ def p6_shop_install(name: str, install_as: Optional[str] = None, confirm: bool =
     is offered as an MCP prompt once the MCP client restarts. install_as: another name when the skill's name
     is taken here. Changes P6 MCP's settings only, never the P6 database."""
     entry = _shop_entry(name)
+    if entry.get("builtin"):
+        raise ValueError(f"{name} is built into P6 MCP: nothing to install. The Skills page of P6 MCP Settings "
+                         "turns it on or off." if name in _skills.BY_NAME else
+                         f"{name} is a built-in skill of a newer P6 MCP: update P6 MCP to get it.")
     item = _shop.fetch_skill(entry)
     path, data = _shop_settings()
     if _shop.status(data, entry) == _shop.NEWER_APP:

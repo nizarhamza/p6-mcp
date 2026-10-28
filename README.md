@@ -133,7 +133,8 @@ client for the prompts.
 ### Skill shop
 
 The **Skill shop** page lists the P6 skills other users shared, from the public catalog
-[nizarhamza/p6-mcp-shop](https://github.com/nizarhamza/p6-mcp-shop). Reading it needs no account; P6 MCP
+[nizarhamza/p6-mcp-shop](https://github.com/nizarhamza/p6-mcp-shop), and the built-in skills of P6 MCP
+(status Built-in: nothing to install, the Skills page turns them on or off). Reading it needs no account; P6 MCP
 reads it only when you open the page or ask your AI client (tools `p6_shop_search`, `p6_shop_get` and
 `p6_shop_install`, Full profile; an install shows the whole skill first and needs your confirmation).
 Read a skill before installing it: it is instructions for the AI, and a skill that uses write tools can

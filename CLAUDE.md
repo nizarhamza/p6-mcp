@@ -154,7 +154,11 @@ stay outside this repository.
   p6mcp.json (also a Claude Desktop skill upload); import also takes a plain skill folder (SKILL.md + text
   files) or a p6mcp.json; unsafe paths and non-text files refused. `install` keeps `source {shop, version,
   sha256}` (an edited shop skill becomes the user's own: `put_skill` drops `source` when the content
-  changes); `status`: available / installed / update / conflict / newer_app. Server tools `p6_shop_search`,
+  changes); `status`: available / installed / update / conflict / newer_app / builtin. The catalog also
+  lists the built-in skills (`builtin_meta`: flag `builtin`, the `BUILTIN` definition with its str.format
+  template, `min_app_version` `BUILTIN_SINCE` so 1.8.0/1.8.1 show newer_app; written by the catalog's
+  `tools/catalog.py builtins`, checked by `check_builtin`): status builtin, never fetched (`fetch_skill`
+  refuses) or installed; the Shop page previews and `p6_shop_get` returns this app's own copy. Server tools `p6_shop_search`,
   `p6_shop_get` (READ) and `p6_shop_install` (policy kind CONFIG: Full profile, dry run + token bound to the
   config file, not gated by allow_writes; saves config.json and refreshes the skills folders that already
   hold P6 skills); `SHOP_TOOLS` listed only while `shop_enabled`; `_tool(open_world=True)` sets

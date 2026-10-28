@@ -18,8 +18,9 @@ from p6mcp.i18n import tr
 from p6mcp.settings_app.common import Job, ask, group, note, pill, start
 from p6mcp.settings_app.guidance_pages import SkillsPage, _preview_box
 
-FILTERS = ("all", "read", "writes", "installed", "updates")
-STATUS_LEVEL = {shop.INSTALLED: "ok", shop.UPDATE: "warn", shop.CONFLICT: "warn", shop.NEWER_APP: "warn"}
+FILTERS = ("all", "read", "writes", "installed", "updates", "builtin")
+STATUS_LEVEL = {shop.INSTALLED: "ok", shop.UPDATE: "warn", shop.CONFLICT: "warn", shop.NEWER_APP: "warn",
+                shop.BUILTIN: "ok"}
 
 
 class ShopPage(QWidget):
@@ -127,7 +128,8 @@ class ShopPage(QWidget):
         for e in rows:
             st = shop.status(self.win.data, e)
             keep = {"all": True, "read": not e.get("writes"), "writes": bool(e.get("writes")),
-                    "installed": st in (shop.INSTALLED, shop.UPDATE), "updates": st == shop.UPDATE}[f]
+                    "installed": st in (shop.INSTALLED, shop.UPDATE), "updates": st == shop.UPDATE,
+                    "builtin": st == shop.BUILTIN}[f]
             if not keep:
                 continue
             out.append(dict(e, status=st))
@@ -174,11 +176,17 @@ class ShopPage(QWidget):
         links = [f'<a href="https://github.com/{e["author"]}">{e["author"]}</a>'] if e.get("author") else []
         if e.get("issue"):
             links.append(f'<a href="{shop.REPO_URL}/issues/{e["issue"]}">{tr("shop.discussion")}</a>')
+        if st == shop.BUILTIN:
+            links.append(tr("shop.builtin_note"))
         self.links.setText(" | ".join(links))
         tools = ", ".join(e.get("tools") or []) or tr("shop.no_tools")
         self.tools.setText(tr("shop.tools.writes" if e.get("writes") else "shop.tools", tools=tools))
         item = self.items.get((e["name"], e.get("sha256")))
-        if item is not None:
+        if st == shop.BUILTIN:  # this P6 MCP's own copy: nothing to read from the catalog
+            self.preview.setPlainText(skills.skill_md(skills.BY_NAME[e["name"]]))
+        elif e.get("builtin"):  # a built-in skill of a newer P6 MCP
+            self.preview.setPlainText(tr("shop.status." + shop.NEWER_APP))
+        elif item is not None:
             self.preview.setPlainText(skills.skill_md(skills.from_config(shop.to_stored(item))))
         elif self.job is None:
             self.preview.setPlainText(tr("shop.loading"))
