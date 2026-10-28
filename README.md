@@ -1,4 +1,5 @@
 ![P6 MCP](assets/brand/png/p6mcp-banner.png)
+[![M8ven Score](https://m8ven.ai/badge/mcp/nizarhamza-p6-mcp-151l9d?v=5514a55ce01fb84cdf4699c8d59f0d6b)](https://m8ven.ai/mcp/nizarhamza-p6-mcp-151l9d?s=readme)
 
 # P6 MCP for Primavera P6
 
