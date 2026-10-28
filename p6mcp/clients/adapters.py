@@ -14,12 +14,15 @@
 - Claude Code: code.claude.com/docs/en/mcp: user scope servers in ~/.claude.json, top-level
   {"mcpServers": {name: {"type": "stdio", command, args} or {"type": "http", url, headers}}}.
 
-P6 command folders (p6mcp.prompts), checked on 2026-10-20: VS Code user prompt files in the profile's
-prompts folder (*.prompt.md, code.visualstudio.com/docs/copilot/customization/prompt-files); Cursor
-~/.cursor/commands (*.md, docs.cursor.com/en/agent/chat/commands); Cline global workflows
-~/Documents/Cline/Workflows (*.md, docs.cline.bot); Claude Code ~/.claude/commands (*.md with
-frontmatter, code.claude.com/docs/en/slash-commands). Claude Desktop has no command folder: it lists the
-server's MCP prompts itself; LM Studio has neither.
+P6 skills folders (p6mcp.skills, Agent Skills: a folder per skill with SKILL.md), checked on 2026-10-28:
+Claude Code ~/.claude/skills (code.claude.com/docs/en/skills); Cursor reads ~/.claude/skills besides its own
+folders (cursor.com/docs/context/skills) and so does VS Code (code.visualstudio.com/docs/agent-customization/
+agent-skills; same-name skills deduplicated), so these three share ~/.claude/skills (writing ~/.cursor/skills
+too would show Cursor duplicates); Cline ~/.cline/skills (docs.cline.bot/customization/skills; it reads
+.claude/skills only inside a workspace). Every client needs name = folder name and a description of at most
+1,024 characters. Claude Desktop has no skills folder (zip upload): it lists the server's MCP prompts itself;
+LM Studio has neither. Command folders of P6 MCP 1.4 to 1.7 (legacy_commands_dir, cleaned up): VS Code
+prompts folder, ~/.cursor/commands, ~/Documents/Cline/Workflows, ~/.claude/commands.
 """
 
 from __future__ import annotations
@@ -39,6 +42,11 @@ def _env(name: str) -> str:
 
 def _home() -> str:
     return _env("USERPROFILE") or os.path.expanduser("~")
+
+
+def _claude_skills() -> str:
+    """~/.claude/skills: read by Claude Code, Cursor and VS Code."""
+    return os.path.join(_home(), ".claude", "skills")
 
 
 class ClaudeDesktop(Adapter):
@@ -67,12 +75,14 @@ class Cursor(Adapter):
     id, name = "cursor", "Cursor"
     process_names = ("cursor.exe",)
     docs = "https://cursor.com/docs/mcp"
-    command_style = "plain"
 
     def config_path(self) -> str:
         return os.path.join(_home(), ".cursor", "mcp.json")
 
-    def commands_dir(self) -> str:
+    def skills_dir(self) -> str:  # Cursor also reads ~/.claude/skills: shared with Claude Code and VS Code
+        return _claude_skills()
+
+    def legacy_commands_dir(self) -> str:
         return os.path.join(_home(), ".cursor", "commands")
 
     def installed(self) -> bool:
@@ -87,13 +97,15 @@ class VSCode(Adapter):
     folder = "Code"
     exe_dirs = ("Microsoft VS Code",)
     docs = "https://code.visualstudio.com/docs/copilot/reference/mcp-configuration"
-    command_style = "vscode"
     prompts_native = True  # also as /mcp.p6mcp.<prompt> in the chat
 
     def config_path(self) -> str:
         return os.path.join(_env("APPDATA"), self.folder, "User", "mcp.json")
 
-    def commands_dir(self) -> str:
+    def skills_dir(self) -> str:  # VS Code also reads ~/.claude/skills (chat.useAgentSkills)
+        return _claude_skills()
+
+    def legacy_commands_dir(self) -> str:
         return os.path.join(_env("APPDATA"), self.folder, "User", "prompts")
 
     def installed(self) -> bool:
@@ -149,9 +161,11 @@ class Cline(Adapter):
     id, name = "cline", "Cline"
     process_names = ("code.exe",)
     docs = "https://docs.cline.bot/mcp/configuring-mcp-servers"
-    command_style = "plain"
 
-    def commands_dir(self) -> str:  # global workflows: ~/Documents/Cline/Workflows (home, not the shell folder)
+    def skills_dir(self) -> str:  # global skills (Cline 3.48 and later)
+        return os.path.join(_home(), ".cline", "skills")
+
+    def legacy_commands_dir(self) -> str:  # global workflows: ~/Documents/Cline/Workflows (home, not the shell folder)
         return os.path.join(_home(), "Documents", "Cline", "Workflows")
 
     def _legacy(self) -> str:
@@ -188,13 +202,15 @@ class ClaudeCode(Adapter):
     id, name = "claude_code", "Claude Code"
     process_names = ()  # claude.exe is also Claude Desktop's process name: no running check
     docs = "https://code.claude.com/docs/en/mcp"
-    command_style = "claude_code"
     prompts_native = True  # also as /mcp__p6mcp__<prompt>
 
     def config_path(self) -> str:
         return os.path.join(_home(), ".claude.json")
 
-    def commands_dir(self) -> str:
+    def skills_dir(self) -> str:
+        return _claude_skills()
+
+    def legacy_commands_dir(self) -> str:
         return os.path.join(_home(), ".claude", "commands")
 
     def installed(self) -> bool:

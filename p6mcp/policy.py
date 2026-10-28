@@ -5,6 +5,10 @@ kind:
   file         reads the database and writes a file the caller names (export_xer, export_dashboard): Full profile
   write        changes the database: Full profile + allow_writes + dry run + confirmation token
   destructive  write that deletes or replaces data: also needs the exact confirmation text
+  config       changes P6 MCP's own settings, never the database (p6_shop_install): Full profile + dry run +
+               confirmation token, not gated by allow_writes
+
+The skill shop tools (SHOP_TOOLS) read github.com: they are listed only when shop_enabled is on.
 
 The Basic profile lists only BASIC_TOOLS (all read tools). The tool list is fixed when the server
 starts (clients cache it); the rules are checked again on every call, so turning writes off takes
@@ -15,8 +19,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-READ, FILE, WRITE, DESTRUCTIVE = "read", "file", "write", "destructive"
-KINDS = (READ, FILE, WRITE, DESTRUCTIVE)
+READ, FILE, WRITE, DESTRUCTIVE, CONFIG = "read", "file", "write", "destructive", "config"
+KINDS = (READ, FILE, WRITE, DESTRUCTIVE, CONFIG)
 
 TOOL_KIND: dict[str, str] = {
     # read
@@ -29,7 +33,7 @@ TOOL_KIND: dict[str, str] = {
     "p6_compare_projects": READ, "p6_cpm_validate": READ, "p6_dangling": READ, "p6_redundant_links": READ,
     "p6_schedule_options": READ, "p6_schedule_whatif": READ, "p6_inspect_xer": READ,
     "p6_list_backups": READ, "p6_edit_log": READ, "p6_diagnose": READ, "p6_sql_select": READ,
-    "p6_list_udfs": READ,
+    "p6_list_udfs": READ, "p6_shop_search": READ, "p6_shop_get": READ,
     # file output
     "p6_export_xer": FILE, "p6_export_dashboard": FILE,
     # write
@@ -41,6 +45,8 @@ TOOL_KIND: dict[str, str] = {
     "p6_set_schedule_options": WRITE, "p6_backup_database": WRITE,
     # destructive
     "p6_delete_activity": DESTRUCTIVE, "p6_delete_project": DESTRUCTIVE, "p6_restore_backup": DESTRUCTIVE,
+    # P6 MCP settings
+    "p6_shop_install": CONFIG,
 }
 
 # Basic profile: a small read-only set that small local models handle well
@@ -50,7 +56,11 @@ BASIC_TOOLS = frozenset({
     "p6_health_check",
 })
 # Tools that do not need a database (the rest refuse with the "No database configured" message)
-NO_DB_TOOLS = frozenset({"p6_diagnose", "p6_inspect_xer"})
+NO_DB_TOOLS = frozenset({"p6_diagnose", "p6_inspect_xer", "p6_shop_search", "p6_shop_get", "p6_shop_install"})
+# The skill shop (p6mcp.shop): GitHub reads, offered only while the setting shop_enabled is on
+SHOP_TOOLS = frozenset({"p6_shop_search", "p6_shop_get", "p6_shop_install"})
+SHOP_OFF = ("The skill shop is turned off. Turn on 'Allow the skill shop' in P6 MCP Settings (Tools and safety), "
+            "then restart your MCP client.")
 
 assert BASIC_TOOLS <= {t for t, k in TOOL_KIND.items() if k == READ}
 assert set(TOOL_KIND.values()) <= set(KINDS)
@@ -67,9 +77,11 @@ def is_write(tool: str) -> bool:
     return kind(tool) in (WRITE, DESTRUCTIVE)
 
 
-def listed(tool: str, profile: str, allow_writes: bool) -> bool:
+def listed(tool: str, profile: str, allow_writes: bool, shop: bool = True) -> bool:
     """Is the tool offered to clients when the server starts with these settings?"""
     k = kind(tool)
+    if tool in SHOP_TOOLS and not shop:
+        return False
     if profile != "full":
         return tool in BASIC_TOOLS
     if k in (WRITE, DESTRUCTIVE):
@@ -91,9 +103,11 @@ def write_refusal(profile: str, allow_writes: bool) -> Optional[str]:
     return None
 
 
-def refusal(tool: str, profile: str, allow_writes: bool) -> Optional[str]:
+def refusal(tool: str, profile: str, allow_writes: bool, shop: bool = True) -> Optional[str]:
     """Why this call is refused under the current settings (None = allowed)."""
     k = kind(tool)
+    if tool in SHOP_TOOLS and not shop:
+        return SHOP_OFF
     if profile != "full" and tool not in BASIC_TOOLS:
         return (f"{tool} is not available in the Basic tool profile. Switch the tool profile to Full in "
                 "P6 MCP Settings, then restart your MCP client.")

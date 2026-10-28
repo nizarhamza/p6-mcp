@@ -1,4 +1,4 @@
-"""Server instructions and the user's own P6 commands (Instructions and Commands pages of the Settings app)."""
+"""Server instructions and the user's own P6 skills (Instructions and Skills pages of the Settings app)."""
 
 import asyncio
 import dataclasses
@@ -7,12 +7,12 @@ import subprocess
 
 import pytest
 
-from p6mcp import clients, config, instructions, prompts, settings_logic
+from p6mcp import clients, config, instructions, settings_logic, skills
 from p6mcp.clients.base import Launch
 
 LN = Launch(r"C:\Program Files\P6 MCP\p6mcp-server.exe", [])
 ACT = "When you show an activity, write it as Activity ID - Activity name (A1230 - Excavation)."
-MINE = {"name": "float-report", "title": "Float report", "description": "Activities with low float.",
+MINE = {"name": "float-report", "title": "Float report", "description": "Activities with low float. Use when asked.",
         "args": [{"name": "project", "description": "Project ID", "default": None},
                  {"name": "days", "description": "Float limit in days", "default": "5"}],
         "template": "List the activities of {project} with total float under {days} days:\n"
@@ -61,50 +61,50 @@ def test_instructions_follow_the_settings():
 # ----------------------------------------------------------------- commands
 
 def test_custom_command_render_and_checks():
-    data = settings_logic.put_command(config.DEFAULTS, MINE)
-    cmd = prompts.custom_commands(config.validate(data))[0]
+    data = settings_logic.put_skill(config.DEFAULTS, MINE)
+    cmd = skills.custom_skills(config.validate(data))[0]
     assert cmd.custom and cmd.tools() == ["p6_float_analysis"]
-    text = prompts.render(cmd, {"project": "DEMO"})
+    text = skills.render(cmd, {"project": "DEMO"})
     assert "of DEMO with total float under 5 days" in text and '{braces} and {"json": 1}' in text
-    assert text.endswith(prompts.RULES)
-    cc = prompts.command_file(cmd, "claude_code")
-    assert "arguments: project days" in cc and "of $project" in cc and prompts.MARKER in cc
+    assert text.endswith(skills.RULES)
+    md = skills.skill_md(cmd)
+    assert "name: p6-float-report\n" in md and "of <project>" in md and skills.MARKER in md
 
     for bad, why in ((dict(MINE, name="weekly-update-review"), "built-in"), (dict(MINE, name="Bad Name"), "name"),
                      (dict(MINE, template=" "), "empty"),
                      (dict(MINE, args=[{"name": "rules"}]), "rules"),
                      (dict(MINE, args=[{"name": "a"}, {"name": "a"}]), "twice")):
         with pytest.raises(ValueError, match=why):
-            settings_logic.put_command(config.DEFAULTS, bad)
+            settings_logic.put_skill(config.DEFAULTS, bad)
     with pytest.raises(ValueError, match="twice"):
-        settings_logic.put_command(data, MINE)
-    renamed = settings_logic.put_command(data, dict(MINE, name="low-float"), old_name="float-report")
-    assert [c["name"] for c in renamed["custom_commands"]] == ["low-float"]
-    assert settings_logic.remove_command(renamed, "low-float")["custom_commands"] == []
+        settings_logic.put_skill(data, MINE)
+    renamed = settings_logic.put_skill(data, dict(MINE, name="low-float"), old_name="float-report")
+    assert [c["name"] for c in renamed["custom_skills"]] == ["low-float"]
+    assert settings_logic.remove_skill(renamed, "low-float")["custom_skills"] == []
     with pytest.raises(config.ConfigError):
-        config.validate({"custom_commands": [dict(MINE, name="x y")]})
+        config.validate({"custom_skills": [dict(MINE, name="x y")]})
 
 
 def test_offered_with_turned_off_and_custom_commands():
-    data = settings_logic.put_command(config.DEFAULTS, MINE)
-    data = settings_logic.put_command(data, dict(MINE, name="free-text", template="Summarise the project."))
-    data = settings_logic.set_command_enabled(data, "baseline-variance", False)
-    names = [c.name for c in prompts.offered("full", True, data)]
+    data = settings_logic.put_skill(config.DEFAULTS, MINE)
+    data = settings_logic.put_skill(data, dict(MINE, name="free-text", template="Summarise the project."))
+    data = settings_logic.set_skill_enabled(data, "baseline-variance", False)
+    names = [c.name for c in skills.offered("full", True, data)]
     assert "baseline-variance" not in names and names[-2:] == ["float-report", "free-text"]
     # Basic profile: the built-in ones need Full tools, p6_float_analysis is a Basic tool, free-text names none
-    assert [c.name for c in prompts.offered("basic", False, data)] == ["float-report", "free-text"]
-    data = settings_logic.set_command_enabled(data, "float-report", False)
-    assert "float-report" not in [c.name for c in prompts.offered("full", True, data)]
-    rows = {r["name"]: r for r in settings_logic.command_rows(dict(data, tool_profile="basic"))}
+    assert [c.name for c in skills.offered("basic", False, data)] == ["float-report", "free-text"]
+    data = settings_logic.set_skill_enabled(data, "float-report", False)
+    assert "float-report" not in [c.name for c in skills.offered("full", True, data)]
+    rows = {r["name"]: r for r in settings_logic.skill_rows(dict(data, tool_profile="basic"))}
     assert rows["weekly-update-review"]["missing_tools"] and not rows["weekly-update-review"]["offered"]
     assert rows["free-text"]["offered"] and not rows["float-report"]["enabled"]
-    assert settings_logic.set_command_enabled(data, "baseline-variance", True)["commands_disabled"] == []
-    assert prompts.offered("full", True) == prompts.offered("full", True, config.DEFAULTS)
+    assert settings_logic.set_skill_enabled(data, "baseline-variance", True)["skills_disabled"] == []
+    assert skills.offered("full", True) == skills.offered("full", True, config.DEFAULTS)
 
 
 def test_server_registers_custom_prompts_and_instructions(server, monkeypatch):
-    raw = config.validate(settings_logic.put_instruction(settings_logic.put_command(
-        dict(config.DEFAULTS, tool_profile="full", allow_writes=True, commands_disabled=["delay-whatif"]), MINE),
+    raw = config.validate(settings_logic.put_instruction(settings_logic.put_skill(
+        dict(config.DEFAULTS, tool_profile="full", allow_writes=True, skills_disabled=["delay-whatif"]), MINE),
         ACT))
     monkeypatch.setattr(server, "STARTUP", dataclasses.replace(server.STARTUP, raw=raw))
     monkeypatch.setattr(server, "PROMPTS", {})
@@ -126,14 +126,53 @@ def test_command_files_include_custom_commands(tmp_path, monkeypatch):
         monkeypatch.setenv(var, str(tmp_path / sub))
     monkeypatch.setenv("P6MCP_CONFIG", str(tmp_path / "config.json"))
     monkeypatch.setattr("p6mcp.clients.base.launch", lambda: LN)
-    config.save(settings_logic.put_command(dict(config.DEFAULTS, tool_profile="full", allow_writes=True), MINE))
+    config.save(settings_logic.put_skill(dict(config.DEFAULTS, tool_profile="full", allow_writes=True), MINE))
     ad = clients.get("cursor")
-    res = ad.install_commands("full", True)
-    assert "p6-float-report.md" in res["written"] and ad.commands_state() == clients.CMD_INSTALLED
+    res = ad.install_skills("full", True)
+    assert "p6-float-report" in res["written"] and ad.skills_state() == clients.SKILLS_INSTALLED
     data = config.read_file()[0]
-    config.save(settings_logic.set_command_enabled(data, "float-report", False))
-    assert ad.commands_state() == clients.CMD_OUTDATED  # turned off: the file must go
-    assert ad.install_commands("full", True)["removed"] == ["p6-float-report.md"]
+    config.save(settings_logic.set_skill_enabled(data, "float-report", False))
+    assert ad.skills_state() == clients.SKILLS_OUTDATED  # turned off: the folder must go
+    assert ad.install_skills("full", True)["removed"] == ["p6-float-report"]
+
+
+def test_strict_rules_for_new_skills_only(server):
+    """A stored skill of an older version keeps loading; a new or edited one gets the strict rules, and an
+    unknown tool never breaks the server, the pages or the clients (it is simply not offered)."""
+    typo = dict(MINE, name="typo", description="", template="Run p6_not_a_tool and p6_list_projects.")
+    data = config.validate({"custom_skills": [typo]})  # stored: loads
+    skill = skills.custom_skills(data)[0]
+    assert skills.missing_tools(skill, "full", True) == ["p6_not_a_tool"] and not skills.available(skill, "full", True)
+    assert [s.name for s in skills.offered("full", True, data)] == [s.name for s in skills.BUILTIN]
+    rows = {r["name"]: r for r in settings_logic.skill_rows(dict(data, tool_profile="full", allow_writes=True))}
+    assert rows["typo"]["missing_tools"] == ["p6_not_a_tool"] and not rows["typo"]["offered"]
+    for bad, why in ((dict(typo, description="Fine."), "unknown tools p6_not_a_tool"),
+                     (dict(MINE, description=""), "description is empty"),
+                     (dict(MINE, description="x" * 1025), "one line"),
+                     (dict(MINE, title="two\nlines"), "title"),
+                     (dict(MINE, files=[{"path": "../up.md", "text": "x"}]), "reference file"),
+                     (dict(MINE, files=[{"path": "run.ps1", "text": "x"}]), "reference file"),
+                     (dict(MINE, files=[{"path": "con.md", "text": "x"}]), "reserved"),
+                     (dict(MINE, files=[{"path": "a.md", "text": "x" * 10001}]), "longer"),
+                     (dict(MINE, files=[{"path": f"f{i}.md", "text": "x"} for i in range(6)]), "at most 5"),
+                     (dict(MINE, files=[{"path": "A.md", "text": "x"}, {"path": "a.md", "text": "y"}]), "twice")):
+        with pytest.raises(ValueError, match=why):
+            settings_logic.put_skill(config.DEFAULTS, bad)
+    ok = settings_logic.put_skill(config.DEFAULTS, dict(MINE, files=[{"path": "ref\\Notes.md", "text": "n"}]))
+    assert ok["custom_skills"][0]["files"] == [{"path": "ref/Notes.md", "text": "n"}]
+
+
+def test_edited_shop_skill_becomes_the_users_own():
+    src = {"shop": "float-report", "version": 2, "sha256": "ab"}
+    data = settings_logic.put_skill(config.DEFAULTS, dict(MINE, source=src))
+    assert data["custom_skills"][0]["source"] == src
+    data = settings_logic.set_skill_enabled(data, "float-report", False)
+    assert data["custom_skills"][0]["source"] == src  # turned off, not edited
+    same = settings_logic.put_skill(data, dict(data["custom_skills"][0]), "float-report")
+    assert same["custom_skills"][0]["source"] == src
+    edited = settings_logic.put_skill(data, dict(data["custom_skills"][0], template="Other p6_lookahead."),
+                                      "float-report")
+    assert "source" not in edited["custom_skills"][0]
 
 
 def test_restart_needed_for_instructions_and_commands():

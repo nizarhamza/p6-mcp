@@ -55,10 +55,21 @@ def test_missing_database_file(clean_env, tmp_path):
 def test_migration_from_version_0(clean_env, golden):
     write(clean_env, {"db_path": golden, "allow_writes": True})
     data, steps = config.read_file()
-    assert steps == ["0->1"] and data["schema_version"] == 1
+    assert steps == ["0->1", "1->2"] and data["schema_version"] == 2
     assert data["databases"] == [{"name": "default", "kind": "sqlite", "path": golden, "confirmed": False}]
     st = config.load()
-    assert st.migrated == ("0->1",) and st.db_path == ""  # migrated but not confirmed
+    assert st.migrated == ("0->1", "1->2") and st.db_path == ""  # migrated but not confirmed
+
+
+def test_migration_of_commands_to_skills(clean_env):
+    """1.8.0: P6 commands became skills; a 1.7 file keeps its own commands and the ones turned off."""
+    cmd = {"name": "float-report", "title": "", "description": "Low float.", "args": [], "template": "Use "
+           "p6_float_analysis.", "enabled": False}
+    write(clean_env, {"schema_version": 1, "custom_commands": [cmd], "commands_disabled": ["delay-whatif"]})
+    data, steps = config.read_file()
+    assert steps == ["1->2"] and data["custom_skills"] == [dict(cmd, files=[])]
+    assert data["skills_disabled"] == ["delay-whatif"] and "custom_commands" not in data
+    assert data["shop_enabled"] is True
 
 
 def test_newer_schema_version_is_reported_not_raised(clean_env):

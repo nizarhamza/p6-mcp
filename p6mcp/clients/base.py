@@ -23,8 +23,8 @@ P6_MARKERS = ("p6_mcp_server", "p6mcp-server", "p6mcp.server")
 
 NOT_INSTALLED, NOT_REGISTERED, REGISTERED, OUTDATED, ERROR = (
     "not_installed", "not_registered", "registered", "outdated", "error")
-# P6 command files in the client's own command folder (p6mcp.prompts)
-CMD_UNSUPPORTED, CMD_NONE, CMD_INSTALLED, CMD_OUTDATED = "unsupported", "none", "installed", "outdated"
+# P6 skills in the client's own skills folder (p6mcp.skills)
+SKILLS_UNSUPPORTED, SKILLS_NONE, SKILLS_INSTALLED, SKILLS_OUTDATED = "unsupported", "none", "installed", "outdated"
 
 
 @dataclass
@@ -63,7 +63,7 @@ class Status:
     running: bool = False
     message: Optional[str] = None
     transport: str = "stdio"          # of the entry this installation expects for this client
-    commands: str = CMD_UNSUPPORTED   # P6 command files: unsupported, none, installed, outdated
+    skills: str = SKILLS_UNSUPPORTED  # P6 skill folders: unsupported, none, installed, outdated
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -99,12 +99,15 @@ class Adapter:
     docs = ""  # where the path and format were checked
     supports_http = True      # False: the client only starts stdio servers (gets a stdio entry in http mode)
     token_in_file = True      # an HTTP entry holds the access token in the client's file
-    command_style: Optional[str] = None  # p6mcp.prompts.STYLES; None: no command folder (MCP prompts only)
     prompts_native = False    # the client lists the server's MCP prompts by itself
 
     # -- to define per client
-    def commands_dir(self) -> Optional[str]:
-        """Folder the client reads its user commands from (None: none)."""
+    def skills_dir(self) -> Optional[str]:
+        """Folder the client reads the user's skills from (None: none; MCP prompts only)."""
+        return None
+
+    def legacy_commands_dir(self) -> Optional[str]:
+        """Folder where P6 MCP 1.4 to 1.7 wrote the P6 command files (replaced by the skills)."""
         return None
 
     def config_path(self) -> str:
@@ -163,9 +166,9 @@ class Adapter:
             st.state, st.message = ERROR, str(e)
             return st
         try:
-            st.commands = self.commands_state()
+            st.skills = self.skills_state()
         except (OSError, files.ClientFileError):
-            st.commands = CMD_OUTDATED
+            st.skills = SKILLS_OUTDATED
         servers = self.servers(data)
         st.others = sorted(k for k, v in servers.items() if k != SERVER_KEY and _is_p6(v))
         if SERVER_KEY not in servers:
@@ -203,80 +206,133 @@ class Adapter:
                           if t.strip() else t)
 
 
-    # -- P6 command files (p6mcp.prompts) in the client's command folder
-    def _command_files(self, profile: str, allow_writes: bool) -> dict[str, str]:
-        """file name -> content of the commands offered under these settings (built-in ones turned off and
-        the user's own ones from the saved settings)."""
-        from p6mcp import prompts
-        return {prompts.file_name(c, self.command_style): prompts.command_file(c, self.command_style)
-                for c in prompts.offered(profile, allow_writes, prompts.saved_config())}
+    # -- P6 skills (p6mcp.skills): a folder p6-<name> per skill in the client's skills folder
+    def _skill_folders(self, profile: str, allow_writes: bool) -> dict[str, dict[str, str]]:
+        """folder name -> {relative path: content} of the skills offered under these settings (built-in ones
+        turned off and the user's own ones from the saved settings)."""
+        from p6mcp import skills
+        return {skills.folder_name(s): skills.skill_files(s)
+                for s in skills.offered(profile, allow_writes, skills.saved_config())}
 
-    def _ours(self) -> dict[str, str]:
-        """Command files P6 MCP wrote in the folder (they carry the marker): name -> content."""
-        from p6mcp import prompts
-        folder = self.commands_dir()
-        out: dict[str, str] = {}
-        if not folder or not os.path.isdir(folder):
+    def _ours(self) -> dict[str, dict[str, str]]:
+        """Skill folders P6 MCP wrote (their SKILL.md carries the marker): name -> {relative path: content}
+        of the files it wrote there."""
+        from p6mcp import skills
+        root = self.skills_dir()
+        out: dict[str, dict[str, str]] = {}
+        if not root or not os.path.isdir(root):
             return out
-        for name in os.listdir(folder):
-            path = os.path.join(folder, name)
-            if not (name.startswith(prompts.PREFIX) and name.endswith(".md") and os.path.isfile(path)):
+        for name in os.listdir(root):
+            md = os.path.join(root, name, "SKILL.md")
+            if not (name.startswith(skills.PREFIX) and os.path.isfile(md)):
                 continue
-            text, _bom = files.read(path)
-            if text is not None and prompts.MARKER in text:
-                out[name] = text
+            try:
+                listed = skills.written_files(files.read(md)[0] or "")
+            except files.ClientFileError:  # not UTF-8: not a file P6 MCP wrote
+                continue
+            content = {}
+            for rel in listed:
+                path = os.path.join(root, name, *rel.split("/"))
+                text = files.read(path)[0] if os.path.isfile(path) else None
+                if text is not None:
+                    content[rel] = text
+            if listed:
+                out[name] = content
         return out
 
-    def commands_state(self, profile: Optional[str] = None, allow_writes: Optional[bool] = None) -> str:
-        """unsupported (no command folder), none, installed (every offered command, current text) or
-        outdated (some missing, changed or no longer offered). Settings default to the saved ones."""
-        if not self.command_style or not self.commands_dir():
-            return CMD_UNSUPPORTED
+    def skills_state(self, profile: Optional[str] = None, allow_writes: Optional[bool] = None) -> str:
+        """unsupported (no skills folder), none, installed (every offered skill, current files) or outdated
+        (some missing, changed or no longer offered). Settings default to the saved ones."""
+        if not self.skills_dir():
+            return SKILLS_UNSUPPORTED
         ours = self._ours()
         if not ours:
-            return CMD_NONE
+            return SKILLS_NONE
         if profile is None or allow_writes is None:
-            from p6mcp import prompts
-            data = prompts.saved_config()  # unreadable settings: the defaults, as the server
+            from p6mcp import skills
+            data = skills.saved_config()  # unreadable settings: the defaults, as the server
             profile, allow_writes = data.get("tool_profile", "basic"), bool(data.get("allow_writes"))
-        return CMD_INSTALLED if ours == self._command_files(profile, allow_writes) else CMD_OUTDATED
+        return SKILLS_INSTALLED if ours == self._skill_folders(profile, allow_writes) else SKILLS_OUTDATED
 
-    def install_commands(self, profile: str, allow_writes: bool) -> dict:
-        """Write the commands offered under these settings into the client's command folder, and remove
-        the ones P6 MCP wrote earlier that are no longer offered. Files without the marker (the user's own)
-        are never touched. Returns {changed, folder, written, removed, skipped}."""
-        folder = self.commands_dir()
-        if not self.command_style or not folder:
-            raise ValueError(f"{self.name} has no command folder: it lists the server's commands itself"
-                             if self.prompts_native else f"{self.name} has no command folder")
-        want = self._command_files(profile, allow_writes)
+    @staticmethod
+    def _remove_folder(root: str, name: str, content: dict[str, str]) -> None:
+        """Delete the files P6 MCP wrote in a skill folder, then the folders left empty (a file of the user's
+        keeps its folder)."""
+        folder = os.path.join(root, name)
+        for rel in content:
+            path = os.path.join(folder, *rel.split("/"))
+            if os.path.isfile(path):
+                os.remove(path)
+        for dirpath, _dirs, _files in sorted(os.walk(folder), key=lambda w: -len(w[0])):
+            try:
+                os.rmdir(dirpath)
+            except OSError:
+                pass
+
+    def install_skills(self, profile: str, allow_writes: bool) -> dict:
+        """Write the skills offered under these settings into the client's skills folder, remove the ones
+        P6 MCP wrote earlier that are no longer offered and the P6 command files of older versions. A folder
+        without the marker (the user's own skill) is never touched. Returns {changed, folder, written, removed,
+        skipped, legacy_removed}."""
+        root = self.skills_dir()
+        if not root:
+            raise ValueError(f"{self.name} has no skills folder: it lists the server's skills (MCP prompts) itself"
+                             if self.prompts_native else f"{self.name} has no skills folder")
+        want = self._skill_folders(profile, allow_writes)
         ours = self._ours()
         written, removed, skipped = [], [], []
-        for name, text in want.items():
-            path = os.path.join(folder, name)
-            if ours.get(name) == text:
+        for name, content in want.items():
+            if ours.get(name) == content:
                 continue
-            if name not in ours and os.path.exists(path):
-                skipped.append(name)  # a file of the user's with the same name
+            folder = os.path.join(root, name)
+            if name not in ours and os.path.exists(folder):
+                skipped.append(name)  # a skill of the user's with the same name
                 continue
-            files.write_atomic(path, text)
+            for rel, text in content.items():
+                files.write_atomic(os.path.join(folder, *rel.split("/")), text)
+            self._remove_folder(root, name, {r: t for r, t in ours.get(name, {}).items() if r not in content})
             written.append(name)
-        for name in ours:
+        for name, content in ours.items():
             if name not in want:
-                os.remove(os.path.join(folder, name))
+                self._remove_folder(root, name, content)
                 removed.append(name)
-        return {"changed": bool(written or removed), "folder": folder, "written": written, "removed": removed,
-                "skipped": skipped}
+        legacy = self.remove_legacy_commands()["removed"]
+        return {"changed": bool(written or removed or legacy), "folder": root, "written": written,
+                "removed": removed, "skipped": skipped, "legacy_removed": legacy}
 
-    def remove_commands(self) -> dict:
-        """Delete the command files P6 MCP wrote (marker); the user's own files are kept."""
-        folder = self.commands_dir()
+    def remove_skills(self) -> dict:
+        """Delete the skill folders P6 MCP wrote (marker) and the command files of older versions; the user's
+        own skills are kept."""
+        root = self.skills_dir()
         removed = []
-        for name in self._ours():
+        for name, content in self._ours().items():
+            self._remove_folder(root, name, content)
+            removed.append(name)
+        legacy = self.remove_legacy_commands()["removed"]
+        return {"changed": bool(removed or legacy), "folder": root, "removed": removed, "legacy_removed": legacy}
+
+    def legacy_commands(self) -> list[str]:
+        """P6 command files that P6 MCP 1.4 to 1.7 wrote in the client's command folder (old marker)."""
+        from p6mcp import skills
+        folder = self.legacy_commands_dir()
+        if not folder or not os.path.isdir(folder):
+            return []
+        out = []
+        for name in sorted(os.listdir(folder)):
+            path = os.path.join(folder, name)
+            if name.startswith(skills.PREFIX) and name.endswith(".md") and os.path.isfile(path):
+                text, _bom = files.read(path)
+                if text is not None and skills.COMMAND_MARKER in text:
+                    out.append(name)
+        return out
+
+    def remove_legacy_commands(self) -> dict:
+        folder = self.legacy_commands_dir()
+        removed = []
+        for name in self.legacy_commands():
             os.remove(os.path.join(folder, name))
             removed.append(name)
         return {"changed": bool(removed), "folder": folder, "removed": removed}
-
 
 def _is_p6(entry: Any) -> bool:
     if not isinstance(entry, dict):

@@ -93,8 +93,9 @@ from p6mcp import config as _config
 from p6mcp import confirm as _confirm
 from p6mcp import instructions as _instructions
 from p6mcp import policy as _policy
-from p6mcp import prompts as _prompts
+from p6mcp import skills as _skills
 from p6mcp import schema as _schema
+from p6mcp import shop as _shop
 from p6mcp import xerstore as _xerstore
 
 # Effective settings: refreshed by _refresh() at the start of every tool call (config.json may change
@@ -342,12 +343,17 @@ def _refresh() -> _config.Settings:
     return st
 
 
+def _shop_on(st: _config.Settings) -> bool:
+    """The skill shop setting (on when no config file says otherwise)."""
+    return st.raw.get("shop_enabled", True) is not False
+
+
 def _before_call(tool: str) -> _config.Settings:
     """Settings of this call; raises when the policy refuses the tool or no database is usable."""
     st = _refresh()
     if st.xer_files and _policy.is_write(tool):
         raise ValueError(XER_READ_ONLY)
-    why = _policy.refusal(tool, st.tool_profile, st.allow_writes)
+    why = _policy.refusal(tool, st.tool_profile, st.allow_writes, _shop_on(st))
     if why:
         raise ValueError(why)
     if not DB_PATH and tool not in _policy.NO_DB_TOOLS:
@@ -435,6 +441,10 @@ def _gated(fn: Callable) -> Callable:
     sig = inspect.signature(fn)
     has_confirm = "confirm" in sig.parameters
     destructive = kind == _policy.DESTRUCTIVE
+    settings_only = kind == _policy.CONFIG  # changes P6 MCP's settings: the token is bound to the config file
+
+    def scope() -> str:
+        return (SETTINGS.config_path or _config.config_path()) if settings_only else DB_PATH
 
     @functools.wraps(fn)
     def call(*a, dry_run: bool = True, confirmation_token: Optional[str] = None,
@@ -452,7 +462,7 @@ def _gated(fn: Callable) -> Callable:
             finally:
                 _CALL.reset(tok)
             if isinstance(res, dict) and res.get("dry_run") and not res.get("would_refuse"):
-                g = TOKENS.issue(name, params, DB_PATH, ctx["plan"] or _confirm.plan_digest(res.get("would_do") or []))
+                g = TOKENS.issue(name, params, scope(), ctx["plan"] or _confirm.plan_digest(res.get("would_do") or []))
                 res["confirmation_token"] = g.token
                 res["token_expires_in_s"] = int(TOKENS.ttl)
                 extra = ""
@@ -460,15 +470,15 @@ def _gated(fn: Callable) -> Callable:
                     res["confirmation_text_required"] = _confirm_text(name, params)
                     extra = f", confirmation_text=\"{res['confirmation_text_required']}\""
                 res["next"] = (f"Show this plan to the user. Only after their explicit yes, call {name} again with the "
-                               f"same arguments plus dry_run=false, confirmation_token=\"{g.token}\"{extra}. P6 must "
-                               "be closed.")
+                               f"same arguments plus dry_run=false, confirmation_token=\"{g.token}\"{extra}."
+                               + ("" if settings_only else " P6 must be closed."))
             return res
         if destructive:
             want = _confirm_text(name, params)
             if (confirmation_text or "").strip() != want:
                 raise ValueError(f"{name} deletes or replaces data: pass confirmation_text=\"{want}\" exactly, as the "
                                  "dry run asks.")
-        g = TOKENS.check(name, params, DB_PATH, confirmation_token)
+        g = TOKENS.check(name, params, scope(), confirmation_token)
         ctx.update(token=g.token, expected_plan=g.plan)
         tok = _CALL.set(ctx)
         try:
@@ -493,14 +503,15 @@ def _gated(fn: Callable) -> Callable:
 _ro_cons: ContextVar[Optional[list]] = ContextVar("_ro_cons", default=None)  # read connections of the running tool
 
 
-def _tool(read_only: bool = True, destructive: bool = False, idempotent: bool = True):
+def _tool(read_only: bool = True, destructive: bool = False, idempotent: bool = True, open_world: bool = False):
     """Register an MCP tool with its annotations (recorded in TOOL_HINTS even without mcp) and its
     gated callable (REGISTERED). Only the tools the startup settings allow are offered to clients
     (policy.listed). The SDK gets a wrapper that turns any error into ToolError, so the client sees
     the reason (mcp 2.x reports any other exception as a bare 'Error executing tool'). The module
-    keeps the plain function: direct calls and tests still get ValueError and friends."""
+    keeps the plain function: direct calls and tests still get ValueError and friends. open_world: the tool
+    reaches the internet (the skill shop)."""
     hints = {"readOnlyHint": read_only, "destructiveHint": destructive and not read_only,
-             "idempotentHint": idempotent, "openWorldHint": False}
+             "idempotentHint": idempotent, "openWorldHint": open_world}
 
     def deco(tool_fn):
         name = tool_fn.__name__
@@ -526,7 +537,7 @@ def _tool(read_only: bool = True, destructive: bool = False, idempotent: bool = 
                 if token is not None:
                     _ro_cons.reset(token)
         gated = REGISTERED[name] = _gated(fn)
-        if not _policy.listed(name, STARTUP.tool_profile, STARTUP.allow_writes):
+        if not _policy.listed(name, STARTUP.tool_profile, STARTUP.allow_writes, _shop_on(STARTUP)):
             return fn
         LISTED.add(name)
         reg = gated
@@ -548,15 +559,15 @@ def _tool(read_only: bool = True, destructive: bool = False, idempotent: bool = 
     return deco
 
 
-PROMPTS: dict[str, Callable[..., str]] = {}  # P6 command -> its MCP prompt function (offered under the settings)
+PROMPTS: dict[str, Callable[..., str]] = {}  # P6 skill -> its MCP prompt function (offered under the settings)
 
 
 def _register_prompts() -> None:
-    """Offer the P6 commands (p6mcp.prompts: built-in ones left on and the user's own) whose tools are all
-    offered, as MCP prompts."""
-    for cmd in _prompts.offered(STARTUP.tool_profile, STARTUP.allow_writes, STARTUP.raw):
+    """Offer the P6 skills (p6mcp.skills: built-in ones left on and the user's own) whose tools are all
+    offered, as MCP prompts (reference files inline)."""
+    for cmd in _skills.offered(STARTUP.tool_profile, STARTUP.allow_writes, STARTUP.raw):
         def fn(_cmd=cmd, **values) -> str:
-            return _prompts.render(_cmd, values)
+            return _skills.prompt_text(_cmd, values)
         P = inspect.Parameter
         fn.__signature__ = inspect.Signature(
             [P(a.name, P.KEYWORD_ONLY, default=P.empty if a.default is None else a.default, annotation=str)
@@ -5587,7 +5598,7 @@ def p6_diagnose() -> dict:
     (database, tool profile, writes allowed, restart needed), the P6 schema and version detected,
     whether P6 is running, the backup and edit log folders. Works without a database."""
     st = SETTINGS
-    now_listed = {t for t in TOOL_HINTS if _policy.listed(t, st.tool_profile, st.allow_writes)}
+    now_listed = {t for t in TOOL_HINTS if _policy.listed(t, st.tool_profile, st.allow_writes, _shop_on(st))}
     out: dict[str, Any] = {
         "server_version": SERVER_VERSION,
         "settings": {"source": st.source, "config_file": st.config_path, "config_error": st.config_error,
@@ -5599,10 +5610,11 @@ def p6_diagnose() -> dict:
         "restart_required": now_listed != LISTED,
         "p6_running": _p6_running(),
         "openpyxl": _openpyxl_version(),  # p6_export_dashboard needs it (None: not installed)
+        "shop": {"enabled": _shop_on(st), "catalog": _shop.REPO_URL},
     }
     if out["restart_required"]:
-        out["restart_note"] = ("The tool profile or the write permission changed since the server started: restart "
-                               "your MCP client to refresh its tool list.")
+        out["restart_note"] = ("The tool profile, the write permission or the skill shop setting changed since the "
+                               "server started: restart your MCP client to refresh its tool list.")
     if XER_MANIFEST is not None:
         out["xer_mode"] = {"files": [{"file": os.path.basename(f["path"]), "path": f["path"],
                                       "xer_version": f.get("xer_version"), "projects": f["projects"],
@@ -9649,6 +9661,125 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
             "warnings": warnings, "schedule_state": state,
             "note": "Values of the last F9 in P6. The Dashboard sheet is protected (no password) and prints on one A3 "
                     "landscape page."}
+
+
+# ----------------------------------------------------------------- skill shop (p6mcp.shop)
+
+SHOP_ROW = ("name", "title", "description", "author", "version", "tools", "writes", "min_app_version")
+
+
+def _shop_settings() -> tuple[str, dict]:
+    """(config file, its content) the shop install edits; an unreadable file is refused."""
+    path = SETTINGS.config_path or _config.config_path()
+    try:
+        data = _config.read_file(path)[0]
+    except _config.ConfigError as e:
+        raise ValueError(f"The P6 MCP settings cannot be read ({e}): fix them in P6 MCP Settings first.") from e
+    return path, data if data is not None else _config.validate({})
+
+
+def _shop_entry(name: str) -> dict:
+    idx = _shop.fetch_index()
+    if idx["error"]:
+        raise ValueError(f"The skill shop cannot be read ({idx['error']}). Check the internet connection.")
+    entry = next((e for e in idx["skills"] if e["name"] == name), None)
+    if entry is None:
+        close = difflib.get_close_matches(name, [e["name"] for e in idx["skills"]], n=3)
+        raise ValueError(f"No skill {name!r} in the shop" + (f"; close names: {', '.join(close)}" if close else "")
+                         + ". Use p6_shop_search.")
+    return entry
+
+
+def _skill_clients() -> list:
+    """Adapters whose skills folder already holds P6 skills, one per folder (Claude Code, Cursor and VS Code
+    share ~/.claude/skills)."""
+    from p6mcp import clients as _clients
+    seen, out = set(), []
+    for ad in _clients.ADAPTERS:
+        folder = ad.skills_dir()
+        if folder and os.path.normcase(folder) not in seen and ad.skills_state() != _clients.SKILLS_NONE:
+            seen.add(os.path.normcase(folder))
+            out.append(ad)
+    return out
+
+
+@_tool(open_world=True)
+def p6_shop_search(query: str = "", offset: int = 0, limit: int = 50) -> dict:
+    """Search the P6 MCP skill shop: P6 skills (ready-made workflows) shared by users on GitHub and approved
+    by the maintainer. query: words found in the name, title, description or author (empty = all). Rows:
+    name, title, description, author, version, tools it calls, writes (it uses write tools), status on this
+    PC (available, installed, update, conflict = the name is taken here, newer_app = needs a newer P6 MCP).
+    Read a skill with p6_shop_get before installing it."""
+    _check_page(offset, limit)
+    idx = _shop.fetch_index()
+    if idx["error"]:
+        raise ValueError(f"The skill shop cannot be read ({idx['error']}). Check the internet connection.")
+    _path, data = _shop_settings()
+    rows = [dict({k: e.get(k) for k in SHOP_ROW}, status=_shop.status(data, e))
+            for e in _shop.search(idx["skills"], query)]
+    return dict(_slice(rows, offset, min(limit, MAX_ROWS)), catalog=_shop.REPO_URL)
+
+
+@_tool(open_world=True)
+def p6_shop_get(name: str) -> dict:
+    """One skill of the shop in full: its instructions, inputs, reference files, the tools it calls (and
+    which ones the current settings do not offer), author, version, license, the GitHub issue it was shared
+    in and its status on this PC. Show the user what it does before p6_shop_install."""
+    entry = _shop_entry(name)
+    item = _shop.fetch_skill(entry)
+    _path, data = _shop_settings()
+    skill = _skills.from_config(_shop.to_stored(item))
+    mine = _shop.installed_as(data, name)
+    return {**_skills.shared_item(item), "author": item.get("author"), "version": item.get("version"),
+            "license": item.get("license"), "tools": skill.tools(), "writes": item.get("writes"),
+            "missing_tools": _skills.missing_tools(skill, SETTINGS.tool_profile, SETTINGS.allow_writes),
+            "issue_url": f"{_shop.REPO_URL}/issues/{item['issue']}" if item.get("issue") else None,
+            "status": _shop.status(data, entry), "installed_as": mine["name"] if mine else None}
+
+
+@_tool(read_only=False, destructive=False, idempotent=True, open_world=True)
+def p6_shop_install(name: str, install_as: Optional[str] = None, confirm: bool = False) -> dict:
+    """Install a skill from the shop, or update it to the shop's version: it joins the user's skills (P6 MCP
+    Settings, Skills page), is written to the skills folders of the clients that already have P6 skills, and
+    is offered as an MCP prompt once the MCP client restarts. install_as: another name when the skill's name
+    is taken here. Changes P6 MCP's settings only, never the P6 database."""
+    entry = _shop_entry(name)
+    item = _shop.fetch_skill(entry)
+    path, data = _shop_settings()
+    if _shop.status(data, entry) == _shop.NEWER_APP:
+        raise ValueError(f"{name} needs P6 MCP {entry.get('min_app_version')} or later: update P6 MCP first.")
+    old = _shop.installed_as(data, name) if install_as is None else None
+    new = _shop.install(data, item, as_name=install_as)  # refuses a name taken by another skill
+    target = install_as or (old["name"] if old else name)
+    ads = _skill_clients()
+    tools = _skills.from_config(_shop.to_stored(item)).tools()
+    plan = [f"{'Update' if old else 'Install'} the skill {target} (version {item.get('version') or 1} by "
+            f"{item.get('author') or 'unknown'}) from the P6 MCP skill shop into {path}",
+            "Tools it calls: " + (", ".join(tools) or "none") + (" (write tools included)" if item.get("writes")
+                                                                  else ""),
+            "Refresh the P6 skills in: " + (", ".join(f"{ad.skills_dir()} ({ad.name})" for ad in ads) or
+                                            "no client yet (Install skills on the Clients page of P6 MCP Settings)")]
+    gate = _plan_gate(plan, confirm)
+    if gate:
+        return {"applied": False, "error": gate.replace("The database changed", "The shop or the settings changed")}
+    if not confirm:
+        return {"dry_run": True, "would_do": plan,
+                "skill": {k: item.get(k) for k in ("title", "description", "args", "template", "files")}}
+    _config.save(new, path)
+    refreshed, errors = [], []
+    for ad in ads:
+        try:
+            ad.install_skills(new.get("tool_profile", "basic"), bool(new.get("allow_writes")))
+            refreshed.append(ad.skills_dir())
+        except (OSError, ValueError, RuntimeError) as e:
+            errors.append(f"{ad.name}: {e}")
+    out = {"applied": True, "skill": target, "version": item.get("version"), "settings_file": path,
+           "skills_folders_refreshed": refreshed,
+           "next": "Restart the MCP client to get the skill as a prompt; clients reading a skills folder pick it "
+                   "up in a new chat."}
+    if errors:
+        out["errors"] = errors
+    return out
 
 
 _register_prompts()

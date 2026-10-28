@@ -4,7 +4,8 @@
     p6mcp-server clients register cursor vscode ...   (or --detected: every installed client)
     p6mcp-server clients unregister cursor ...
     p6mcp-server clients snippet [stdio|http|vscode]
-    p6mcp-server clients commands install|remove cursor ...   (or --detected: every client with a command folder)
+    p6mcp-server clients skills install|remove cursor ...   (or --detected: every client with a skills folder;
+                                                              "commands", the name before 1.8, still works)
 
 Exit code 0 when every requested action succeeded, 1 otherwise. Output is plain ASCII.
 """
@@ -31,15 +32,16 @@ def main(argv=None) -> int:
         p.add_argument("--detected", action="store_true", help="every installed client")
     sn = sub.add_parser("snippet")
     sn.add_argument("kind", nargs="?", default="stdio", choices=("stdio", "http", "vscode"))
-    cm = sub.add_parser("commands", help="P6 command files in the clients' command folders")
-    cm.add_argument("action", choices=("install", "remove"))
-    cm.add_argument("ids", nargs="*")
-    cm.add_argument("--detected", action="store_true", help="every installed client with a command folder")
+    for name in ("skills", "commands"):  # commands: P6 MCP 1.4 to 1.7 (installer of an older version)
+        cm = sub.add_parser(name, help="P6 skills in the clients' skills folders")
+        cm.add_argument("action", choices=("install", "remove"))
+        cm.add_argument("ids", nargs="*")
+        cm.add_argument("--detected", action="store_true", help="every installed client with a skills folder")
     a = ap.parse_args(argv)
 
     data = config.read_file()[0] or config.DEFAULTS
-    if a.cmd == "commands":
-        return _commands(ap, a, data)
+    if a.cmd in ("skills", "commands"):
+        return _skills(ap, a, data)
     http = clients.target(data)
     if a.cmd == "list":
         sts = clients.scan(http=http)
@@ -73,11 +75,11 @@ def main(argv=None) -> int:
     return 0 if ok else 1
 
 
-def _commands(ap, a, data) -> int:
+def _skills(ap, a, data) -> int:
     ids = list(a.ids)
     if a.detected:
         ids += [ad.id for ad in clients.ADAPTERS
-                if ad.command_style and ad.installed() and ad.id not in ids]
+                if ad.skills_dir() and ad.installed() and ad.id not in ids]
     if not ids:
         ap.error("name at least one client, or --detected")
     ok = True
@@ -85,11 +87,11 @@ def _commands(ap, a, data) -> int:
         try:
             ad = clients.get(cid)
             if a.action == "install":
-                res = ad.install_commands(data.get("tool_profile", "basic"), bool(data.get("allow_writes")))
+                res = ad.install_skills(data.get("tool_profile", "basic"), bool(data.get("allow_writes")))
                 print(f"{cid}: {len(res['written'])} written, {len(res['removed'])} removed in {res['folder']}"
-                      + (f" (kept your own files: {', '.join(res['skipped'])})" if res["skipped"] else ""))
+                      + (f" (kept your own skills: {', '.join(res['skipped'])})" if res["skipped"] else ""))
             else:
-                res = ad.remove_commands()
+                res = ad.remove_skills()
                 print(f"{cid}: {len(res['removed'])} removed" + (f" from {res['folder']}" if res["folder"] else ""))
         except (ValueError, files.ClientFileError, OSError) as e:
             ok = False

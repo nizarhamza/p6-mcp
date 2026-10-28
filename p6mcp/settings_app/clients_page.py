@@ -14,7 +14,7 @@ from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel, QPlainTextEdit,
                                QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from p6mcp import clients, config, credentials, prompts
+from p6mcp import clients, config, credentials, skills
 from p6mcp.clients import files
 from p6mcp.i18n import tr
 from p6mcp.jsonc import JsoncError
@@ -67,16 +67,16 @@ class ClientsPage(QWidget):
         self.state = QLabel()
         self.state.setWordWrap(True)
         bl.addWidget(self.state)
-        self.cmd_state = QLabel()  # P6 commands (p6mcp.prompts) as the client's own command files
-        self.cmd_state.setWordWrap(True)
-        bl.addWidget(self.cmd_state)
+        self.skill_state = QLabel()  # P6 skills (p6mcp.skills) as folders in the client's skills folder
+        self.skill_state.setWordWrap(True)
+        bl.addWidget(self.skill_state)
         crow = QHBoxLayout()
-        self.cmd_btn = QPushButton(tr("cl.cmd.install"))
-        self.cmd_btn.clicked.connect(self.install_commands)
-        self.cmd_remove_btn = QPushButton(tr("cl.cmd.remove"))
-        self.cmd_remove_btn.clicked.connect(self.remove_commands)
-        crow.addWidget(self.cmd_btn)
-        crow.addWidget(self.cmd_remove_btn)
+        self.skill_btn = QPushButton(tr("cl.skill.install"))
+        self.skill_btn.clicked.connect(self.install_skills)
+        self.skill_remove_btn = QPushButton(tr("cl.skill.remove"))
+        self.skill_remove_btn.clicked.connect(self.remove_skills)
+        crow.addWidget(self.skill_btn)
+        crow.addWidget(self.skill_remove_btn)
         crow.addStretch(1)
         bl.addLayout(crow)
         lrow = QHBoxLayout()
@@ -205,7 +205,7 @@ class ClientsPage(QWidget):
                 else:
                     text += " " + tr("cl.detail.token_prompt", name=st.name)
             pill(self.state, STATE_LEVEL.get(st.state, "idle"), text)
-        self._show_commands(st, installed)
+        self._show_skills(st, installed)
         others = st.others if st else []
         self.legacy.setVisible(bool(others))
         self.legacy_btn.setVisible(bool(others))
@@ -213,7 +213,7 @@ class ClientsPage(QWidget):
             pill(self.legacy, "warn", tr("cl.legacy", name=st.name, keys=", ".join(others)))
             self.legacy_btn.setText(tr("cl.legacy.remove", key=others[0]))
 
-    # -- P6 commands
+    # -- P6 skills
     @staticmethod
     def saved_tools() -> tuple[str, bool]:
         """Tool profile and writes of the saved settings: the ones the server offers its tools under
@@ -224,37 +224,36 @@ class ClientsPage(QWidget):
             data = config.DEFAULTS
         return data.get("tool_profile", "basic"), bool(data.get("allow_writes"))
 
-    def _show_commands(self, st, installed: bool) -> None:
+    def _show_skills(self, st, installed: bool) -> None:
         ad = clients.get(st.client) if st else None
-        files_ok = bool(installed and ad and ad.command_style)
-        offered = prompts.offered(*self.saved_tools(), prompts.saved_config())
-        state = st.commands if st else clients.CMD_UNSUPPORTED
-        self.cmd_btn.setVisible(files_ok)
-        self.cmd_remove_btn.setVisible(files_ok)
-        self.cmd_btn.setEnabled(files_ok and bool(offered) and state != clients.CMD_INSTALLED)
-        self.cmd_btn.setText(tr("cl.cmd.update") if state == clients.CMD_OUTDATED else tr("cl.cmd.install"))
-        self.cmd_remove_btn.setEnabled(files_ok and state in (clients.CMD_INSTALLED, clients.CMD_OUTDATED))
-        self.cmd_state.setVisible(installed)
+        folder_ok = bool(installed and ad and ad.skills_dir())
+        offered = skills.offered(*self.saved_tools(), skills.saved_config())
+        state = st.skills if st else clients.SKILLS_UNSUPPORTED
+        self.skill_btn.setVisible(folder_ok)
+        self.skill_remove_btn.setVisible(folder_ok)
+        self.skill_btn.setEnabled(folder_ok and bool(offered) and state != clients.SKILLS_INSTALLED)
+        self.skill_btn.setText(tr("cl.skill.update") if state == clients.SKILLS_OUTDATED else tr("cl.skill.install"))
+        self.skill_remove_btn.setEnabled(folder_ok and state in (clients.SKILLS_INSTALLED, clients.SKILLS_OUTDATED))
+        self.skill_state.setVisible(installed)
         if not installed:
             return
         if not offered:
-            text, level = tr("cl.cmd.basic"), "info"
-        elif not ad.command_style:
-            text, level = tr("cl.cmd.native" if ad.prompts_native else "cl.cmd.unsupported", name=st.name), "info"
+            text, level = tr("cl.skill.basic"), "info"
+        elif not ad.skills_dir():
+            text, level = tr("cl.skill.native" if ad.prompts_native else "cl.skill.unsupported", name=st.name), "info"
         else:
-            text = tr("cl.cmd." + state, name=st.name, folder=ad.commands_dir(),
-                      first="/" + prompts.PREFIX + offered[0].name)
-            level = {clients.CMD_INSTALLED: "ok", clients.CMD_OUTDATED: "warn"}.get(state, "info")
-        pill(self.cmd_state, level, text)
+            text = tr("cl.skill." + state, name=st.name, folder=ad.skills_dir(), first=skills.PREFIX + offered[0].name)
+            level = {clients.SKILLS_INSTALLED: "ok", clients.SKILLS_OUTDATED: "warn"}.get(state, "info")
+        pill(self.skill_state, level, text)
 
-    def install_commands(self) -> bool:
+    def install_skills(self) -> bool:
         profile, writes = self.saved_tools()
-        return self._act(lambda ad: ad.install_commands(profile, writes), "cl.cmd.done.install")
+        return self._act(lambda ad: ad.install_skills(profile, writes), "cl.skill.done.install")
 
-    def remove_commands(self) -> bool:
+    def remove_skills(self) -> bool:
         st = self.status()
-        if st and ask(self, tr("cl.cmd.remove"), tr("cl.cmd.remove.ask", name=st.name), warning=False):
-            return self._act(lambda ad: ad.remove_commands(), "cl.cmd.done.remove")
+        if st and ask(self, tr("cl.skill.remove"), tr("cl.skill.remove.ask", name=st.name), warning=False):
+            return self._act(lambda ad: ad.remove_skills(), "cl.skill.done.remove")
         return False
 
     # -- actions on the client's file
@@ -271,7 +270,7 @@ class ClientsPage(QWidget):
         if res.get("backup"):
             msg += " " + tr("cl.backup", path=res["backup"])
         if res.get("skipped"):
-            msg += " " + tr("cl.cmd.skipped", files=", ".join(res["skipped"]))
+            msg += " " + tr("cl.skill.skipped", files=", ".join(res["skipped"]))
         self.win.flash(msg)
         self.rescan()
         return True

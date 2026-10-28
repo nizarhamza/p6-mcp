@@ -39,6 +39,9 @@ def env(tmp_path, monkeypatch, golden):
     monkeypatch.setattr(pages, "ask", lambda *a, **k: answers["value"])
     monkeypatch.setattr("p6mcp.settings_app.clients_page.ask", lambda *a, **k: answers["value"])
     monkeypatch.setattr(SettingsWindow, "ask_close", lambda self: "discard")
+    # config.json written by another program (the p6 helper, the shop install tool): overwrite unless a test says
+    monkeypatch.setattr(SettingsWindow, "ask_changed", lambda self: answers.get("changed", "overwrite"))
+    monkeypatch.setattr("p6mcp.shop.fetch_index", lambda *a, **k: {"skills": [], "error": "offline (test)", "url": ""})
     monkeypatch.setattr("p6mcp.updates.check", lambda *a, **k: {"current": "1.0.0", "latest": "1.0.0",
                                                                   "newer": False, "url": "x", "error": None})
     registry = {"cmd": None}  # the real HKCU Run key is never touched
@@ -225,31 +228,31 @@ def test_clients_page_offers_registers_and_ignores(qtbot, env, golden, tmp_path)
     assert w.data["clients_ignored"] == ["cursor"] and not w.banner.isVisibleTo(w)
 
 
-def test_clients_page_installs_commands(qtbot, env, tmp_path):
+def test_clients_page_installs_skills(qtbot, env, tmp_path):
     os.makedirs(tmp_path / "User" / ".cursor")
     os.makedirs(tmp_path / "Roaming" / "Claude")
     w = make(qtbot, {"language": "en", "tool_profile": "basic"})
     page = w.page(ClientsPage)
     page.select("cursor")
-    assert not page.cmd_btn.isHidden() and not page.cmd_btn.isEnabled()  # Basic profile: no command offered
-    assert "Full tool profile" in page.cmd_state.text()
+    assert not page.skill_btn.isHidden() and not page.skill_btn.isEnabled()  # Basic profile: no skill offered
+    assert "Full tool profile" in page.skill_state.text()
     config.save(dict(config.read_file()[0], tool_profile="full", allow_writes=False))
     page._show_selected()
-    assert page.cmd_btn.isEnabled() and page.cmd_btn.text() == "Install commands"
-    assert page.install_commands()
+    assert page.skill_btn.isEnabled() and page.skill_btn.text() == "Install skills"
+    assert page.install_skills()
     qtbot.waitUntil(lambda: page.job is None, timeout=15000)
-    folder = tmp_path / "User" / ".cursor" / "commands"
-    assert sorted(os.listdir(folder)) == ["p6-baseline-variance.md", "p6-delay-whatif.md", "p6-export-dashboard.md",
-                                          "p6-schedule-quality-audit.md", "p6-weekly-update-review.md"]
+    folder = tmp_path / "User" / ".claude" / "skills"  # Cursor reads Claude Code's skills folder
+    assert sorted(os.listdir(folder)) == ["p6-baseline-variance", "p6-delay-whatif", "p6-export-dashboard",
+                                          "p6-schedule-quality-audit", "p6-weekly-update-review"]
     page.select("cursor")
-    assert page.status().commands == "installed" and not page.cmd_btn.isEnabled()
-    assert "/p6-weekly-update-review" in page.cmd_state.text()
-    assert page.remove_commands()  # ask answers yes
+    assert page.status().skills == "installed" and not page.skill_btn.isEnabled()
+    assert "p6-weekly-update-review" in page.skill_state.text()
+    assert page.remove_skills()  # ask answers yes
     qtbot.waitUntil(lambda: page.job is None, timeout=15000)
     page.select("cursor")
-    assert os.listdir(folder) == [] and page.status().commands == "none"
+    assert os.listdir(folder) == [] and page.status().skills == "none"
     page.select("claude_desktop")
-    assert page.cmd_btn.isHidden() and "nothing to install" in page.cmd_state.text()
+    assert page.skill_btn.isHidden() and "nothing to install" in page.skill_state.text()
 
 
 def test_clients_page_legacy_entry_and_snippet(qtbot, env, tmp_path):
@@ -415,9 +418,9 @@ def test_logs_and_about_pages(qtbot, win, monkeypatch):
     assert "Apache" in texts and "Oracle" in texts and "local model" in texts
 
 
-def test_instructions_and_commands_pages(qtbot, win, env, monkeypatch):
+def test_instructions_and_skills_pages(qtbot, win, env, monkeypatch):
     from p6mcp.settings_app import guidance_pages
-    from p6mcp.settings_app.guidance_pages import CommandDialog, CommandsPage, InstructionsPage
+    from p6mcp.settings_app.guidance_pages import InstructionsPage, SkillDialog, SkillsPage
     monkeypatch.setattr(guidance_pages, "ask", lambda *a, **k: True)
     act = "When you show an activity, write it as Activity ID - Activity name."
     ins = win.page(InstructionsPage)
@@ -432,21 +435,72 @@ def test_instructions_and_commands_pages(qtbot, win, env, monkeypatch):
     assert saved["custom_instructions"] == [{"text": act, "enabled": True}]
     assert "your instructions" in win.banner.text()  # restart the client to read them
 
-    cmds = win.page(CommandsPage)
-    assert cmds.table.rowCount() == 6 and cmds.preview.toPlainText().startswith("Weekly update review of project")
-    dlg = CommandDialog(cmds, win.data)
+    cmds = win.page(SkillsPage)
+    assert cmds.table.rowCount() == 6 and cmds.preview.toPlainText().startswith("---\nname: p6-weekly-update-review")
+    dlg = SkillDialog(cmds, win.data)
     qtbot.addWidget(dlg)
     dlg.name.setText("my-check")
+    dlg.desc.setText("Checks a project. Use when asked to check one.")
+    monkeypatch.setattr(dlg, "edit_file", lambda f: {"path": "ref/limits.md", "text": "Float under 5 days."})
+    dlg.add_file()
+    assert dlg.file_list.count() == 1
     dlg.text.setPlainText("Check {project} with p6_update_activity(project=\"{project}\").")
     dlg._add_arg({"name": "project", "description": "Project ID", "default": None})
     dlg.accept()
-    assert dlg.result_data["custom_commands"][0]["args"] == [{"name": "project", "description": "Project ID",
+    assert dlg.result_data["custom_skills"][0]["args"] == [{"name": "project", "description": "Project ID",
                                                               "default": None}]
-    monkeypatch.setattr(cmds, "edit_command", lambda item, old: dlg.result_data)
+    assert dlg.result_data["custom_skills"][0]["files"] == [{"path": "ref/limits.md", "text": "Float under 5 days."}]
+    monkeypatch.setattr(cmds, "edit_skill", lambda item, old: dlg.result_data)
     assert cmds.add() and cmds.table.rowCount() == 7 and cmds.current()["name"] == "my-check"
     assert cmds.table.item(6, 4).text() == "No: needs p6_update_activity"  # Basic profile
-    assert "Check <project> with" in cmds.preview.toPlainText()
+    assert "Check <project> with" in cmds.preview.toPlainText() and "- ref/limits.md" in cmds.preview.toPlainText()
     cmds.table.item(0, 0).setCheckState(Qt.CheckState.Unchecked)
-    assert win.data["commands_disabled"] == ["weekly-update-review"]
+    assert win.data["skills_disabled"] == ["weekly-update-review"]
     cmds.table.setCurrentCell(6, 1)
     assert cmds.remove() and cmds.table.rowCount() == 6
+
+
+def test_skill_sharing_files_and_shop_page(qtbot, win, env, monkeypatch, tmp_path):
+    from p6mcp import settings_logic, shop
+    from p6mcp.settings_app import guidance_pages, shop_page
+    from p6mcp.settings_app.guidance_pages import SkillsPage
+    from p6mcp.settings_app.shop_page import ShopPage
+    monkeypatch.setattr(guidance_pages, "ask", lambda *a, **k: True)
+    monkeypatch.setattr(shop_page, "ask", lambda *a, **k: True)
+    mine = {"name": "float-watch", "title": "Float watch", "description": "Low float. Use when asked.", "args": [],
+            "template": "Run p6_float_analysis.", "files": [{"path": "limits.md", "text": "Under 10 days."}]}
+    win.set_data(settings_logic.put_skill(win.data, mine))
+    page = win.page(SkillsPage)
+    page.refresh("float-watch")
+    opened = []
+    monkeypatch.setattr(page, "open_url", opened.append)
+    assert page.share_btn.isEnabled() and page.share()
+    assert opened[0].startswith(shop.REPO_URL + "/issues/new?template=share-skill.yml")
+    path = str(tmp_path / "p6-float-watch.zip")
+    monkeypatch.setattr(page, "save_path", lambda name: path)
+    assert page.export() == path and os.path.exists(path)
+    monkeypatch.setattr(page, "open_path", lambda: path)
+    monkeypatch.setattr(page, "edit_skill", lambda item, old: settings_logic.put_skill(win.data, item))
+    assert page.import_skill() and page.current()["name"] == "float-watch-2"  # the name was taken: renamed
+    assert win.data["custom_skills"][1]["files"] == mine["files"]
+
+    sp = win.page(ShopPage)
+    assert "read when you open this page" in sp.state.text() and sp.table.rowCount() == 0  # no network yet
+    shared = shop.meta(dict(mine, name="lookahead-plus", title="Look-ahead plus", template="Use p6_lookahead."),
+                       version=1, author="planner1", issue=3)
+    entry = {k: v for k, v in shared.items() if k not in ("args", "template", "files")} | {"sha256": "ab"}
+    monkeypatch.setattr(shop, "fetch_index", lambda *a, **k: {"skills": [entry], "error": None, "url": ""})
+    monkeypatch.setattr(shop, "fetch_skill", lambda e, *a, **k: dict(shared, sha256=e["sha256"]))
+    sp.load()
+    qtbot.waitUntil(lambda: sp.job is None, timeout=15000)  # the index, then the selected skill
+    qtbot.waitUntil(lambda: "name: p6-lookahead-plus" in sp.preview.toPlainText(), timeout=15000)
+    assert sp.table.rowCount() == 1 and sp.table.item(0, 4).text() == "Not installed"
+    assert "planner1" in sp.links.text() and "/issues/3" in sp.links.text()
+    assert sp.install() and sp.table.item(0, 4).text() == "Installed" and sp.remove_btn.isEnabled()
+    stored = next(c for c in win.data["custom_skills"] if c["name"] == "lookahead-plus")
+    assert stored["source"] == {"shop": "lookahead-plus", "version": 1, "sha256": "ab"}
+    assert win.page(SkillsPage).table.rowCount() == 9 and win.save()
+    assert sp.remove() and shop.installed_as(win.data, "lookahead-plus") is None
+    win.set_data(dict(win.data, shop_enabled=False))
+    sp.refresh()
+    assert "turned off" in sp.state.text() and sp.table.rowCount() == 0

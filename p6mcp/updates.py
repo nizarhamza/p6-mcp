@@ -1,4 +1,5 @@
-"""Updates: the only network calls P6 MCP makes. check() reads the latest published GitHub release;
+"""Updates: with the skill shop (p6mcp.shop) the only network calls P6 MCP makes. check() reads the
+latest published GitHub release;
 download() fetches its installer and SHA256SUMS.txt and refuses a file whose hash does not match;
 launch_install() runs that installer silently once the tray app has quit. No Qt here: the tray's
 updater (settings_app/updater.py) drives these steps; the tests fake the network and the processes."""

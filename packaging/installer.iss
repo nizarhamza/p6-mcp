@@ -91,9 +91,9 @@ Filename: "{app}\p6mcp-settings.exe"; Description: "{cm:OpenSettings}"; Flags: p
 Filename: "{app}\p6mcp-settings.exe"; Parameters: "--minimized"; Flags: nowait; Check: IsAutoUpdate
 
 [UninstallRun]
-; remove only the p6mcp entries, the P6 command files P6 MCP wrote, and the startup entry; settings, backups and logs are kept
+; remove only the p6mcp entries, the P6 skills (and command files of 1.7 and earlier) P6 MCP wrote, and the startup entry; settings, backups and logs are kept
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients unregister --detected"; Flags: runhidden; RunOnceId: "UnregisterClients"
-Filename: "{app}\p6mcp-server.exe"; Parameters: "clients commands remove --detected"; Flags: runhidden; RunOnceId: "RemoveCommands"
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients skills remove --detected"; Flags: runhidden; RunOnceId: "RemoveSkills"
 Filename: "{app}\p6mcp-server.exe"; Parameters: "setup startup off"; Flags: runhidden; RunOnceId: "StartupOff"
 
 [Code]

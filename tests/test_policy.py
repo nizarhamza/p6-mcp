@@ -30,7 +30,7 @@ def test_hints_agree_with_kinds(server):
 def test_write_tools_expose_the_two_step_parameters(server):
     for name, kind in policy.TOOL_KIND.items():
         params = inspect.signature(server.REGISTERED[name]).parameters
-        if kind in (policy.WRITE, policy.DESTRUCTIVE):
+        if kind in (policy.WRITE, policy.DESTRUCTIVE, policy.CONFIG):
             assert params["dry_run"].default is True, name
             assert "confirmation_token" in params, name
             assert ("confirmation_text" in params) == (kind == policy.DESTRUCTIVE), name
@@ -53,7 +53,10 @@ def test_listing_rules(profile, writes):
     elif writes:
         assert listed == set(policy.TOOL_KIND)
     else:
-        assert listed == {t for t, k in policy.TOOL_KIND.items() if k in (policy.READ, policy.FILE)}
+        assert listed == {t for t, k in policy.TOOL_KIND.items() if k in (policy.READ, policy.FILE, policy.CONFIG)}
+    assert not policy.listed("p6_shop_search", profile, writes, shop=False)
+    assert policy.refusal("p6_shop_install", "full", writes, shop=False) == policy.SHOP_OFF
+    assert policy.refusal("p6_shop_install", "full", False) is None  # settings only: writes not needed
 
 
 def _listed_by_a_fresh_server(tmp_path, cfg: dict) -> set:

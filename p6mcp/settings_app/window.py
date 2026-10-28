@@ -15,13 +15,14 @@ from p6mcp.i18n import tr
 from p6mcp.settings_app.common import brand_pixmap, muted, pill
 from p6mcp.settings_app.about_pages import AboutPage, LogsPage
 from p6mcp.settings_app.clients_page import ClientsPage
-from p6mcp.settings_app.guidance_pages import CommandsPage, InstructionsPage
+from p6mcp.settings_app.guidance_pages import InstructionsPage, SkillsPage
 from p6mcp.settings_app.pages import DatabasePage, ServerPage, StartupPage, ToolsPage
+from p6mcp.settings_app.shop_page import ShopPage
 from p6mcp.settings_app.tray import app_icon
 
 PAGES = (("nav.database", DatabasePage), ("nav.startup", StartupPage), ("nav.server", ServerPage),
          ("nav.clients", ClientsPage), ("nav.tools", ToolsPage), ("nav.instructions", InstructionsPage),
-         ("nav.commands", CommandsPage), ("nav.logs", LogsPage), ("nav.about", AboutPage))
+         ("nav.skills", SkillsPage), ("nav.shop", ShopPage), ("nav.logs", LogsPage), ("nav.about", AboutPage))
 CLIENTS_PAGE = [cls for _k, cls in PAGES].index(ClientsPage)
 HEADER_HEIGHT = 48  # logical pixels of the logo header
 
@@ -35,6 +36,7 @@ class SettingsWindow(QMainWindow):
         self.supervisor, self.on_close, self.updater = supervisor, on_close, updater
         self.data, self.load_error = settings_logic.load_for_edit()
         self.saved: Optional[dict] = None if self.load_error else copy.deepcopy(self.data)
+        self.disk = settings_logic.file_stamp()  # the config file as loaded or last saved here
         self.restart_keys: list[str] = []
         self.pages: list[QWidget] = []
         self.client_statuses: list = []  # filled by the Clients page scan (at every launch)
@@ -211,6 +213,13 @@ class SettingsWindow(QMainWindow):
         if self.load_error:
             QMessageBox.warning(self, tr("app.title"), tr("app.broken.save_first"))
             return False
+        if settings_logic.file_stamp() != self.disk:  # changed by someone else (a skill installed by Claude)
+            answer = self.ask_changed()
+            if answer == "reload":
+                self.reload()
+                return False
+            if answer != "overwrite":
+                return False
         try:
             config.save(self.data)
         except (config.ConfigError, OSError) as e:
@@ -224,10 +233,31 @@ class SettingsWindow(QMainWindow):
         self.restart_keys = sorted(set(self.restart_keys) | set(settings_logic.restart_needed(before, self.data)),
                                    key=settings_logic.RESTART_KEYS.index)
         self.saved = copy.deepcopy(self.data)
+        self.disk = settings_logic.file_stamp()
         self.page(StartupPage).refresh()
         self.page_changed()
         self.flash(tr("app.saved"))
         return True
+
+    def ask_changed(self) -> str:
+        """'overwrite', 'reload' or 'cancel' when the file changed since this window read it (tests answer it)."""
+        box = QMessageBox(QMessageBox.Icon.Warning, tr("app.title"), tr("app.changed.ask"),
+                          QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Reset
+                          | QMessageBox.StandardButton.Cancel, self)
+        box.button(QMessageBox.StandardButton.Save).setText(tr("app.changed.overwrite"))
+        box.button(QMessageBox.StandardButton.Reset).setText(tr("app.changed.reload"))
+        box.button(QMessageBox.StandardButton.Cancel).setText(tr("common.cancel"))
+        answer = box.exec()
+        return {QMessageBox.StandardButton.Save: "overwrite",
+                QMessageBox.StandardButton.Reset: "reload"}.get(answer, "cancel")
+
+    def reload(self) -> None:
+        """Read the settings file again (unsaved changes of this window are dropped)."""
+        self.data, self.load_error = settings_logic.load_for_edit()
+        self.saved = None if self.load_error else copy.deepcopy(self.data)
+        self.disk = settings_logic.file_stamp()
+        self.refresh_pages()
+        self.flash(tr("app.changed.reloaded"))
 
     def revert(self) -> None:
         if self.saved is not None:
@@ -244,6 +274,7 @@ class SettingsWindow(QMainWindow):
             return
         self.load_error = None
         self.saved = None
+        self.disk = settings_logic.file_stamp()
         self.data = copy.deepcopy(config.DEFAULTS)
         self.flash(tr("app.broken.moved", path=moved or ""))
         self.refresh_pages()

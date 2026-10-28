@@ -23,9 +23,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
-from p6mcp import instructions, prompts
+from p6mcp import instructions, skills
 
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
 APP_DIR_NAME = "P6MCP"
 TOOL_PROFILES = ("basic", "full")
 TRANSPORTS = ("stdio", "http")
@@ -63,8 +63,10 @@ DEFAULTS: dict[str, Any] = {
     "clients_ignored": [],        # client ids whose registration offer the user declined for good
     "instructions_disabled": [],  # built-in server instruction ids turned off (p6mcp.instructions)
     "custom_instructions": [],    # the user's own instruction lines [{text, enabled}]
-    "commands_disabled": [],      # built-in P6 command names turned off (p6mcp.prompts)
-    "custom_commands": [],        # the user's own commands [{name, title, description, args, template, enabled}]
+    "skills_disabled": [],        # built-in P6 skill names turned off (p6mcp.skills)
+    "custom_skills": [],          # the user's own skills [{name, title, description, args, template, files,
+                                  #   enabled, source}]
+    "shop_enabled": True,         # the skill shop (p6mcp.shop: reads the GitHub catalog when asked)
 }
 
 
@@ -100,7 +102,21 @@ def _migrate_0_to_1(d: dict) -> dict:
     return d
 
 
-MIGRATIONS = {0: _migrate_0_to_1}  # from version -> function giving version + 1
+def _migrate_1_to_2(d: dict) -> dict:
+    """1.8.0: P6 commands became skills (custom_commands -> custom_skills with reference files,
+    commands_disabled -> skills_disabled)."""
+    d = dict(d)
+    if "custom_commands" in d:
+        items = d.pop("custom_commands")
+        d["custom_skills"] = [dict(it, files=it.get("files", [])) if isinstance(it, dict) else it
+                              for it in items] if isinstance(items, list) else items
+    if "commands_disabled" in d:
+        d["skills_disabled"] = d.pop("commands_disabled")
+    d["schema_version"] = 2
+    return d
+
+
+MIGRATIONS = {0: _migrate_0_to_1, 1: _migrate_1_to_2}  # from version -> function giving version + 1
 
 
 def migrate(d: dict) -> tuple[dict, list[str]]:
@@ -158,7 +174,7 @@ def validate(d: dict) -> dict:
     if not isinstance(out["xer_confirmed"], bool):
         errs.append("xer_confirmed must be true or false")
     for key in ("allow_writes", "backup_before_write", "block_when_p6_running", "run_at_startup",
-                "start_minimized", "update_check", "auto_update"):
+                "start_minimized", "update_check", "auto_update", "shop_enabled"):
         if not isinstance(out[key], bool):
             errs.append(f"{key} must be true or false, got {out[key]!r}")
     if not isinstance(out["backup_retention"], int) or isinstance(out["backup_retention"], bool) \
@@ -176,7 +192,7 @@ def validate(d: dict) -> dict:
         errs.append("trusted_schemas must be a list of fingerprints")
     if not isinstance(out["clients_ignored"], list) or not all(isinstance(x, str) for x in out["clients_ignored"]):
         errs.append("clients_ignored must be a list of client ids")
-    errs += instructions.check(out) + prompts.check_config(out)
+    errs += instructions.check(out) + skills.check_config(out)
     dbs = out["databases"]
     names = set()
     if not isinstance(dbs, list):

@@ -1,22 +1,24 @@
-"""The Instructions and Commands pages of the Settings window.
+"""The Instructions and Skills pages of the Settings window.
 
 Instructions: the text every MCP client receives when it connects (p6mcp.instructions), built-in lines
-that can be turned off and the user's own lines. Commands: the P6 commands (p6mcp.prompts), built-in ones
-that can be turned off and the user's own ones. Both edit win.data through win.set_data(); the server reads
-them when it starts, so a change takes effect after Save and a restart of the MCP client.
+that can be turned off and the user's own lines. Skills: the P6 skills (p6mcp.skills), built-in ones that can
+be turned off and the user's own ones (with reference files; shared on GitHub through p6mcp.shop, or as a zip
+file). Both edit win.data through win.set_data(); the server reads them when it starts, so a change takes
+effect after Save and a restart of the MCP client (skills folders: Install skills on the Clients page).
 """
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontDatabase
-from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication
+from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
                                QHeaderView, QInputDialog, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
                                QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from p6mcp import instructions, prompts, settings_logic
+from p6mcp import instructions, settings_logic, shop, skills
 from p6mcp.i18n import tr
 from p6mcp.settings_app.common import ask, group, note
 
@@ -170,32 +172,63 @@ class InstructionsPage(QWidget):
             self.custom.setCurrentRow(max(0, min(row + step, self.custom.count() - 1)))
 
 
-# ----------------------------------------------------------------- Commands
+# ----------------------------------------------------------------- Skills
 
-class CommandDialog(QDialog):
-    """Edit one of the user's own commands. On OK, self.result_data holds the new config dict."""
+class FileDialog(QDialog):
+    """Edit one reference file of a skill (path and text)."""
+
+    def __init__(self, parent, f: dict):
+        super().__init__(parent)
+        self.setWindowTitle(tr("skill.file.title"))
+        lay = QVBoxLayout(self)
+        form = QFormLayout()
+        self.path = QLineEdit(f.get("path", ""))
+        self.path.setPlaceholderText("reference/checklist.md")
+        form.addRow(tr("skill.file.path"), self.path)
+        lay.addLayout(form)
+        self.text = QPlainTextEdit(f.get("text", ""))
+        lay.addWidget(self.text, 1)
+        lay.addWidget(note(tr("skill.file.note", n=skills.MAX_FILE_TEXT)))
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("common.cancel"))
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+        fm = self.fontMetrics()
+        self.resize(fm.averageCharWidth() * 90, fm.height() * 30)
+
+    def value(self) -> dict:
+        return {"path": self.path.text().strip(), "text": self.text.toPlainText()}
+
+
+class SkillDialog(QDialog):
+    """Edit one of the user's own skills (also the preview of an imported one). On OK, self.result_data holds
+    the new config dict."""
 
     def __init__(self, parent, data: dict, item: Optional[dict] = None, old_name: Optional[str] = None):
         super().__init__(parent)
         self.data, self.old_name, self.result_data = data, old_name, None
-        item = item or {"name": "", "title": "", "description": "", "args": [], "template": "", "enabled": True}
-        self.enabled = bool(item.get("enabled", True))
-        self.setWindowTitle(tr("cmd.edit.title") if old_name else tr("cmd.add.title"))
+        item = item or {"name": "", "title": "", "description": "", "args": [], "template": "", "files": [],
+                        "enabled": True}
+        self.enabled, self.source = bool(item.get("enabled", True)), item.get("source")
+        self.files: list[dict] = [dict(f) for f in item.get("files") or []]
+        self.setWindowTitle(tr("skill.edit.title") if old_name else tr("skill.add.title"))
         lay = QVBoxLayout(self)
         form = QFormLayout()
         self.name = QLineEdit(item.get("name", ""))
         self.name.setPlaceholderText("my-report")
-        form.addRow(tr("cmd.f.name"), self.name)
+        form.addRow(tr("skill.f.name"), self.name)
         self.title = QLineEdit(item.get("title", ""))
-        form.addRow(tr("cmd.f.title"), self.title)
+        form.addRow(tr("skill.f.title"), self.title)
         self.desc = QLineEdit(item.get("description", ""))
-        form.addRow(tr("cmd.f.description"), self.desc)
+        self.desc.setPlaceholderText(tr("skill.f.description.hint"))
+        form.addRow(tr("skill.f.description"), self.desc)
         lay.addLayout(form)
 
-        box, al = group(tr("cmd.f.args"))
+        box, al = group(tr("skill.f.args"))
         self.args = QTableWidget(0, 4)
-        self.args.setHorizontalHeaderLabels([tr("cmd.arg.name"), tr("cmd.arg.description"), tr("cmd.arg.default"),
-                                             tr("cmd.arg.required")])
+        self.args.setHorizontalHeaderLabels([tr("skill.arg.name"), tr("skill.arg.description"),
+                                             tr("skill.arg.default"), tr("skill.arg.required")])
         self.args.verticalHeader().setVisible(False)
         hh = self.args.horizontalHeader()
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -206,9 +239,9 @@ class CommandDialog(QDialog):
             self._add_arg(a)
         al.addWidget(self.args)
         row = QHBoxLayout()
-        add = QPushButton(tr("cmd.arg.add"))
+        add = QPushButton(tr("skill.arg.add"))
         add.clicked.connect(lambda: self._add_arg({"name": "", "description": "", "default": None}))
-        rem = QPushButton(tr("cmd.arg.remove"))
+        rem = QPushButton(tr("skill.arg.remove"))
         rem.clicked.connect(lambda: self.args.currentRow() >= 0 and self.args.removeRow(self.args.currentRow()))
         row.addWidget(add)
         row.addWidget(rem)
@@ -216,12 +249,29 @@ class CommandDialog(QDialog):
         al.addLayout(row)
         lay.addWidget(box)
 
-        box, tl = group(tr("cmd.f.text"))
+        box, tl = group(tr("skill.f.text"))
         self.text = QPlainTextEdit(item.get("template", ""))
         self.text.setMinimumHeight(self.fontMetrics().height() * 12)
         tl.addWidget(self.text)
-        tl.addWidget(note(tr("cmd.f.text.note")))
+        tl.addWidget(note(tr("skill.f.text.note")))
         lay.addWidget(box, 1)
+
+        box, fl = group(tr("skill.f.files"))
+        self.file_list = QListWidget()
+        self.file_list.setMinimumHeight(self.fontMetrics().height() * 4)
+        self.file_list.itemDoubleClicked.connect(lambda *_a: self.edit_file_row())
+        fl.addWidget(self.file_list)
+        row = QHBoxLayout()
+        for key, fn in (("skill.file.add", self.add_file), ("skill.file.load", self.load_file),
+                        ("skill.file.edit", self.edit_file_row), ("skill.file.remove", self.remove_file)):
+            b = QPushButton(tr(key))
+            b.clicked.connect(lambda _c=False, f=fn: f())
+            row.addWidget(b)
+        row.addStretch(1)
+        fl.addLayout(row)
+        fl.addWidget(note(tr("skill.f.files.note", n=skills.MAX_FILES, size=skills.MAX_FILE_TEXT)))
+        lay.addWidget(box)
+        self._show_files()
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("common.cancel"))
@@ -229,7 +279,7 @@ class CommandDialog(QDialog):
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
         fm = self.fontMetrics()
-        self.resize(fm.averageCharWidth() * 100, fm.height() * 40)
+        self.resize(fm.averageCharWidth() * 100, fm.height() * 46)
 
     def _add_arg(self, a: dict) -> None:
         r = self.args.rowCount()
@@ -242,6 +292,55 @@ class CommandDialog(QDialog):
         req.setCheckState(CHECKED[a.get("default") is None])
         self.args.setItem(r, 3, req)
 
+    # -- reference files
+    def _show_files(self) -> None:
+        self.file_list.clear()
+        for f in self.files:
+            self.file_list.addItem(tr("skill.file.row", path=f["path"], n=len(f["text"])))
+
+    def edit_file(self, f: dict) -> Optional[dict]:
+        """The file after the editor, None on Cancel (the tests replace it)."""
+        dlg = FileDialog(self, f)
+        return dlg.value() if dlg.exec() == QDialog.DialogCode.Accepted else None
+
+    def pick_file(self) -> Optional[str]:
+        """A text file to load as a reference file (the tests replace it)."""
+        path, _f = QFileDialog.getOpenFileName(self, tr("skill.file.load"), "", tr("skill.file.filter"))
+        return path or None
+
+    def add_file(self) -> None:
+        f = self.edit_file({"path": "", "text": ""})
+        if f:
+            self.files.append(f)
+            self._show_files()
+
+    def load_file(self) -> None:
+        path = self.pick_file()
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8-sig") as fh:
+                text = fh.read()
+        except (OSError, UnicodeDecodeError) as e:
+            QMessageBox.warning(self, self.windowTitle(), str(e))
+            return
+        self.files.append({"path": os.path.basename(path), "text": text})
+        self._show_files()
+
+    def edit_file_row(self) -> None:
+        r = self.file_list.currentRow()
+        if 0 <= r < len(self.files):
+            f = self.edit_file(self.files[r])
+            if f:
+                self.files[r] = f
+                self._show_files()
+
+    def remove_file(self) -> None:
+        r = self.file_list.currentRow()
+        if 0 <= r < len(self.files):
+            del self.files[r]
+            self._show_files()
+
     def item(self) -> dict:
         def cell(r: int, c: int) -> str:
             return self.args.item(r, c).text() if self.args.item(r, c) else ""
@@ -250,20 +349,23 @@ class CommandDialog(QDialog):
         for r in range(self.args.rowCount()):
             required = self.args.item(r, 3) is not None and self.args.item(r, 3).checkState() == Qt.CheckState.Checked
             args.append({"name": cell(r, 0), "description": cell(r, 1), "default": None if required else cell(r, 2)})
-        return {"name": self.name.text(), "title": self.title.text(), "description": self.desc.text(),
-                "args": args, "template": self.text.toPlainText(), "enabled": self.enabled}
+        out = {"name": self.name.text(), "title": self.title.text(), "description": self.desc.text(),
+               "args": args, "template": self.text.toPlainText(), "files": self.files, "enabled": self.enabled}
+        if self.source:
+            out["source"] = self.source
+        return out
 
     def accept(self) -> None:
         try:
-            self.result_data = settings_logic.put_command(self.data, self.item(), self.old_name)
+            self.result_data = settings_logic.put_skill(self.data, self.item(), self.old_name)
         except ValueError as e:
             QMessageBox.warning(self, self.windowTitle(), str(e))
             return
         super().accept()
 
 
-class CommandsPage(QWidget):
-    COLS = ("cmd.col.on", "cmd.col.command", "cmd.col.title", "cmd.col.kind", "cmd.col.offered")
+class SkillsPage(QWidget):
+    COLS = ("skill.col.on", "skill.col.skill", "skill.col.title", "skill.col.kind", "skill.col.offered")
 
     def __init__(self, win):
         super().__init__()
@@ -271,9 +373,9 @@ class CommandsPage(QWidget):
         self.rows: list[dict] = []
         self._loading = False
         lay = QVBoxLayout(self)
-        lay.addWidget(note(tr("cmd.intro")))
+        lay.addWidget(note(tr("skill.intro")))
 
-        box, tl = group(tr("cmd.list"))
+        box, tl = group(tr("skill.list"))
         self.table = QTableWidget(0, len(self.COLS))
         self.table.setHorizontalHeaderLabels([tr(k) for k in self.COLS])
         self.table.verticalHeader().setVisible(False)
@@ -284,39 +386,51 @@ class CommandsPage(QWidget):
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         for c in (0, 1, 3, 4):
             hh.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setMinimumHeight(self.fontMetrics().height() * 14)  # the 5 built-in commands and a few more
+        self.table.setMinimumHeight(self.fontMetrics().height() * 14)  # the built-in skills and a few more
         self.table.itemChanged.connect(self._toggled)
         self.table.currentCellChanged.connect(lambda *_a: self._selected())
         self.table.cellDoubleClicked.connect(lambda *_a: self.edit())
         tl.addWidget(self.table)
         row = QHBoxLayout()
-        self.add_btn = QPushButton(tr("cmd.add"))
+        self.add_btn = QPushButton(tr("skill.add"))
         self.add_btn.clicked.connect(self.add)
-        self.copy_btn = QPushButton(tr("cmd.copy"))
+        self.copy_btn = QPushButton(tr("skill.copy"))
         self.copy_btn.clicked.connect(self.copy)
-        self.edit_btn = QPushButton(tr("cmd.edit"))
+        self.edit_btn = QPushButton(tr("skill.edit"))
         self.edit_btn.clicked.connect(self.edit)
-        self.remove_btn = QPushButton(tr("cmd.remove"))
+        self.remove_btn = QPushButton(tr("skill.remove"))
         self.remove_btn.clicked.connect(self.remove)
         for b in (self.add_btn, self.copy_btn, self.edit_btn, self.remove_btn):
             row.addWidget(b)
         row.addStretch(1)
         tl.addLayout(row)
+        row = QHBoxLayout()
+        self.share_btn = QPushButton(tr("skill.share"))
+        self.share_btn.clicked.connect(self.share)
+        self.export_btn = QPushButton(tr("skill.export"))
+        self.export_btn.clicked.connect(self.export)
+        self.import_btn = QPushButton(tr("skill.import"))
+        self.import_btn.clicked.connect(self.import_skill)
+        for b in (self.share_btn, self.export_btn, self.import_btn):
+            row.addWidget(b)
+        row.addStretch(1)
+        tl.addLayout(row)
+        tl.addWidget(note(tr("skill.share.note")))
         lay.addWidget(box)
 
-        box, pl = group(tr("cmd.preview"))
+        box, pl = group(tr("skill.preview"))
         self.desc = note()
         pl.addWidget(self.desc)
         self.preview = _preview_box(12)
         pl.addWidget(self.preview)
-        pl.addWidget(note(tr("cmd.restart")))
+        pl.addWidget(note(tr("skill.restart")))
         lay.addWidget(box, 1)
         self.refresh()
 
     def refresh(self, select: Optional[str] = None) -> None:
         cur = self.current()
         select = select or (cur["name"] if cur else None)
-        self.rows = settings_logic.command_rows(self.win.data)
+        self.rows = settings_logic.skill_rows(self.win.data)
         self._loading = True
         self.table.setRowCount(len(self.rows))
         for i, r in enumerate(self.rows):
@@ -324,15 +438,16 @@ class CommandsPage(QWidget):
             on.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
             on.setCheckState(CHECKED[r["enabled"]])
             self.table.setItem(i, 0, on)
-            self.table.setItem(i, 1, QTableWidgetItem("/" + prompts.PREFIX + r["name"]))
+            self.table.setItem(i, 1, QTableWidgetItem(skills.PREFIX + r["name"]))
             self.table.setItem(i, 2, QTableWidgetItem(r["title"]))
-            self.table.setItem(i, 3, QTableWidgetItem(tr("cmd.kind.custom" if r["custom"] else "cmd.kind.builtin")))
+            kind = "skill.kind.shop" if r["source"] else "skill.kind.custom" if r["custom"] else "skill.kind.builtin"
+            self.table.setItem(i, 3, QTableWidgetItem(tr(kind)))
             if r["offered"]:
                 offered = tr("common.yes")
             elif not r["enabled"]:
-                offered = tr("cmd.off")
+                offered = tr("skill.off")
             else:
-                offered = tr("cmd.needs", tools=", ".join(r["missing_tools"]))
+                offered = tr("skill.needs", tools=", ".join(r["missing_tools"]))
             cell = QTableWidgetItem(offered)
             cell.setToolTip(offered)
             self.table.setItem(i, 4, cell)
@@ -340,7 +455,8 @@ class CommandsPage(QWidget):
         idx = next((i for i, r in enumerate(self.rows) if r["name"] == select), 0 if self.rows else -1)
         if idx >= 0:
             self.table.setCurrentCell(idx, 1)
-        self.add_btn.setEnabled(len(self.win.data.get("custom_commands") or []) < prompts.MAX_CUSTOM)
+        self.add_btn.setEnabled(len(self.win.data.get("custom_skills") or []) < skills.MAX_CUSTOM)
+        self.import_btn.setEnabled(len(self.win.data.get("custom_skills") or []) < skills.MAX_CUSTOM)
         self._selected()
 
     def current(self) -> Optional[dict]:
@@ -352,14 +468,16 @@ class CommandsPage(QWidget):
         custom = bool(r and r["custom"])
         self.edit_btn.setEnabled(custom)
         self.remove_btn.setEnabled(custom)
+        self.share_btn.setEnabled(custom and not (r or {}).get("source"))  # a shop skill is already shared
         self.copy_btn.setEnabled(r is not None)
+        self.export_btn.setEnabled(r is not None)
         if r is None:
             self.desc.setText("")
             self.preview.setPlainText("")
             return
-        cmd = r["command"]
-        self.desc.setText(cmd.description)
-        self.preview.setPlainText(prompts.render(cmd, {a.name: "<" + a.name + ">" for a in cmd.args}))
+        skill = r["skill"]
+        self.desc.setText(skill.description)
+        self.preview.setPlainText(skills.skill_md(skill))
 
     def _apply(self, data: dict, select: Optional[str] = None) -> None:
         self.win.set_data(data)
@@ -370,67 +488,140 @@ class CommandsPage(QWidget):
             return
         name = self.rows[it.row()]["name"]
         try:
-            data = settings_logic.set_command_enabled(self.win.data, name, it.checkState() == Qt.CheckState.Checked)
+            data = settings_logic.set_skill_enabled(self.win.data, name, it.checkState() == Qt.CheckState.Checked)
         except ValueError as e:
             self.win.error(str(e))
             self.refresh()
             return
         self._apply(data, name)
 
-    def edit_command(self, item: Optional[dict], old_name: Optional[str]) -> Optional[dict]:
+    def edit_skill(self, item: Optional[dict], old_name: Optional[str]) -> Optional[dict]:
         """Open the editor; the new config dict, or None on Cancel (the tests replace it)."""
-        dlg = CommandDialog(self, self.win.data, item, old_name)
+        dlg = SkillDialog(self, self.win.data, item, old_name)
         return dlg.result_data if dlg.exec() == QDialog.DialogCode.Accepted else None
 
     def _stored(self, name: str) -> Optional[dict]:
-        return next((c for c in self.win.data.get("custom_commands") or [] if c.get("name") == name), None)
+        return next((c for c in self.win.data.get("custom_skills") or [] if c.get("name") == name), None)
+
+    def _item(self, r: dict) -> dict:
+        """The selected skill as an editable item (a built-in text becomes editable)."""
+        stored = self._stored(r["name"]) if r["custom"] else None
+        if stored:
+            return dict(stored)
+        skill = r["skill"]
+        template = skill.template.replace("{rules}", "").rstrip()
+        template = template.replace("{{", "{").replace("}}", "}")  # built-in texts double them for str.format
+        return {"name": skill.name, "title": skill.title, "description": skill.description,
+                "args": [{"name": a.name, "description": a.description, "default": a.default} for a in skill.args],
+                "template": template, "files": [{"path": p, "text": t} for p, t in skill.files], "enabled": True}
+
+    def _new_name(self, base: str) -> str:
+        names = {s.name for s in skills.BUILTIN} | {c.get("name") for c in self.win.data.get("custom_skills") or []}
+        name, n = base, 2
+        while name in names:
+            name, n = f"{base}-{n}", n + 1
+        return name[:skills.MAX_NAME]
 
     def add(self) -> bool:
-        data = self.edit_command(None, None)
+        data = self.edit_skill(None, None)
         if data is None:
             return False
-        self._apply(data, data["custom_commands"][-1]["name"])
+        self._apply(data, data["custom_skills"][-1]["name"])
         return True
 
     def copy(self) -> bool:
-        """A new command of the user's starting from the selected one (a built-in text becomes editable)."""
+        """A new skill of the user's starting from the selected one."""
         r = self.current()
         if r is None:
             return False
-        cmd = r["command"]
-        stored = self._stored(cmd.name)
-        template = stored["template"] if stored else cmd.template.replace("{rules}", "").rstrip()
-        if not stored:  # built-in texts double their literal braces for str.format
-            template = template.replace("{{", "{").replace("}}", "}")
-        names = {c.name for c in prompts.COMMANDS} | {c.get("name") for c in self.win.data.get("custom_commands") or []}
-        name, n = "my-" + cmd.name, 2
-        while name in names:
-            name, n = f"my-{cmd.name}-{n}", n + 1
-        item = {"name": name[:prompts.MAX_NAME], "title": cmd.title, "description": cmd.description,
-                "args": [{"name": a.name, "description": a.description, "default": a.default} for a in cmd.args],
-                "template": template, "enabled": True}
-        data = self.edit_command(item, None)
+        item = self._item(r)
+        item.pop("source", None)
+        item["name"] = self._new_name("my-" + r["name"])
+        data = self.edit_skill(item, None)
         if data is None:
             return False
-        self._apply(data, data["custom_commands"][-1]["name"])
+        self._apply(data, data["custom_skills"][-1]["name"])
         return True
 
     def edit(self) -> bool:
         r = self.current()
         if not r or not r["custom"]:
             return False
-        data = self.edit_command(self._stored(r["name"]), r["name"])
+        data = self.edit_skill(self._stored(r["name"]), r["name"])
         if data is None:
             return False
-        new = next((c["name"] for c in data["custom_commands"] if c["name"] not in
-                    {x.get("name") for x in self.win.data.get("custom_commands") or []}), r["name"])
+        new = next((c["name"] for c in data["custom_skills"] if c["name"] not in
+                    {x.get("name") for x in self.win.data.get("custom_skills") or []}), r["name"])
         self._apply(data, new)
         return True
 
     def remove(self) -> bool:
         r = self.current()
-        if not r or not r["custom"] or not ask(self, tr("cmd.remove"), tr("cmd.remove.ask", name=r["name"]),
+        if not r or not r["custom"] or not ask(self, tr("skill.remove"), tr("skill.remove.ask", name=r["name"]),
                                                warning=False):
             return False
-        self._apply(settings_logic.remove_command(self.win.data, r["name"]))
+        self._apply(settings_logic.remove_skill(self.win.data, r["name"]))
+        return True
+
+    # -- sharing (GitHub) and files (no account needed)
+    def open_url(self, url: str) -> None:
+        """Open a page in the browser (the tests replace it)."""
+        QDesktopServices.openUrl(QUrl(url))
+
+    def save_path(self, name: str) -> Optional[str]:
+        """Where to export (the tests replace it)."""
+        path, _f = QFileDialog.getSaveFileName(self, tr("skill.export"), name + ".zip", tr("skill.export.filter"))
+        return path or None
+
+    def open_path(self) -> Optional[str]:
+        """A skill file to import (the tests replace it)."""
+        path, _f = QFileDialog.getOpenFileName(self, tr("skill.import"), "", tr("skill.import.filter"))
+        return path or None
+
+    def share(self) -> bool:
+        r = self.current()
+        if not r or not r["custom"] or r.get("source"):
+            return False
+        try:
+            url, clip = shop.share_url(self._item(r))
+        except ValueError as e:
+            self.win.error(tr("skill.share.invalid", err=e))
+            return False
+        if not ask(self, tr("skill.share"), tr("skill.share.ask", name=r["name"], repo=shop.REPO), warning=False):
+            return False
+        if clip:
+            QGuiApplication.clipboard().setText(clip)
+            self.win.error(tr("skill.share.clipboard"))
+        self.open_url(url)
+        return True
+
+    def export(self) -> Optional[str]:
+        r = self.current()
+        if not r:
+            return None
+        path = self.save_path(skills.PREFIX + r["name"])
+        if not path:
+            return None
+        try:
+            shop.export_zip(self._item(r), path)
+        except (OSError, ValueError) as e:
+            self.win.error(str(e))
+            return None
+        self.win.flash(tr("skill.export.done", path=path))
+        return path
+
+    def import_skill(self) -> bool:
+        path = self.open_path()
+        if not path:
+            return False
+        try:
+            item = shop.import_file(path)
+        except (OSError, ValueError) as e:
+            self.win.error(tr("skill.import.failed", err=e))
+            return False
+        item["name"] = self._new_name(item["name"])  # a name taken here gets a -2 suffix (editable below)
+        data = self.edit_skill(item, None)  # the user reviews the skill before it is added
+        if data is None:
+            return False
+        self._apply(data, data["custom_skills"][-1]["name"])
         return True

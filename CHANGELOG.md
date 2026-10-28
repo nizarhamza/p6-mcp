@@ -3,6 +3,41 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] - Unreleased
+
+### Changed
+
+- P6 commands are now **P6 skills** (Agent Skills format). The built-in ones and your own are written as a
+  folder `p6-<name>` with `SKILL.md` and its reference files in the clients' skills folders: Claude Code,
+  Cursor and VS Code read `%USERPROFILE%\.claude\skills`, Cline `%USERPROFILE%\.cline\skills`. The AI
+  uses a skill when the request matches its description (the built-in descriptions say when). The MCP
+  prompts stay (Claude Desktop's + menu). Settings: the Commands page is now **Skills**, the MCP clients
+  page **Install skills** / **Update skills** / **Remove skills**; CLI `clients skills install|remove`
+  (`clients commands` still works). The command files written by 1.4 to 1.7 are converted to skills when
+  the Settings app starts. Config schema 2: `custom_commands` -> `custom_skills`, `commands_disabled` ->
+  `skills_disabled` (migrated automatically).
+
+### Added
+
+- Your own skills can carry up to 5 text reference files (checklists, thresholds, examples; .md, .txt,
+  .csv, .json; no scripts), written beside SKILL.md and appended to the MCP prompt.
+- **Skill shop**: a Shop page in Settings lists the skills shared by users in the public GitHub catalog
+  nizarhamza/p6-mcp-shop (read anonymously, only when the page is opened); install, update and remove them.
+  **Share on GitHub** (Skills page) opens a prefilled GitHub issue; the maintainer approves it and a GitHub
+  Action publishes it. **Export** / **Import** a skill as a zip file for users without a GitHub account
+  (the zip is also a skill Claude Desktop can upload).
+- Tools `p6_shop_search`, `p6_shop_get` and `p6_shop_install` (Full profile; the install changes P6 MCP's
+  settings only, with a dry run and a confirmation token, without needing write permission). Setting
+  `shop_enabled` (Tools and safety, on by default); `p6_diagnose` reports it.
+- Settings warns before saving over settings another program changed meanwhile (a skill installed by your
+  AI client): overwrite or reload.
+
+### Fixed
+
+- A custom command naming a tool that does not exist (a typo) stopped the server from starting and broke
+  the Commands and MCP clients pages; such a skill is now simply not offered, and new or edited skills
+  refuse unknown tools.
+
 ## [1.7.0] - 2026-10-27
 
 ### Added

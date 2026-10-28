@@ -621,6 +621,13 @@ class ToolsPage(QWidget):
         wl.addWidget(note(tr("tools.writes.note")))
         lay.addWidget(box)
 
+        box, sl = group(tr("tools.shop"))
+        self.shop = QCheckBox(tr("tools.shop.allow"))
+        self.shop.clicked.connect(lambda checked: self._set(shop_enabled=checked))
+        sl.addWidget(self.shop)
+        sl.addWidget(note(tr("tools.shop.note")))
+        lay.addWidget(box)
+
         box, kl = group(tr("tools.backups"))
         form = QFormLayout()
         frow = QHBoxLayout()
@@ -671,11 +678,13 @@ class ToolsPage(QWidget):
         self.allow.setToolTip(tr("tools.allow.xer") if xer else ("" if full else tr("tools.allow.needs_full")))
         self.backup.setChecked(bool(d.get("backup_before_write", True)))
         self.block.setChecked(bool(d.get("block_when_p6_running", True)))
+        self.shop.setChecked(d.get("shop_enabled", True) is not False)
         self.folder.setText(d.get("backup_dir") or "")
         self.keep.blockSignals(True)
         self.keep.setValue(int(d.get("backup_retention", config.DEFAULTS["backup_retention"])))
         self.keep.blockSignals(False)
-        rows = settings_logic.tool_rows(d.get("tool_profile", "basic"), bool(d.get("allow_writes")) and not xer)
+        rows = settings_logic.tool_rows(d.get("tool_profile", "basic"), bool(d.get("allow_writes")) and not xer,
+                                        d.get("shop_enabled", True) is not False)
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             self.table.setItem(i, 0, QTableWidgetItem(r["tool"]))

@@ -38,12 +38,26 @@ def main(argv=None) -> int:
     if signal_running_instance():
         return 0
     runtime.setup_logging("tray")
+    _convert_commands()
     i18n.set_language((config.read_file()[0] or {}).get("language", "auto") if _readable() else "auto")
     tray = TrayApp(app)
     asked_during_setup = runtime.take_window_request()
     if not minimized or tray.tray is None or asked_during_setup:
         tray.show_window()
     return app.exec()
+
+
+def _convert_commands() -> None:
+    """P6 MCP 1.8 turned the P6 commands into skills: convert the command files an older version wrote in
+    the clients' folders (nothing to do once converted)."""
+    import logging
+    from p6mcp import clients
+    log = logging.getLogger("p6mcp.settings")
+    try:
+        for done in clients.convert_legacy_commands():
+            log.info("P6 commands converted to skills: %s", done)
+    except Exception:  # never a reason not to start
+        log.exception("converting the P6 commands to skills failed")
 
 
 def _readable() -> bool:

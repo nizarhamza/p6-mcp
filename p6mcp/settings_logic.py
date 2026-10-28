@@ -10,10 +10,10 @@ import os
 import socket
 from typing import Optional
 
-from p6mcp import config, instructions, policy, prompts
+from p6mcp import config, instructions, policy, skills
 
 RESTART_KEYS = ("tool_profile", "allow_writes", "transport", "http_port", "instructions_disabled",
-                "custom_instructions", "commands_disabled", "custom_commands")  # read when the server starts
+                "custom_instructions", "skills_disabled", "custom_skills", "shop_enabled")  # read at server start
 
 
 def _dbs(data: dict) -> list[dict]:
@@ -137,7 +137,7 @@ def restart_needed(saved: dict, current: dict) -> list[str]:
     return [k for k in RESTART_KEYS if saved.get(k, config.DEFAULTS[k]) != current.get(k, config.DEFAULTS[k])]
 
 
-# -- server instructions and P6 commands (Instructions and Commands pages)
+# -- server instructions and P6 skills (Instructions and Skills pages)
 
 def _toggle(data: dict, key: str, value: str, off: bool) -> dict:
     data = copy.deepcopy(data)
@@ -198,20 +198,20 @@ def move_instruction(data: dict, index: int, step: int) -> dict:
     return data
 
 
-def set_command_enabled(data: dict, name: str, on: bool) -> dict:
-    """Turn a built-in command or one of the user's own commands on or off."""
-    if name in prompts.BY_NAME:
-        return _toggle(data, "commands_disabled", name, not on)
+def set_skill_enabled(data: dict, name: str, on: bool) -> dict:
+    """Turn a built-in skill or one of the user's own skills on or off."""
+    if name in skills.BY_NAME:
+        return _toggle(data, "skills_disabled", name, not on)
     data = copy.deepcopy(data)
-    item = next((c for c in data.get("custom_commands") or [] if c.get("name") == name), None)
+    item = next((c for c in data.get("custom_skills") or [] if c.get("name") == name), None)
     if item is None:
-        raise ValueError(f"No command {name!r}")
+        raise ValueError(f"No skill {name!r}")
     item["enabled"] = bool(on)
     return data
 
 
-def clean_command(item: dict) -> dict:
-    """A custom command as the Commands page edits it, trimmed into the stored shape."""
+def clean_skill(item: dict) -> dict:
+    """A custom skill as the Skills page edits it, trimmed into the stored shape (no source: see put_skill)."""
     args = []
     for a in item.get("args") or []:
         name = (a.get("name") or "").strip()
@@ -220,61 +220,81 @@ def clean_command(item: dict) -> dict:
         dflt = a.get("default")
         args.append({"name": name, "description": (a.get("description") or "").strip(),
                      "default": None if dflt is None else str(dflt).strip()})
+    files = [{"path": (f.get("path") or "").strip().replace("\\", "/"), "text": f.get("text") or ""}
+             for f in item.get("files") or [] if (f.get("path") or "").strip() or (f.get("text") or "").strip()]
     return {"name": (item.get("name") or "").strip().lower(), "title": (item.get("title") or "").strip(),
             "description": " ".join((item.get("description") or "").split()), "args": args,
-            "template": (item.get("template") or "").strip("\n"), "enabled": bool(item.get("enabled", True))}
+            "template": (item.get("template") or "").strip("\n"), "files": files,
+            "enabled": bool(item.get("enabled", True))}
 
 
-def put_command(data: dict, item: dict, old_name: Optional[str] = None) -> dict:
-    """Add the user's own command (old_name None) or replace command old_name. Raises ValueError with
-    every problem found."""
-    item = clean_command(item)
+def put_skill(data: dict, item: dict, old_name: Optional[str] = None) -> dict:
+    """Add the user's own skill (old_name None) or replace skill old_name. Raises ValueError with every
+    problem found (the strict rules of skills.check_skill). item's source (a shop skill) is kept only while
+    the content is unchanged: an edited shop skill becomes the user's own."""
+    source = item.get("source")
+    item = clean_skill(item)
     data = copy.deepcopy(data)
-    items = data.setdefault("custom_commands", [])
+    items = data.setdefault("custom_skills", [])
     others = tuple(c.get("name") for c in items if c.get("name") != old_name)
-    errs = prompts.check_custom(item, others)
+    old = next((c for c in items if c.get("name") == old_name), None) if old_name else None
+    if source is not None and (old is None or skills.shared_item(clean_skill(old)) == skills.shared_item(item)):
+        item["source"] = source
+    errs = skills.check_skill(item, others, strict=True)
     if errs:
         raise ValueError("; ".join(errs))
     idx = next((i for i, c in enumerate(items) if c.get("name") == old_name), None) if old_name else None
     if idx is None:
-        if len(items) >= prompts.MAX_CUSTOM:
-            raise ValueError(f"At most {prompts.MAX_CUSTOM} commands")
+        if len(items) >= skills.MAX_CUSTOM:
+            raise ValueError(f"At most {skills.MAX_CUSTOM} skills")
         items.append(item)
     else:
         items[idx] = item
     return data
 
 
-def remove_command(data: dict, name: str) -> dict:
+def remove_skill(data: dict, name: str) -> dict:
     data = copy.deepcopy(data)
-    data["custom_commands"] = [c for c in data.get("custom_commands") or [] if c.get("name") != name]
+    data["custom_skills"] = [c for c in data.get("custom_skills") or [] if c.get("name") != name]
     return data
 
 
-def command_rows(data: dict) -> list[dict]:
-    """Every command (built-in first, then the user's own) with whether clients get it under the saved
-    tool settings of data: {name, title, description, custom, enabled, offered, missing_tools, command}."""
+def skill_rows(data: dict) -> list[dict]:
+    """Every skill (built-in first, then the user's own) with whether clients get it under the saved tool
+    settings of data: {name, title, description, custom, enabled, offered, missing_tools, skill, source}."""
     profile, writes = data.get("tool_profile", "basic"), bool(data.get("allow_writes")) and \
         data.get("data_source") != "xer"
-    off = set(data.get("commands_disabled") or [])
+    off = set(data.get("skills_disabled") or [])
     rows = []
-    cmds = [(c, c.name not in off) for c in prompts.COMMANDS]
-    cmds += [(prompts.from_config(it), bool(it.get("enabled", True))) for it in data.get("custom_commands") or []]
-    for cmd, on in cmds:
-        missing = [t for t in cmd.tools() if not policy.listed(t, profile, writes)]
-        rows.append({"name": cmd.name, "title": cmd.title, "description": cmd.description, "custom": cmd.custom,
-                     "enabled": on, "offered": on and not missing, "missing_tools": missing, "command": cmd})
+    items = [(s, s.name not in off, None) for s in skills.BUILTIN]
+    items += [(skills.from_config(it), bool(it.get("enabled", True)), it.get("source"))
+              for it in data.get("custom_skills") or []]
+    for skill, on, source in items:
+        missing = skills.missing_tools(skill, profile, writes)
+        rows.append({"name": skill.name, "title": skill.title, "description": skill.description,
+                     "custom": skill.custom, "enabled": on, "offered": on and not missing, "missing_tools": missing,
+                     "skill": skill, "source": source})
     return rows
 
 
-def tool_rows(profile: str, allow_writes: bool) -> list[dict]:
+def tool_rows(profile: str, allow_writes: bool, shop: bool = True) -> list[dict]:
     """The tools and whether clients get them under these settings, for the Tools page."""
-    return [{"tool": t, "kind": k, "available": policy.listed(t, profile, allow_writes)}
+    return [{"tool": t, "kind": k, "available": policy.listed(t, profile, allow_writes, shop)}
             for t, k in sorted(policy.TOOL_KIND.items(), key=lambda x: (policy.KINDS.index(x[1]), x[0]))]
 
 
 def default_backup_dir() -> str:
     return os.path.join(config.localdata_dir(), "backups")
+
+
+def file_stamp() -> Optional[tuple[int, int]]:
+    """(mtime_ns, size) of the config file, None when there is none: tells the Settings window that another
+    program (the shop install tool) saved the file meanwhile."""
+    try:
+        st = os.stat(config.config_path())
+    except OSError:
+        return None
+    return st.st_mtime_ns, st.st_size
 
 
 def load_for_edit() -> tuple[dict, Optional[str]]:

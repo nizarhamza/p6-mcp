@@ -13,16 +13,17 @@ from __future__ import annotations
 import json
 from typing import Iterable, Optional
 
+from p6mcp.clients import files
 from p6mcp.clients.adapters import ADAPTERS, BY_ID
-from p6mcp.clients.base import (CMD_INSTALLED, CMD_NONE, CMD_OUTDATED, CMD_UNSUPPORTED, ERROR, NOT_INSTALLED,
-                                NOT_REGISTERED, OUTDATED, REGISTERED, SERVER_KEY, Adapter, HttpTarget, Launch, Status,
-                                launch)
+from p6mcp.clients.base import (ERROR, NOT_INSTALLED, NOT_REGISTERED, OUTDATED, REGISTERED, SERVER_KEY,
+                                SKILLS_INSTALLED, SKILLS_NONE, SKILLS_OUTDATED, SKILLS_UNSUPPORTED, Adapter, HttpTarget,
+                                Launch, Status, launch)
 from p6mcp.clients.base import _running_names
 
 __all__ = ["ADAPTERS", "BY_ID", "Adapter", "HttpTarget", "Launch", "Status", "launch", "scan", "get", "snippet",
            "http_url", "target",
            "SERVER_KEY", "NOT_INSTALLED", "NOT_REGISTERED", "REGISTERED", "OUTDATED", "ERROR",
-           "CMD_UNSUPPORTED", "CMD_NONE", "CMD_INSTALLED", "CMD_OUTDATED"]
+           "SKILLS_UNSUPPORTED", "SKILLS_NONE", "SKILLS_INSTALLED", "SKILLS_OUTDATED", "convert_legacy_commands"]
 
 
 def get(client_id: str) -> Adapter:
@@ -68,3 +69,27 @@ def snippet(kind: str = "stdio", port: int = 39217, token: Optional[str] = None,
     else:
         raise ValueError("kind must be stdio, http or vscode")
     return json.dumps(body, indent=2)
+
+
+def convert_legacy_commands(data: Optional[dict] = None) -> list[dict]:
+    """P6 MCP 1.8 turned the P6 commands into skills: for every client still holding the command files of an
+    older version, write the skills offered under the saved tool settings (install_skills, which removes
+    those files) or, without a skills folder, only remove them. Nothing to do once converted (run at every
+    start of the Settings app). Returns [{client, written, legacy_removed}] or [{client, error}]."""
+    if data is None:
+        from p6mcp import skills
+        data = skills.saved_config()
+    profile, writes = data.get("tool_profile", "basic"), bool(data.get("allow_writes"))
+    done = []
+    for ad in ADAPTERS:
+        try:
+            if not ad.legacy_commands():
+                continue
+            if ad.skills_dir():
+                res = ad.install_skills(profile, writes)
+                done.append({"client": ad.id, "written": res["written"], "legacy_removed": res["legacy_removed"]})
+            else:
+                done.append({"client": ad.id, "written": [], "legacy_removed": ad.remove_legacy_commands()["removed"]})
+        except (OSError, ValueError, files.ClientFileError) as e:
+            done.append({"client": ad.id, "error": str(e)})
+    return done

@@ -127,7 +127,42 @@ stay outside this repository.
   rewrites `/D...` arguments into paths. Test an install with a fake profile in APPDATA / LOCALAPPDATA /
   USERPROFILE so the installer never registers the real clients.
 
-- `p6mcp/updates.py`: the only network calls. `check()` reads the latest published release of
+- `p6mcp/skills.py` (was prompts.py until 1.8): P6 skills = `BUILTIN` (6 workflows, descriptions in "what it does.
+  Use when ..." form) + the user's `custom_skills` ({name, title, description, args, template, files [{path,
+  text}], enabled, source}). `check_skill(item, others, strict)`: base checks for stored items (an older config
+  keeps loading), `strict` for new or edited ones (`put_skill`, shop, import): description required, one line
+  <= 1024 (Agent Skills spec), known tools only, at most 5 reference files (`FILE_RE` text formats, never
+  scripts, 10,000 characters each), whole skill <= `MAX_JSON` (a GitHub issue body holds 65,536). An unknown
+  tool in a stored skill is never offered (`missing_tools`); before 1.8 it crashed the server at startup.
+  `skill_md` writes SKILL.md (frontmatter name = folder `p6-<name>` + description only, `MARKER`, then a
+  `<!-- p6mcp files: [...] -->` list of the reference files it wrote); `prompt_text` = the MCP prompt with the
+  reference files inline. Config schema 2 (`_migrate_1_to_2`: custom_commands -> custom_skills,
+  commands_disabled -> skills_disabled). Clients: `Adapter.skills_dir()` (Claude Code, Cursor and VS Code
+  share `~/.claude/skills`: Cursor and VS Code read it, writing their own folders too would show duplicates;
+  Cline `~/.cline/skills`; Claude Desktop / LM Studio none), `install_skills` / `skills_state` /
+  `remove_skills` (ours = a `p6-*` folder whose SKILL.md has the marker; only the listed files are deleted),
+  `legacy_commands_dir()` + `remove_legacy_commands` for the 1.4 to 1.7 command files (`COMMAND_MARKER`),
+  `clients.convert_legacy_commands()` run at every start of the Settings app; CLI `clients skills
+  install|remove` (`commands` alias; the uninstaller runs `clients skills remove --detected`).
+- `p6mcp/shop.py` (stdlib only: the catalog repo's GitHub Action imports `check_shared` from a pinned tag):
+  public catalog nizarhamza/p6-mcp-shop (`index.json`, `skills/<name>/p6mcp.json` = the whole skill +
+  version, author, license, issue; SKILL.md and reference files beside it to browse). Reads only under
+  `RAW_PREFIX` (raw.githubusercontent.com: no API rate limit), 256 KB cap, never raise for the index
+  (`error`), `fetch_skill` checks the index sha256 (one index re-read on a mismatch: the raw cache lags).
+  `share_url` = a prefilled issue (`template=share-skill.yml`, field `skill`); above `MAX_URL` the JSON goes
+  to the clipboard. `export_bytes` / `import_bytes`: zip `p6-<name>/` with SKILL.md, reference files and
+  p6mcp.json (also a Claude Desktop skill upload); import also takes a plain skill folder (SKILL.md + text
+  files) or a p6mcp.json; unsafe paths and non-text files refused. `install` keeps `source {shop, version,
+  sha256}` (an edited shop skill becomes the user's own: `put_skill` drops `source` when the content
+  changes); `status`: available / installed / update / conflict / newer_app. Server tools `p6_shop_search`,
+  `p6_shop_get` (READ) and `p6_shop_install` (policy kind CONFIG: Full profile, dry run + token bound to the
+  config file, not gated by allow_writes; saves config.json and refreshes the skills folders that already
+  hold P6 skills); `SHOP_TOOLS` listed only while `shop_enabled`; `_tool(open_world=True)` sets
+  openWorldHint. Settings: `shop_page.ShopPage` (index read on first show or Refresh, each skill when
+  selected, all through `Job`), Skills page Share / Export / Import (`open_url`, `save_path`, `open_path`
+  are the seams tests replace), Tools page "Allow the skill shop", and `SettingsWindow.save` asks
+  overwrite / reload (`ask_changed`) when config.json changed on disk since it was read (`file_stamp`).
+- `p6mcp/updates.py`: with the skill shop the only network calls. `check()` reads the latest published release of
   `nizarhamza/p6-mcp` (tag, page, assets); `download()` fetches `SHA256SUMS.txt` and the
   `P6MCP-Setup-<v>.exe` asset (only URLs under `DOWNLOAD_PREFIX`) into `%LOCALAPPDATA%\P6MCP\updates` and
   deletes a file whose SHA256 does not match; `client_servers()` = `p6mcp-server.exe` processes that are
@@ -149,7 +184,7 @@ stay outside this repository.
   the network or start an installer in tests.
 - Public repository: https://github.com/nizarhamza/p6-mcp (Apache 2.0, Copyright 2026 Nizar Hamza; LICENSE,
   NOTICE, SECURITY.md, CHANGELOG.md, issue templates; README screenshots in `docs/images`, rendered from the
-  synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release; 1.0.1 = fixes of the 2026-10-20 server review; 1.1.0 = assignment units tools and the XER export of schedule options; 1.2.0 = UDF tools (list, filter and columns, set and clear activity values); 1.3.0 = automatic updates; 1.6.0 = Excel dashboard (`p6_export_dashboard`); 1.7.0 = `export-dashboard` command (dashboard result gives `cards` and `dcma_failed`).
+  synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release; 1.0.1 = fixes of the 2026-10-20 server review; 1.1.0 = assignment units tools and the XER export of schedule options; 1.2.0 = UDF tools (list, filter and columns, set and clear activity values); 1.3.0 = automatic updates; 1.6.0 = Excel dashboard (`p6_export_dashboard`); 1.7.0 = `export-dashboard` command (dashboard result gives `cards` and `dcma_failed`); 1.8.0 = P6 commands became skills (SKILL.md folders) and the skill shop on GitHub.
 
 ## Running
 
