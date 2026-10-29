@@ -3,6 +3,21 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Every tool now declares its four MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+  `openWorldHint`) as a literal on its own line of the source, so directory scanners that read the code see
+  them. The values sent to MCP clients are unchanged.
+
+### Added
+
+- Tests for the 17 tools that had none (relationship edits one by one and in batches, float paths, dangling
+  ends, redundant links, progress check, group and resource summaries, calendars, health check snapshots
+  compared, schedule options read and written, EPS creation, XER inspection), plus checks that every tool is
+  named in a test and declares its annotations literally.
+
 ## [1.9.0] - 2026-10-28
 
 ### Changed

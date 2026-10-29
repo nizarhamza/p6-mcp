@@ -313,6 +313,7 @@ XER_MANIFEST: Optional[dict] = None  # XER-only mode: files, projects (Project I
 XER_READ_ONLY = ("XER-only mode is read only: the XER files are analysed, never changed. Select a P6 database in "
                  "P6 MCP Settings to write.")
 TOOL_HINTS: dict[str, dict[str, bool]] = {}
+HINT_KEYS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")  # MCP tool annotations, in order
 REGISTERED: dict[str, Callable] = {}  # tool -> what a client call runs (policy gate + two-step write flow)
 LISTED: set[str] = set()  # tools offered to clients (fixed at startup)
 TOKENS = _confirm.TokenStore()
@@ -506,18 +507,22 @@ def _gated(fn: Callable) -> Callable:
 _ro_cons: ContextVar[Optional[list]] = ContextVar("_ro_cons", default=None)  # read connections of the running tool
 
 
-def _tool(read_only: bool = True, destructive: bool = False, idempotent: bool = True, open_world: bool = False):
+def _tool(annotations: Mapping[str, bool]):
     """Register an MCP tool with its annotations (recorded in TOOL_HINTS even without mcp) and its
     gated callable (REGISTERED). Only the tools the startup settings allow are offered to clients
     (policy.listed). The SDK gets a wrapper that turns any error into ToolError, so the client sees
     the reason (mcp 2.x reports any other exception as a bare 'Error executing tool'). The module
-    keeps the plain function: direct calls and tests still get ValueError and friends. open_world: the tool
-    reaches the internet (the skill shop)."""
-    hints = {"readOnlyHint": read_only, "destructiveHint": destructive and not read_only,
-             "idempotentHint": idempotent, "openWorldHint": open_world}
+    keeps the plain function: direct calls and tests still get ValueError and friends. annotations: the
+    four MCP hints (HINT_KEYS) as a dict literal on each tool, so static scanners read them from the
+    source; openWorldHint marks the tools that reach the internet (the skill shop)."""
+    hints = dict(annotations)
 
     def deco(tool_fn):
         name = tool_fn.__name__
+        if tuple(hints) != HINT_KEYS or not all(isinstance(v, bool) for v in hints.values()):
+            raise ValueError(f"{name}: annotations must give {', '.join(HINT_KEYS)} in this order, as booleans")
+        if hints["readOnlyHint"] and hints["destructiveHint"]:
+            raise ValueError(f"{name}: a read-only tool cannot be destructive")
         TOOL_HINTS[name] = hints
 
         @functools.wraps(tool_fn)
@@ -1969,7 +1974,7 @@ def _code_filter(con, pid: int, code_type: Optional[str], code_value: Optional[s
 
 # ----------------------------------------------------------------- read tools
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_list_projects(include_baselines: bool = False, exclude_templates: bool = False, eps: Optional[str] = None,
                      order: ProjOrder = "project", offset: Offset = 0, limit: Limit = 200) -> dict:
     """Projects, one page: {total, offset, returned, next_offset, rows}. Row: Project ID, name, data
@@ -2024,7 +2029,7 @@ def p6_list_projects(include_baselines: bool = False, exclude_templates: bool = 
         con.rollback()
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Optional[Depth] = None,
                 rollups: bool = True, baseline: Optional[ProjectId] = None, offset: Offset = 0,
                 limit: Limit = 100) -> dict:
@@ -2120,7 +2125,7 @@ def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Opt
     return res
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_query_activities(
     project: ProjectId,
     name_contains: Optional[str] = None,
@@ -2458,7 +2463,7 @@ def _act_details(con, task_id: int) -> tuple[dict, list[str]]:
     return out, cut
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_get_activity(project: ProjectId, task_code: ActivityId) -> dict:
     """Full detail of one activity: the list fields (see p6_query_activities), secondary
     constraint, remaining, expected, suspend and resume dates, calendar (hours_per_day converts
@@ -2488,7 +2493,7 @@ def p6_get_activity(project: ProjectId, task_code: ActivityId) -> dict:
     return out
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_list_udfs(table: str = "TASK", project: Optional[ProjectId] = None, name_contains: Optional[str] = None,
                  offset: Offset = 0, limit: Limit = 100) -> dict:
     """User defined fields (UDFs, the 'User Defined' columns of P6) of one subject, one page: {total,
@@ -2557,7 +2562,7 @@ def p6_list_udfs(table: str = "TASK", project: Optional[ProjectId] = None, name_
     return res
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_get_relationships(project: ProjectId, task_code: ActivityId, direction: Direction = "both",
                          offset: Offset = 0, limit: Limit = 100) -> dict:
     """Relationships of an activity, one page: {total, offset, returned, next_offset, rows, lag_rule}.
@@ -2603,7 +2608,7 @@ def _critical_clause(con, pid: int, mode: str, threshold_days: Optional[float]
             hours, "total_float")
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_critical_path(project: ProjectId, mode: CpMode = "project", float_threshold_days: Optional[float] = None,
                      include_completed: bool = False, fields: Optional[ActFields] = None,
                      min_float_days: Optional[float] = None, offset: Offset = 0, limit: Limit = 50) -> dict:
@@ -2663,7 +2668,7 @@ def p6_critical_path(project: ProjectId, mode: CpMode = "project", float_thresho
     return res
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_float_paths(project: ProjectId, path: Optional[PathNo] = None, include_completed: bool = False,
                    fields: Optional[ActFields] = None, offset: Offset = 0, limit: Limit = 50) -> dict:
     """Float paths of the last P6 schedule run (Schedule Options, multiple float paths), one page
@@ -3184,7 +3189,7 @@ def _hc_snapshot_save(snap: dict) -> str:
     return path
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, baseline_dates: BaselineDates = "current",
                     duration_basis: DurationBasis = "remaining", thresholds: Optional[Thresholds] = None,
                     high_float_days: Optional[NonNegDays] = None, check: Optional[HcCheck] = None,
@@ -3311,7 +3316,7 @@ def _hc_pick(project: str, ref: str, snaps: list[dict], name: str) -> dict:
     raise ValueError(f"{name}: no health snapshot {ref!r} (ids: p6_health_check_compare lists them in snapshots)")
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_health_check_compare(project: ProjectId, before: str = "previous", after: str = "latest") -> dict:
     """Compare two health check snapshots of a project (each full p6_health_check run saves one):
     before / after = 'latest', 'previous' (the one before latest) or a snapshot id (any database), or
@@ -3407,7 +3412,7 @@ def _dangling_suggest(net: _Net, d: dict, kind: str) -> Optional[dict]:
     return None
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_dangling(project: ProjectId, kind: DanglingKind = "both", offset: Offset = 0, limit: Limit = 100) -> dict:
     """Dangling ends, as the dangling block of p6_health_check: open activities (not milestones, not LOE
     or WBS summary) whose start has predecessors but none FS or SS (open start: driven only by FF/SF),
@@ -3456,7 +3461,7 @@ OOS_SQL = {"FS": "r.pred_type = 'PR_FS' AND COALESCE(r.lag_hr_cnt, 0) >= 0 AND t
            "SF": "r.pred_type = 'PR_SF' AND t.status_code = 'TK_Complete' AND p.act_start_date IS NULL"}
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_progress_check(project: ProjectId, sample_size: SampleSize = 15) -> dict:
     """Progress consistency of a project (statused schedule). out_of_sequence: links whose successor
     progressed before its predecessor allows it: FS (lag 0 or more: successor started, predecessor not
@@ -3711,7 +3716,7 @@ def _root_driver(net: _Net, d: dict, hidden: list) -> dict:
                       "expected finish or an option this server does not model)"}
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_driving_path(project: ProjectId, target: ActivityId, max_depth: Annotated[int, Field(ge=1)] = 500,
                     include_completed: bool = False, offset: Offset = 0, limit: Limit = 100) -> dict:
     """Driving predecessors of an activity, traced backward on the early dates of the last F9: a link
@@ -3801,7 +3806,7 @@ def _cstr_sources(net: _Net, d: dict) -> list[dict]:
              "date": c["cstr_date"]} for c in net.cstr_hits(d, LATE_CSTR, late=True)]
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annotated[int, Field(ge=1)] = 500,
                     offset: Offset = 0, limit: Limit = 100) -> dict:
     """Where the late dates (and so the total float) of an activity come from, on the last F9: walks
@@ -3952,7 +3957,7 @@ def _transitive(net: _Net) -> dict[int, str]:
     return out
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_redundant_links(project: ProjectId, categories: Optional[list[RedundantCategory]] = None,
                        name_pattern: str = "(deleted)", offset: Offset = 0, limit: Limit = 100) -> dict:
     """Relationships of the project (successor in it) that are candidates for removal, one row per link
@@ -4393,7 +4398,7 @@ def _cpm_compare(cpm: _Cpm, res: dict, stale: bool, never: bool = False) -> dict
                        "completed_late_dates_differing": stats["completed_late_bad"]}}
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_cpm_validate(project: ProjectId, offset: Offset = 0, limit: Limit = 50) -> dict:
     """Run this server's CPM engine on the unchanged network and compare it with P6's last F9: early
     start and finish, late start and finish and total float of every open activity (completed ones:
@@ -4554,7 +4559,7 @@ def _whatif_apply(cpm: _Cpm, e: Mapping) -> str:
     return f"{d['task_code']}: constraint {_cstr_label(code) or 'none'} {_fmt_dt(dt) if dt else ''}".strip()
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: CompareTo = "current",
                        milestones: Optional[list[ActivityId]] = None, offset: Offset = 0, limit: Limit = 50) -> dict:
     """What-if scheduling in memory (the database is never written): applies the edits in order (add,
@@ -4760,7 +4765,7 @@ def _cmp_links(con) -> str:
 LINK_KEY = "lb.pred = la.pred AND lb.succ = la.succ AND lb.type = la.type AND lb.pred_project IS la.pred_project"
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, section: CompareSection = "activities",
                         dates: BaselineDates = "current", min_variance_days: NonNegDays = 0,
                         offset: Offset = 0, limit: Limit = 50) -> dict:
@@ -4903,7 +4908,7 @@ def _group_row(a: Mapping) -> dict:
             "orig_dur_d": r2(a.get("orig_d")), "rem_dur_d": r2(a.get("rem_d"))}
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_group_summary(project: ProjectId, by: GroupBy = "status", code_type: Optional[str] = None,
                      code_level: Optional[Level] = None, wbs_level: Level = 1, include_completed: bool = True,
                      offset: Offset = 0, limit: Limit = 100) -> dict:
@@ -4989,7 +4994,7 @@ def p6_group_summary(project: ProjectId, by: GroupBy = "status", code_type: Opti
     return res
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: Optional[WindowWeeks] = None,
                  from_date: Optional[DateTimeStr] = None, include_in_progress: bool = True,
                  include_completed: bool = False, wbs_name_contains: Optional[str] = None,
@@ -5188,7 +5193,7 @@ def _period_edges(lo: datetime, hi: datetime, period: str, week_day: int = 1) ->
     return out
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Optional[ProjectId] = None,
                       measure: Measure = "units", resource: Optional[str] = None, from_date: Optional[DateStr] = None,
                       to_date: Optional[DateStr] = None, updates: Optional[ProjectIds] = None) -> dict:
@@ -5311,7 +5316,7 @@ MS_VS = ("late", "early", "on_time")  # p6_milestones vs_baseline
 MsOrder = Literal["date", "variance"]
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, baseline_dates: BaselineDates = "current",
                   open_only: bool = False, order: MsOrder = "date", offset: Offset = 0, limit: Limit = 50) -> dict:
     """Milestones of a project (TT_Mile start milestones, TT_FinMile finish milestones), one page by date
@@ -5402,7 +5407,7 @@ def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, base
     return res
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None) -> dict:
     """One-call overview of a project (values of the last F9): project (name, calendar), dates (data
     date, planned start, must finish by, scheduled finish, last schedule run, first start and last
@@ -5575,7 +5580,7 @@ def _float_bucket(hours: Optional[float], hpd: float, edges: Sequence[float]) ->
     raise ValueError(f"edges {list(edges)} do not hold 0")
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_float_analysis(project: ProjectId, edges_days: Optional[FloatEdges] = None, include_milestones: bool = True,
                       wbs_name_contains: Optional[str] = None, code_type: Optional[str] = None,
                       code_value: Optional[str] = None, include_child_codes: bool = True,
@@ -5646,7 +5651,7 @@ def p6_float_analysis(project: ProjectId, edges_days: Optional[FloatEdges] = Non
             "note": "Float of the last F9 in days of each activity's calendar (hours / hours per day)."}
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_resource_summary(project: ProjectId, resource: Optional[str] = None, offset: Offset = 0,
                         limit: Limit = 100) -> dict:
     """Assignments of a project per resource, one page: {total, offset, returned, next_offset, rows,
@@ -5713,7 +5718,7 @@ def p6_resource_summary(project: ProjectId, resource: Optional[str] = None, offs
     return res
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_list_calendars(project: Optional[ProjectId] = None, name_contains: Optional[str] = None,
                       from_date: Optional[DateStr] = None, to_date: Optional[DateStr] = None,
                       include_exceptions: bool = False, offset: Offset = 0, limit: Limit = 50) -> dict:
@@ -5777,7 +5782,7 @@ def p6_list_calendars(project: Optional[ProjectId] = None, name_contains: Option
     return res
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_schedule_options(project: Optional[ProjectId] = None, xer_path: Optional[str] = None,
                         xer_project: Optional[str] = None) -> dict:
     """Schedule options (P6 Tools > Schedule > Options) stored for a project, found in an XER file
@@ -5816,7 +5821,7 @@ def p6_schedule_options(project: Optional[ProjectId] = None, xer_path: Optional[
             "notes": notes}
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_sql_select(sql: str, offset: Offset = 0, limit: Limit = 200) -> dict:
     """Last resort: use only when no other p6_ tool answers the question. Runs one read-only
     SELECT (or WITH ... SELECT, or PRAGMA table_info(T) to see a table's columns) on the P6
@@ -5891,7 +5896,7 @@ def p6_sql_select(sql: str, offset: Offset = 0, limit: Limit = 200) -> dict:
     return res
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_diagnose() -> dict:
     """Start here when a tool reports a configuration problem. Shows the server settings in force
     (database, tool profile, writes allowed, restart needed), the P6 schema and version detected,
@@ -6209,7 +6214,7 @@ def _single_link(fn: Callable, project: str, it: Mapping, confirm: bool) -> dict
         return _commit(con, plan, confirm, projects=x["projects"], log=x["log"])
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_add_relationship(
     project: ProjectId, predecessor_code: ActivityId, successor_code: ActivityId,
     rel_type: RelType = "FS", lag_days: float = 0,
@@ -6225,7 +6230,7 @@ def p6_add_relationship(
                                             "predecessor_project": predecessor_project}, confirm)
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_update_relationship(
     project: ProjectId, predecessor_code: ActivityId, successor_code: ActivityId,
     rel_type: Optional[RelType] = None, lag_days: Optional[float] = None,
@@ -6242,7 +6247,7 @@ def p6_update_relationship(
                                                "predecessor_project": predecessor_project}, confirm)
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_delete_relationship(
     project: ProjectId, predecessor_code: ActivityId, successor_code: ActivityId,
     predecessor_project: Optional[ProjectId] = None, current_type: Optional[RelType] = None,
@@ -6391,7 +6396,7 @@ def _link_batch(project: str, items: list, kind: str, confirm: bool, fn: Callabl
         return res
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_delete_relationships(project: ProjectId, ids: Optional[LinkIds] = None, pairs: Optional[LinkRefs] = None,
                             confirm: bool = False) -> dict:
     """Delete many relationships in one transaction (all or nothing; dry run unless confirm=True). ids:
@@ -6407,7 +6412,7 @@ def p6_delete_relationships(project: ProjectId, ids: Optional[LinkIds] = None, p
     return _link_batch(project, items, "delete", confirm, _rel_delete, f"Delete {len(items)} relationship(s)")
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_add_relationships(project: ProjectId, items: LinkNews, confirm: bool = False) -> dict:
     """Add many relationships in one transaction (all or nothing; dry run unless confirm=True). Item:
     {predecessor_code, successor_code, rel_type (FS default), lag_days (0 default, days of the lag
@@ -6418,7 +6423,7 @@ def p6_add_relationships(project: ProjectId, items: LinkNews, confirm: bool = Fa
     return _link_batch(project, items, "add", confirm, _rel_add, f"Add {len(items)} relationship(s)")
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_update_relationships(project: ProjectId, items: LinkEdits, confirm: bool = False) -> dict:
     """Change type and/or lag of many relationships in one transaction (all or nothing; dry run unless
     confirm=True). Item: {predecessor_code, successor_code, rel_type, lag_days, current_type (picks
@@ -6429,7 +6434,7 @@ def p6_update_relationships(project: ProjectId, items: LinkEdits, confirm: bool 
     return _link_batch(project, items, "update", confirm, _rel_update, f"Change {len(items)} relationship(s)")
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_update_activity(
     project: ProjectId, task_code: ActivityId,
     task_name: Optional[str] = None,
@@ -6744,7 +6749,7 @@ def _asg_update(con, project: str, it: Mapping) -> dict:
                            "role": a["role_short_name"], "before": view(old), "after": view(new)}}
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_update_assignment(
     project: ProjectId, task_code: Optional[ActivityId] = None, resource: Optional[str] = None,
     role: Optional[str] = None, taskrsrc_id: Optional[int] = None,
@@ -6765,7 +6770,7 @@ def p6_update_assignment(
         ("at_completion_units", at_completion_units)) if v is not None}, confirm)
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_update_assignments(project: ProjectId, items: AsgEdits, confirm: bool = False) -> dict:
     """Set the units of many assignments in one transaction (all or nothing; dry run unless
     confirm=True). Item: {task_code, resource, role, taskrsrc_id, budgeted_units, actual_units,
@@ -6931,7 +6936,7 @@ def _udf_next(res: dict) -> dict:
     return res
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_update_udf(project: ProjectId, task_code: ActivityId, udf: str, value: Optional[UdfValue] = None,
                   clear: bool = False, confirm: bool = False) -> dict:
     """Set one activity UDF value (a 'User Defined' column of P6, labels in p6_list_udfs), or remove it
@@ -6944,7 +6949,7 @@ def p6_update_udf(project: ProjectId, task_code: ActivityId, udf: str, value: Op
                                                       **({"value": value} if value is not None else {})}, confirm))
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_update_udfs(project: ProjectId, items: UdfEdits, confirm: bool = False) -> dict:
     """Set or clear many activity UDF values in one transaction (all or nothing; dry run unless
     confirm=True). Item: {task_code, udf, value} or {task_code, udf, clear: true}, as p6_update_udf.
@@ -7017,7 +7022,7 @@ def _act_delete_rows(con, task_ids: Iterable[int]) -> tuple[dict[str, int], dict
     return counts, cleared, left
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_delete_activity(project: ProjectId, task_code: ActivityId, force: bool = False, confirm: bool = False) -> dict:
     """Delete one activity and everything that belongs to it, as P6 does (hard delete; P6's triggers
     log REFRDEL): relationships both ways, resource assignments (with their period actuals, timesheet
@@ -7105,7 +7110,7 @@ def p6_delete_activity(project: ProjectId, task_code: ActivityId, force: bool = 
         return res
 
 
-@_tool(read_only=False, destructive=False, idempotent=False)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
 def p6_backup_database() -> dict:
     """Take a manual backup copy of the P6 database now (kept apart from the automatic retention)."""
     why = _write_refusal()
@@ -7181,7 +7186,7 @@ def _backup_taken_at(path: str) -> str:
     return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M:%S")
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_edit_log(project: Optional[ProjectId] = None, since: Optional[DateTimeStr] = None,
                 offset: Offset = 0, limit: Limit = 50) -> dict:
     """Confirmed writes of this server on this database, newest first, from the persistent edit log
@@ -7220,7 +7225,7 @@ def p6_edit_log(project: Optional[ProjectId] = None, since: Optional[DateTimeStr
     return res
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_list_backups(offset: Offset = 0, limit: Limit = 200) -> dict:
     """Backup files (.db) in the backup folder, newest first: {total, offset, returned, next_offset,
     rows, folder}. Row: name (pass it to p6_restore_backup), taken_at (from the file name, else the
@@ -7275,7 +7280,7 @@ def _projects_of(path: str) -> dict[str, tuple]:
         con.close()
 
 
-@_tool(read_only=False, destructive=True, idempotent=False)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False})
 def p6_restore_backup(name: str, confirm: bool = False) -> dict:
     """Replace the database with a backup from the backup folder (name as p6_list_backups shows it).
     Dry run: the backup's projects compared with the current ones (only_in_backup, only_in_database,
@@ -7410,7 +7415,7 @@ def _guid() -> str:
     return base64.b64encode(uuid.uuid4().bytes).decode()[:22]
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_list_eps(order: EpsOrder = "seq", offset: Offset = 0, limit: Limit = 200) -> dict:
     """EPS nodes, one page: {total, offset, returned, next_offset, rows}. eps_id is the short name
     used by p6_import_xer and p6_create_eps; parent_wbs_id links a node to its parent EPS; depth (0 = top
@@ -7461,7 +7466,7 @@ def _create_eps(con, eps_id: str, eps_name: str, parent_wbs: Optional[int], now:
     return wid
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_create_eps(eps_id: str, eps_name: str, parent_eps: Optional[str] = None,
                   confirm: bool = False) -> dict:
     """Create an EPS node (top level, or under parent_eps). Dry run unless confirm=True.
@@ -7551,7 +7556,7 @@ def _lpl_arg(level_priority_list) -> Optional[list[tuple[str, str]]]:
     return lpl
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_set_schedule_options(project: ProjectId, options: Optional[SchedValues] = None,
                             from_xer: Optional[str] = None, xer_project: Optional[str] = None,
                             key_activity: Optional[str] = None, level_priority_list: Optional[LevelPriority] = None,
@@ -7827,7 +7832,7 @@ def _delete_targets(con, names: list[str], include_baselines: bool, allow_templa
     return found, bls
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_delete_project(project: ProjectList, include_baselines: bool = True, allow_templates: bool = False,
                       delete_empty_eps: bool = False, confirm: bool = False) -> dict:
     """Delete one or more projects (Project IDs, a list deletes them in one transaction with one
@@ -8377,7 +8382,7 @@ def _remove_rows(imp: _XerImport, table: str, ids: list[int]) -> None:
     imp.count(table, "deleted", con.execute(f"DELETE FROM {table} WHERE {XER_PK[table]} IN {_ids_sql(ids)}").rowcount)
 
 
-@_tool(read_only=False, destructive=True, idempotent=False)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False})
 def p6_import_xer(
     path: str,
     mode: ImportMode = "new",
@@ -8750,7 +8755,7 @@ def p6_import_xer(
         return res
 
 
-@_tool()
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_inspect_xer(path: str, xer_project: Optional[str] = None, db_preview: bool = True) -> dict:
     """Read an XER file without importing it: header, encoding (UTF-8, else cp1252 with the offset of
     the first non UTF-8 byte), BOM, %E end marker, rows per table, projects (Project ID, data date,
@@ -8796,7 +8801,7 @@ def _ids_sql(ids) -> str:
     return "(" + ",".join(str(int(i)) for i in ids) + ")" if ids else "(NULL)"
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_export_xer(project: ProjectId, path: str, tables: Optional[list[XerTable]] = None,
                   xer_version: Optional[str] = None, overwrite: bool = False) -> dict:
     """Export one project to an XER file (read only on the database). An existing file is refused
@@ -9940,7 +9945,7 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
     return wb, counts, card_values
 
 
-@_tool(read_only=False, destructive=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[ProjectId] = None,
                         baseline_dates: BaselineDates = "planned", milestones: Optional[ActivityIds] = None,
                         near_critical_days: NonNegDays = 10, period: Period = "month",
@@ -10094,7 +10099,7 @@ def _skill_clients() -> list:
     return out
 
 
-@_tool(open_world=True)
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
 def p6_shop_search(query: str = "", offset: int = 0, limit: int = 50) -> dict:
     """Search the P6 MCP skill shop: P6 skills (ready-made workflows) shared by users on GitHub and approved
     by the maintainer. query: words found in the name, title, description or author (empty = all). Rows:
@@ -10111,7 +10116,7 @@ def p6_shop_search(query: str = "", offset: int = 0, limit: int = 50) -> dict:
     return dict(_slice(rows, offset, min(limit, MAX_ROWS)), catalog=_shop.REPO_URL)
 
 
-@_tool(open_world=True)
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
 def p6_shop_get(name: str) -> dict:
     """One skill of the shop in full: its instructions, inputs, reference files, the tools it calls (and
     which ones the current settings do not offer), author, version, license, the GitHub issue it was shared
@@ -10130,7 +10135,7 @@ def p6_shop_get(name: str) -> dict:
             "status": _shop.status(data, entry), "installed_as": mine["name"] if mine else None}
 
 
-@_tool(read_only=False, destructive=False, idempotent=True, open_world=True)
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
 def p6_shop_install(name: str, install_as: Optional[str] = None, confirm: bool = False) -> dict:
     """Install a skill from the shop, or update it to the shop's version: it joins the user's skills (P6 MCP
     Settings, Skills page), is written to the skills folders of the clients that already have P6 skills, and

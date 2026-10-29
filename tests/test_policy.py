@@ -1,6 +1,8 @@
+import ast
 import inspect
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -25,6 +27,48 @@ def test_hints_agree_with_kinds(server):
             assert not h["readOnlyHint"], name
         if kind == policy.DESTRUCTIVE:
             assert h["destructiveHint"], name
+
+
+def test_hints_are_literal_in_the_source(server):
+    """Static scanners (M8ven) read the hints from the decorator line: a dict literal of the four booleans."""
+    with open(server.__file__, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    found = {}
+    for node in tree.body:
+        for d in getattr(node, "decorator_list", ()):
+            if isinstance(d, ast.Call) and getattr(d.func, "id", None) == "_tool":
+                assert not d.args and [k.arg for k in d.keywords] == ["annotations"], node.name
+                assert isinstance(d.keywords[0].value, ast.Dict), node.name
+                found[node.name] = ast.literal_eval(d.keywords[0].value)
+    assert found == server.TOOL_HINTS
+    for name, hints in found.items():
+        assert tuple(hints) == server.HINT_KEYS, name
+        assert all(type(v) is bool for v in hints.values()), name
+
+
+def test_tool_refuses_other_annotations(server):
+    def p6_probe():
+        return None
+    with pytest.raises(ValueError, match="in this order"):
+        server._tool(annotations={"readOnlyHint": True})(p6_probe)
+    with pytest.raises(ValueError, match="in this order"):
+        server._tool(annotations={"readOnlyHint": 1, "destructiveHint": False, "idempotentHint": True,
+                                  "openWorldHint": False})(p6_probe)
+    with pytest.raises(ValueError, match="cannot be destructive"):
+        server._tool(annotations={"readOnlyHint": True, "destructiveHint": True, "idempotentHint": True,
+                                  "openWorldHint": False})(p6_probe)
+    assert "p6_probe" not in server.TOOL_HINTS and "p6_probe" not in server.REGISTERED
+
+
+def test_every_tool_is_named_in_a_test(server):
+    """Each tool has at least one test calling it by name (the names are read here, never written)."""
+    folder = os.path.join(ROOT, "tests")
+    text = ""
+    for name in sorted(os.listdir(folder)):
+        if name.endswith(".py"):
+            with open(os.path.join(folder, name), encoding="utf-8") as fh:
+                text += fh.read()
+    assert [t for t in server.TOOL_HINTS if not re.search(rf"\b{t}\b", text)] == []
 
 
 def test_write_tools_expose_the_two_step_parameters(server):
