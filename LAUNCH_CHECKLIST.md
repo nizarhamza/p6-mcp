@@ -28,8 +28,8 @@ Names used below:
 
 ## B. Release 2.0.0
 
-- [ ] Date the 2.0.0 entry of `CHANGELOG.md`, commit.
-- [ ] Push `main` and the tag (the tag starts the Release workflow, which builds a draft release):
+- [x] Date the 2.0.0 entry of `CHANGELOG.md`, commit.
+- [x] Push `main` and the tag (the tag starts the Release workflow, which builds a draft release):
 
   ```bash
   git -C D:/HAMZA/Documents/p6mcp push origin main
@@ -46,19 +46,19 @@ Names used below:
 - [ ] Run the manual test checklist of `docs/RELEASING.md` on the draft. For 2.0 add: an update over 1.9.0
       shows "MCP for Primavera P6" in Windows Settings > Apps and in the Start menu, the old "P6 MCP Settings"
       shortcut is gone, the client entries (`p6mcp`) and the settings are unchanged.
-- [ ] Publish the release (GitHub, Releases, the v2.0.0 draft, Publish). The installed 1.x copies update
+- [x] Publish the release (GitHub, Releases, the v2.0.0 draft, Publish). The installed 1.x copies update
       themselves to 2.0.0 within their next checks, and the MCP Registry workflow publishes the 2.0.0 entry.
 
 ## C. After the release
 
-- [ ] Push the catalog commit that pins `P6MCP_REF` to `v2.0.0` (it needs the tag), then check that "Check the
+- [x] Push the catalog commit that pins `P6MCP_REF` to `v2.0.0` (it needs the tag), then check that "Check the
       catalog" is green:
 
   ```bash
   git -C D:/HAMZA/Documents/p6-mcp-shop push origin main
   ```
 
-- [ ] Check the MCP Registry entry:
+- [x] Check the MCP Registry entry:
 
   ```bash
   curl "https://registry.modelcontextprotocol.io/v0/servers?search=nizarhamza/p6-mcp"
@@ -69,18 +69,18 @@ Names used below:
 
 ## D. Landing site on Cloudflare Pages
 
-- [ ] Cloudflare dashboard > Workers & Pages > Create > Pages > Connect to Git > `nizarhamza/p6-mcp`.
+- [x] Cloudflare dashboard > Workers & Pages > Create > Pages > Connect to Git > `nizarhamza/p6-mcp`.
       Project name `mcp-for-primavera-p6`, production branch `main`, framework preset None, build command empty,
       build output directory `site`. Every push to `main` deploys.
-- [ ] Check `/`, `/guides/`, the four guides, `/llms.txt`, `/sitemap.xml`, `/robots.txt`, a missing URL (the
+- [x] Check `/`, `/guides/`, the four guides, `/llms.txt`, `/sitemap.xml`, `/robots.txt`, a missing URL (the
       404 page) and the response headers from `site/_headers` (Content-Security-Policy, cache).
-- [ ] Set the repository homepage:
+- [x] Set the repository homepage:
 
   ```bash
   gh repo edit nizarhamza/p6-mcp --homepage https://mcp-for-primavera-p6.pages.dev/
   ```
 
-- [ ] If Cloudflare gives another subdomain (name taken) or you add a custom domain, replace
+- [x] Not needed for 2.0.0: the subdomain was free. If you add a custom domain later, replace
       `https://mcp-for-primavera-p6.pages.dev` everywhere: `site/` (canonical, Open Graph, JSON-LD, sitemap,
       robots, llms.txt), `server.json` (websiteUrl, icon), `packaging/bundle.py` (SITE) and the README FAQ link.
       `tests/test_registry.py` checks that server.json and the bundle agree.
