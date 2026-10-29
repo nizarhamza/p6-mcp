@@ -52,6 +52,7 @@ import itertools
 import json
 import math
 import os
+import random
 import re
 import sqlite3
 import statistics
@@ -140,6 +141,7 @@ LAG_RULES = {"rcal_Predecessor": "predecessor calendar", "rcal_Successor": "succ
 ACT_LINKS_CAP = 50  # predecessors, successors, assignments, codes, UDFs, notebooks listed by p6_get_activity
 SUMMARY_TYPES = "('TT_LOE', 'TT_WBS')"  # LOE and WBS summary activities: never listed as critical or longest path
 HARD_CSTR = "('CS_MSO', 'CS_MEO', 'CS_MSOB', 'CS_MEOB', 'CS_MANDSTART', 'CS_MANDFIN')"  # DCMA hard constraints
+HARD_CSTR_SET = frozenset(re.findall(r"CS_\w+", HARD_CSTR))
 DCMA_LIMIT_DAYS = 44.0  # DCMA default limit of high float, high duration and long lags (days of the calendar)
 MAT_SQL = "MATERIALIZED " if sqlite3.sqlite_version_info >= (3, 35, 0) else ""  # CTE hint (SQLite 3.35+)
 SQL_COUNT_CAP, SQL_COUNT_SECONDS = 1_000_000, 3  # p6_sql_select counts at most this many rows, for this long
@@ -210,7 +212,7 @@ PathNo = Annotated[int, Field(ge=1, description="Float path number (1 = most cri
 BaselineDates = Literal["current", "planned"]  # baseline finish: actual else early, or its planned finish
 DurationBasis = Literal["remaining", "original"]
 CompareSection = Literal["activities", "relationships"]
-DcmaCheck = Literal["logic", "leads", "lags", "long_lags", "fs_links", "hard_constraints", "high_float",
+DcmaCheck = Literal["logic", "logic_density", "leads", "lags", "long_lags", "fs_links", "hard_constraints", "high_float",
                     "negative_float", "high_duration", "invalid_dates", "resources", "missed_tasks",
                     "critical_path_test", "cpli", "bei"]
 ThresholdCheck = Literal[tuple(c for c in get_args(DcmaCheck) if c != "critical_path_test")]  # not run: no threshold
@@ -280,6 +282,7 @@ assert set(ACT_HOURS) <= set(ACT_FIELDS)
 # rule: max = pct at most the threshold, min = pct at least, ratio = value at least; threshold None = report only.
 DCMA_CHECKS: dict[str, tuple] = {
     "logic": (5, "max", "logic_target", None, "check_logic"),
+    "logic_density": (1.5, "ratio", None, None, None),  # not a P6 check: links with an open successor / open activities
     "leads": (0, "max", "negative_lag_target", None, "check_negative_lag"),
     "lags": (5, "max", "lag_target", None, "check_lag"),
     "long_lags": (None, "max", "long_lags_target", "long_lags_constraint", "check_long_lags"),
@@ -296,6 +299,18 @@ DCMA_CHECKS: dict[str, tuple] = {
     "bei": (0.95, "ratio", "bei_target", None, "check_bei"),
 }
 assert list(DCMA_CHECKS) == list(get_args(DcmaCheck))
+# Checks of p6_health_check checks left out of summary, score, dcma_failed and the dashboard's DCMA table (those
+# stay the DCMA 14): logic_density counts in weighted_score only.
+HC_UNSCORED = ("logic_density",)
+# weighted_score: weight per check; pass earns the weight, warn HC_WARN_SHARE of it, fail 0, not evaluated is left
+# out. The weights add up to 110, so points = earned / weight of the evaluated checks x 100.
+HC_WEIGHTS = {"logic_density": 20, "logic": 20, "critical_path_test": 15, "negative_float": 15, "high_float": 10,
+              "hard_constraints": 10, "high_duration": 5, "leads": 5, "lags": 5, "fs_links": 5}
+HC_WARN_SHARE = 0.5
+HC_WARN_MAX = 2.0  # an "at most" check that fails warns while its % is at most this many times the threshold
+HC_WARN_MIN = 0.9  # an "at least" check that fails warns while its % or value is at least this share of it
+HC_GRADES = (("A", 90.0), ("B", 80.0), ("C", 70.0), ("D", 55.0))  # grade when points are at least; F below
+assert set(HC_WEIGHTS) <= set(DCMA_CHECKS) and set(HC_UNSCORED) <= set(DCMA_CHECKS)
 
 # built-in lines the user kept plus their own ones (Settings, Instructions page), fixed at startup
 INSTRUCTIONS = _instructions.build(STARTUP.raw)
@@ -1209,22 +1224,39 @@ class _Cal:
         return sum(1 for i in range((d2 - d1).days + 1) if self.is_workday(d1 + timedelta(days=i)))
 
     def add_work_hours(self, start: datetime, hours: float) -> datetime:
-        """End of `hours` of work begun at start; lands on a shift end when it fills it (P6 finish)."""
+        """End of `hours` of work begun at start; lands on a shift end when it fills it (P6 finish). The start day
+        is walked shift by shift from start, the following whole days are skipped through the cumulative index
+        (_cum_secs: same result as walking them), the last day is walked shift by shift."""
         if hours < 0:
             raise ValueError("hours must be 0 or more")
         left = round(hours * 60)
         if not left:
             return start
         d, t0 = start.date(), (start - datetime.combine(start.date(), time())).total_seconds() / 60
-        for _ in range(CAL_SCAN_DAYS):
-            for s, f in self.shifts(d):
-                lo = max(s, t0)
-                if f > lo:
-                    if left <= f - lo:
-                        return datetime.combine(d, time()) + timedelta(minutes=lo + left)
-                    left -= f - lo
-            d, t0 = d + timedelta(days=1), 0
-        raise ValueError(f"calendar {self.name!r} has no working time within {CAL_SCAN_DAYS} days")
+        for s, f in self.shifts(d):
+            lo = max(s, t0)
+            if f > lo:
+                if left <= f - lo:
+                    return datetime.combine(d, time()) + timedelta(minutes=lo + left)
+                left -= f - lo
+        o, span, need = d.toordinal() + 1, 32, left * 60  # working seconds still to place, from the next day
+        while True:
+            self._cum_secs(date.fromordinal(o))  # both ends in one index (a rebuild keeps the earlier range)
+            self._cum_secs(date.fromordinal(o + span))
+            c0, cum = self._cum
+            base = cum[o - c0]
+            if cum[o + span - c0] - base >= need:
+                break
+            if span >= CAL_SCAN_DAYS:
+                raise ValueError(f"calendar {self.name!r} has no working time within {CAL_SCAN_DAYS} days")
+            span = min(span * 4, CAL_SCAN_DAYS)
+        i = bisect.bisect_left(cum, base + need, o - c0 + 1, o + span - c0 + 1)  # the day that fills it
+        day, left = date.fromordinal(c0 + i - 1), (base + need - cum[i - 1]) / 60
+        for s, f in self.shifts(day):
+            if left <= f - s:
+                return datetime.combine(day, time()) + timedelta(minutes=s + left)
+            left -= f - s
+        raise AssertionError("cumulative index out of step with the shifts")  # cannot happen
 
     def subtract_work_hours(self, end: datetime, hours: float) -> datetime:
         """Start of `hours` of work that finish at end; lands on a shift start when it fills it
@@ -2923,6 +2955,10 @@ def _dcma(con, pid: int, bid: Optional[int], cfg: dict, baseline_dates: str, bas
                                         " AND r.pred_type IN ('PR_FS', 'PR_FF')")),
                                     "note": "information only (not in count or pass): start driven only by FF/SF "
                                             "predecessors, finish driving only SS/SF successors; milestones left out"})
+    # logic density: links per open activity (not a P6 check, out of summary and score: see HC_UNSCORED)
+    checks["logic_density"] = _chk(n_olinks, n_open, thr["logic_density"], "ratio",
+                                   value=n_olinks / n_open if n_open else None)
+    checks["logic_density"]["pct"] = None  # a ratio, not a share
     # 2 to 5: relationships whose successor is open
     checks["leads"] = rel("leads", "r.lag_hr_cnt < 0")
     # ladder pairs: SS + FF between the same two activities with the same lag (information only)
@@ -2946,9 +2982,15 @@ def _dcma(con, pid: int, bid: Optional[int], cfg: dict, baseline_dates: str, bas
                           "sample": checks["fs_links"]["sample"]}
     cond = f"t.cstr_type IN {HARD_CSTR}" + (f" OR t.cstr_type2 IN {HARD_CSTR}" if "cstr_type2" in tcols else "")
     checks["hard_constraints"] = act("hard_constraints", op, cond, n_open)
+    def worst(cond: str, order: str) -> Optional[dict]:  # the open activity with the lowest / highest float in days
+        r = con.execute(f"SELECT t.task_code, t.task_name, t.total_float_hr_cnt, {HPD_SQL} {acts}{op} AND ({cond}) "
+                        f"ORDER BY t.total_float_hr_cnt / {HPD_SQL} {order}, t.task_code, t.task_id LIMIT 1",
+                        args).fetchone()
+        return None if r is None else {"task_code": r[0], "task_name": r[1], "total_float_d": _days(r[2], r[3])}
     cond, extra = _limit(lim["high_float"], "t.total_float_hr_cnt", HPD_SQL, "hf", args)
-    checks["high_float"] = act("high_float", op, cond, n_open, **extra)
-    checks["negative_float"] = act("negative_float", op, "t.total_float_hr_cnt < 0", n_open)
+    checks["high_float"] = act("high_float", op, cond, n_open, **extra, worst=worst(cond, "DESC"))
+    checks["negative_float"] = act("negative_float", op, "t.total_float_hr_cnt < 0", n_open,
+                                   worst=worst("t.total_float_hr_cnt < 0", "ASC"))
     col = "t.remain_drtn_hr_cnt" if basis == "remaining" else "t.target_drtn_hr_cnt"
     cond, extra = _limit(lim["high_duration"], col, HPD_SQL, "hd", args)
     checks["high_duration"] = act("high_duration", work, cond, n_work, **extra,
@@ -3014,7 +3056,44 @@ def _dcma(con, pid: int, bid: Optional[int], cfg: dict, baseline_dates: str, bas
 
 
 HcCheck = Literal[tuple(list(get_args(DcmaCheck)) + ["key_dates"])]  # drill-down names: the DCMA 14 + information checks
-HC_NO_ITEMS = {"critical_path_test", "cpli", "bei"}  # project-level values, no item list
+HC_NO_ITEMS = {"logic_density", "critical_path_test", "cpli", "bei"}  # project-level values, no item list
+
+
+def _hc_status(name: str, c: Mapping) -> str:
+    """pass, warn, fail or not_evaluated of one weighted check: a failed check warns inside its band (an "at
+    most" check up to HC_WARN_MAX x its threshold, an "at least" check down to HC_WARN_MIN x it; none for a
+    zero threshold or a check without threshold), compared before rounding."""
+    ok = c.get("pass")
+    if ok is None:
+        return "not_evaluated"
+    if ok:
+        return "pass"
+    rule, thr = DCMA_CHECKS[name][1], c.get("threshold")
+    count, den = c.get("count"), c.get("denominator")
+    if not thr or rule is None:
+        return "fail"
+    if rule == "ratio":
+        v = count / den if count is not None and den else c.get("value")
+        return "warn" if v is not None and v >= HC_WARN_MIN * thr else "fail"
+    if count is None or not den:
+        return "fail"
+    pct = 100 * count / den
+    return "warn" if (pct <= HC_WARN_MAX * thr if rule == "max" else pct >= HC_WARN_MIN * thr) else "fail"
+
+
+def _weighted_score(checks: Mapping) -> dict:
+    """weighted_score of a health check (HC_WEIGHTS): per check weight, status and points earned; points =
+    earned / weight of the evaluated checks x 100 (1 decimal), grade from the points as written."""
+    rows, earned, top = {}, 0.0, 0
+    for name, w in HC_WEIGHTS.items():
+        st = _hc_status(name, checks.get(name) or {})
+        e = None if st == "not_evaluated" else float(w if st == "pass" else w * HC_WARN_SHARE if st == "warn" else 0)
+        if e is not None:
+            earned, top = earned + e, top + w
+        rows[name] = {"weight": w, "status": st, "earned": e}
+    points = round(100 * earned / top, 1) if top else None
+    grade = None if points is None else next((g for g, lo in HC_GRADES if points >= lo), "F")
+    return {"points": points, "grade": grade, "earned": earned, "max": top, "checks": rows}
 HC_TOTALS = ("open_incomplete_activities", "relationships", "open_successor_links", "non_fs_links")
 
 
@@ -3218,7 +3297,17 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
     offset, returned, next_offset, rows} with result (the check) instead of the whole report. A full
     run saves a snapshot for p6_health_check_compare (snapshot.id; save_snapshot=False skips it). The
     earlier top keys stay: no_predecessor, no_successor, hard_constraints, high_float, negative_float
-    {count, sample}; leads_negative_lag, positive_lags, non_fs_links (links whose successor is open)."""
+    {count, sample}; leads_negative_lag, positive_lags, non_fs_links (links whose successor is open).
+    checks.logic_density (after logic): links whose successor is open / open activities, value at least
+    1.5 (not in summary or score, which stay the DCMA 14). negative_float.worst and high_float.worst: the
+    open activity with the lowest / highest total float {task_code, task_name, total_float_d}.
+    weighted_score {points, grade, earned, max, checks {name: {weight, status pass / warn / fail /
+    not_evaluated, earned}}}: logic_density 20, logic 20, critical_path_test 15, negative_float 15,
+    high_float 10, hard_constraints 10, high_duration 5, leads 5, lags 5, fs_links 5; pass = the weight,
+    warn = half (a failed at most check up to 2 x its threshold, a failed at least check down to 0.9 x it;
+    no band for a zero threshold), fail = 0, not evaluated left out; points = earned / weight of the
+    evaluated checks x 100; grade A >= 90, B >= 80, C >= 70, D >= 55, else F. engine_version: the CPM
+    engine of the critical path test."""
     if baseline_dates not in get_args(BaselineDates):
         raise ValueError(f"baseline_dates must be one of {list(get_args(BaselineDates))}")
     if duration_basis not in get_args(DurationBasis):
@@ -3266,13 +3355,15 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
            "non_fs_links": fs["denominator"] - fs["count"],
            **{k: {"count": checks[k]["count"], "sample": checks[k]["sample"]}
               for k in ("hard_constraints", "high_float", "negative_float")}, "checks": checks,
-           "summary": {k: [c for c, v in checks.items() if v["pass"] is ok] for k, ok in
+           "summary": {k: [c for c, v in checks.items() if v["pass"] is ok and c not in HC_UNSCORED] for k, ok in
                        (("failed", False), ("passed", True), ("not_evaluated", None))},
            "threshold_source": cfg["source"]}
     sm = res["summary"]
     ev = len(sm["passed"]) + len(sm["failed"])
     res["score"] = {"passed": len(sm["passed"]), "failed": len(sm["failed"]), "not_evaluated": len(sm["not_evaluated"]),
                     "evaluated": ev, "pct_passed": round(100 * len(sm["passed"]) / ev, 1) if ev else None}
+    res["weighted_score"] = _weighted_score(checks)
+    res["engine_version"] = ENGINE_VERSION
     if thresholds:
         res["thresholds_overridden"] = sorted(thresholds)
     if cfg["notes"]:
@@ -3294,7 +3385,8 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
                            "open_successor_links": fs["denominator"], "non_fs_links": res["non_fs_links"]},
                 "checks": {k: {f: v.get(f) for f in ("count", "denominator", "pct", "value", "threshold", "pass")}
                            for k, v in checks.items()},
-                "items": keys}
+                "weighted_score": res["weighted_score"],
+                "engine_version": ENGINE_VERSION, "items": keys}
         try:
             _hc_snapshot_save(snap)
             res["snapshot"] = {"id": snap["id"]}
@@ -3325,7 +3417,9 @@ def p6_health_check_compare(project: ProjectId, before: str = "previous", after:
     open successor, non-FS links {before, after, delta}. checks: per check count, pct and value
     {before, after, delta}, pass {before, after}, and the items that entered and left it (activity IDs or
     links 'pred -> succ type', first 50 of each, with entered_count / left_count). changed: checks whose
-    count moved. warnings: parameters that differ (baseline, thresholds...). snapshots: the project's
+    count moved. weighted_score: points {before, after, delta} and grade {before, after} (null for a
+    snapshot saved before weighted scores). engine_version {before, after}. warnings: parameters that
+    differ (baseline, thresholds...), and the engine version when it differs. snapshots: the project's
     snapshots of this database (id, ts, last_schedule_date)."""
     con = _connect()
     _project_id(con, project)
@@ -3362,8 +3456,18 @@ def p6_health_check_compare(project: ProjectId, before: str = "previous", after:
         warn.append(f"different databases: {a.get('db')} -> {b.get('db')}")
     if b.get("stale") or a.get("stale"):
         warn.append("a snapshot was taken while the project was edited since its last F9")
+    ev = {"before": a.get("engine_version"), "after": b.get("engine_version")}
+    if ev["before"] != ev["after"]:
+        warn.append(f"engine_version differs: {ev['before']} -> {ev['after']}" + (
+            " (a snapshot saved before engine versions were recorded)" if None in ev.values() else "")
+            + ": the critical path test may differ for that reason alone")
+    wa, wb = a.get("weighted_score") or {}, b.get("weighted_score") or {}
+    weighted = {"points": {"before": wa.get("points"), "after": wb.get("points"),
+                           "delta": delta(wa.get("points"), wb.get("points"))},
+                "grade": {"before": wa.get("grade"), "after": wb.get("grade")}}
     return {"project": project, "before": meta(a), "after": meta(b), "totals": totals, "checks": checks,
             "changed": [k for k, v in checks.items() if (v.get("count") or {}).get("delta")],
+            "weighted_score": weighted, "engine_version": ev,
             "warnings": warn, "snapshots": [meta(s) for s in snaps[-20:]]}
 
 
@@ -3806,6 +3910,62 @@ def _cstr_sources(net: _Net, d: dict) -> list[dict]:
              "date": c["cstr_date"]} for c in net.cstr_hits(d, LATE_CSTR, late=True)]
 
 
+def _float_walk(net: _Net, d0: dict, max_depth: int = 500) -> dict:
+    """Where the late dates of the open activity d0 come from (p6_float_origin, p6_milestones,
+    p6_update_integrity): {level, via (task_id -> [(controlling link, gap)]), sources, cut, origin, own
+    (its own constraints and whether they control), explanation}."""
+    level, via, order, i, sources, cut = {d0["task_id"]: 0}, {}, [d0["task_id"]], 0, [], False
+    while i < len(order):
+        n = order[i]
+        i += 1
+        d = net.t[n]
+        ctl = [(lk, g) for lk in net.by_pred.get(n, []) for g in (net.gap(lk, late=True),)
+               if g is not None and abs(g) <= GAP_TOL_H]  # completed successors too: P6 places them (retained logic)
+        own = _cstr_sources(net, d)
+        sources += own
+        if not ctl and not own:
+            sources += _late_origin(net, d)
+        for lk, g in ctl:
+            via.setdefault(n, []).append((lk, g))
+            if lk["succ"] not in level:
+                if level[n] + 1 > max_depth:
+                    cut = True
+                    continue
+                level[lk["succ"]] = level[n] + 1
+                order.append(lk["succ"])
+    kinds = sorted({s["type"] for s in sources})
+    origin = {"type": kinds[0] if len(kinds) == 1 else "mixed" if kinds else "none", "task_code": None,
+              "task_name": None, "date": None, "sources": sources}
+    if len(sources) == 1:
+        origin.update({k: v for k, v in sources[0].items() if k != "type"})
+    code = d0["task_code"]
+    own = [{"cstr_type": ty, "cstr_label": _cstr_label(ty), "cstr_date": dt,
+            "controls": any(s["type"] == "activity_constraint" and s["task_code"] == code and s["cstr_type"] == ty
+                            for s in sources)}
+           for ty, dt in ((d0["cstr_type"], d0["cstr_date"]), (d0["cstr_type2"], d0["cstr_date2"])) if ty]
+    path = [code]
+    n = d0["task_id"]
+    while via.get(n):
+        lk, _ = sorted(via[n], key=lambda e: net.t[e[0]["succ"]]["task_code"])[0]
+        nxt = net.t[lk["succ"]]
+        path.append(f"{REL_TYPES_REV.get(lk['type'])} {_days(lk['lag'], net.lag_hpd(net.t[n], nxt)):g} d -> {nxt['task_code']}")
+        n = lk["succ"]
+        if len(path) > 12:
+            path.append("...")
+            break
+    words = {"activity_constraint": "a constraint", "project_must_finish": "the project must finish date "
+             + str(net.prj["plan_end_date"]), "open_end": "the project finish (open end)", "unexplained": "an unexplained source"}
+    expl = (f"Total float {_days(d0['total_float_hr_cnt'], d0['hpd'])} d of {code} comes from "
+            + (" and ".join(sorted({words[s['type']] + (f" ({s['cstr_label']} {s['cstr_date']} on {s['task_code']})"
+                                                         if s['type'] == 'activity_constraint' else '') for s in sources}))
+               or "nothing found") + ", through " + " ".join(path) + ".")
+    for c in own:
+        expl += (f" Its own constraint {c['cstr_label']} {c['cstr_date']} "
+                 + ("controls its late dates." if c["controls"] else "does NOT control its late dates."))
+    return {"level": level, "via": via, "sources": sources, "cut": cut, "origin": origin, "own": own,
+            "explanation": expl}
+
+
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annotated[int, Field(ge=1)] = 500,
                     offset: Offset = 0, limit: Limit = 100) -> dict:
@@ -3831,25 +3991,8 @@ def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annota
     d0 = net.task(task_code)
     if d0["status_code"] == "TK_Complete" or d0["lf"] is None:
         raise ValueError(f"{task_code} is completed or has no late dates: no float to explain")
-    level, via, order, i, sources, cut = {d0["task_id"]: 0}, {}, [d0["task_id"]], 0, [], False
-    while i < len(order):
-        n = order[i]
-        i += 1
-        d = net.t[n]
-        ctl = [(lk, g) for lk in net.by_pred.get(n, []) for g in (net.gap(lk, late=True),)
-               if g is not None and abs(g) <= GAP_TOL_H]  # completed successors too: P6 places them (retained logic)
-        own = _cstr_sources(net, d)
-        sources += own
-        if not ctl and not own:
-            sources += _late_origin(net, d)
-        for lk, g in ctl:
-            via.setdefault(n, []).append((lk, g))
-            if lk["succ"] not in level:
-                if level[n] + 1 > max_depth:
-                    cut = True
-                    continue
-                level[lk["succ"]] = level[n] + 1
-                order.append(lk["succ"])
+    w = _float_walk(net, d0, max_depth)
+    level, via, origin, own, expl, cut = w["level"], w["via"], w["origin"], w["own"], w["explanation"], w["cut"]
     rows = []
     for tid, lv in level.items():
         row = {"level": lv, **net.act_view(net.t[tid], late=True)}
@@ -3857,34 +4000,6 @@ def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annota
         row["controlled_by"] = [net.link_view(lk, g, "succ") for lk, g in vs]  # [] at the source
         rows.append(row)
     rows.sort(key=lambda r: (r["level"], r["task_code"]))
-    kinds = sorted({s["type"] for s in sources})
-    origin = {"type": kinds[0] if len(kinds) == 1 else "mixed" if kinds else "none", "task_code": None,
-              "task_name": None, "date": None, "sources": sources}
-    if len(sources) == 1:
-        origin.update({k: v for k, v in sources[0].items() if k != "type"})
-    own = [{"cstr_type": ty, "cstr_label": _cstr_label(ty), "cstr_date": dt,
-            "controls": any(s["type"] == "activity_constraint" and s["task_code"] == task_code and s["cstr_type"] == ty
-                            for s in sources)}
-           for ty, dt in ((d0["cstr_type"], d0["cstr_date"]), (d0["cstr_type2"], d0["cstr_date2"])) if ty]
-    path = [d0["task_code"]]
-    n = d0["task_id"]
-    while via.get(n):
-        lk, _ = sorted(via[n], key=lambda e: net.t[e[0]["succ"]]["task_code"])[0]
-        nxt = net.t[lk["succ"]]
-        path.append(f"{REL_TYPES_REV.get(lk['type'])} {_days(lk['lag'], net.lag_hpd(net.t[n], nxt)):g} d -> {nxt['task_code']}")
-        n = lk["succ"]
-        if len(path) > 12:
-            path.append("...")
-            break
-    words = {"activity_constraint": "a constraint", "project_must_finish": "the project must finish date "
-             + str(net.prj["plan_end_date"]), "open_end": "the project finish (open end)", "unexplained": "an unexplained source"}
-    expl = (f"Total float {_days(d0['total_float_hr_cnt'], d0['hpd'])} d of {task_code} comes from "
-            + (" and ".join(sorted({words[s['type']] + (f" ({s['cstr_label']} {s['cstr_date']} on {s['task_code']})"
-                                                         if s['type'] == 'activity_constraint' else '') for s in sources}))
-               or "nothing found") + ", through " + " ".join(path) + ".")
-    for c in own:
-        expl += (f" Its own constraint {c['cstr_label']} {c['cstr_date']} "
-                 + ("controls its late dates." if c["controls"] else "does NOT control its late dates."))
     gaps = sorted(((lk, net.gap(lk, late=True)) for lk in net.by_pred.get(d0["task_id"], [])),
                   key=lambda e: (e[1] is None, e[1] or 0))
     res = _slice(rows, offset, limit)
@@ -4066,6 +4181,9 @@ def p6_redundant_links(project: ProjectId, categories: Optional[list[RedundantCa
 CPM_TOL = timedelta(minutes=1)  # dates equal within a minute
 CPM_TF_TOL_H = 0.05  # total float equal within 3 minutes
 CPM_TRUST = 0.99  # match rate on open activities needed to trust what-if results and the critical path test
+# Version of the engine's date, calendar and float semantics: bump it whenever a rule above changes what the
+# engine computes (returned by p6_cpm_validate, p6_schedule_whatif, p6_schedule_risk, stored in health snapshots)
+ENGINE_VERSION = 1
 START_CSTR = {"CS_MSOA", "CS_MSO", "CS_MANDSTART"}  # bound the early start
 FIN_CSTR = {"CS_MEOA", "CS_MEO", "CS_MANDFIN"}  # bound the early finish
 LATE_START_CSTR = {"CS_MSOB", "CS_MSO", "CS_MANDSTART"}
@@ -4160,13 +4278,14 @@ class _Cpm:
             return "mandatory finish constraint"
         return None
 
-    def rem(self, d: dict, es: Optional[datetime] = None) -> float:
+    def rem(self, d: dict, es: Optional[datetime] = None, h: Optional[float] = None) -> float:
+        """Remaining working hours the passes use (h: hours replacing the stored ones, Monte Carlo)."""
         if d["status_code"] == "TK_Complete" or d["task_type"] in ("TT_Mile", "TT_FinMile"):
             return 0.0
         if (self.opts.get("sched_use_expect_end_flag") == "Y" and d.get("expect_end_date") and es is not None
                 and d["cal"] is not None and not d["cal"].error):
             return max(0.0, d["cal"].work_hours(es, d["expect_end_date"]))
-        return d["rem"]
+        return d["rem"] if h is None else h
 
     def order(self) -> tuple[list[int], dict, dict]:
         by_s, by_p = {}, {}
@@ -4191,36 +4310,68 @@ class _Cpm:
     # ------------------------------------------------------------------ passes
     def run(self) -> dict[int, dict]:
         """{task_id: {es, ef, ls, lf, tf_h}} of every activity of the project."""
+        plan = self.plan()
+        res = self.forward(plan)
+        self.backward(plan, res)
+        return res
+
+    def plan(self) -> dict:
+        """What every pass over this network shares: activity order, links of the project by successor and by
+        predecessor with their lag calendar and effective lag (constant: it depends on actual dates and the
+        data date only), links to other projects by own activity."""
         if self.dd is None:
             raise ValueError("The project has no data date (PROJECT.last_recalc_date): schedule it once in P6")
-        order, by_s, by_p = self.order()
-        T, dd = self.t, self.dd
-        retained = self.opts.get("sched_retained_logic", "Y") != "N"
+        order, by_s, _ = self.order()
+        T = self.t
+        by_s2, by_p2 = {}, {}
+        for n, lks in by_s.items():
+            for lk in lks:
+                p = T[lk["pred"]]
+                lc = self.lag_cal(p["cal"], T[n]["cal"])
+                e = (lk, lc, self.eff_lag(lk, p, lc))
+                by_s2.setdefault(n, []).append(e)
+                by_p2.setdefault(lk["pred"], []).append(e)
         ext_p, ext_s = {}, {}  # links to other projects by own activity
         for lk in self.ext_pred:
             ext_p.setdefault(lk["succ"], []).append(lk)
         for lk in self.ext_succ:
             ext_s.setdefault(lk["pred"], []).append(lk)
-        res: dict[int, dict] = {}
-        for n in order:
+        return {"order": order, "by_s": by_s2, "by_p": by_p2, "ext_p": ext_p, "ext_s": ext_s}
+
+    def forward(self, plan: dict, rem: Optional[Mapping[int, float]] = None, drivers: Optional[dict] = None,
+                fixed: Optional[tuple] = None) -> dict[int, dict]:
+        """Early dates {task_id: {es, ef}}. rem: remaining hours by task_id replacing the stored ones (Monte
+        Carlo). drivers: filled with each activity's bounds (task_id -> entry; ties() gives the predecessors
+        whose link sets its dates). fixed: (results kept as they are, the activities to compute, in network
+        order)."""
+        T, dd = self.t, self.dd
+        retained = self.opts.get("sched_retained_logic", "Y") != "N"
+        res: dict[int, dict] = dict(fixed[0]) if fixed else {}
+        for n in (fixed[1] if fixed else plan["order"]):
             d = T[n]
             cal = d["cal"] if d["cal"] is not None and not d["cal"].error else None
             nws = (lambda x: cal.next_work_start(x)) if cal else (lambda x: x)
-            sb, fb = [], []
-            for lk in by_s.get(n, []):
+            sb, fb, sp, fp = [], [], [], []  # start / finish bounds and their predecessor (None: not a link)
+            for lk, lc, eff in plan["by_s"].get(n, ()):
                 p, r = T[lk["pred"]], res[lk["pred"]]
                 a = r["ef"] if LINK_FROM[lk["type"]] == "f" else r["es"]
-                lc = self.lag_cal(p["cal"], d["cal"])
                 b = a if (p["status_code"] == "TK_Complete" and d["status_code"] == "TK_Complete") \
-                    else self.shift(lc, a, self.eff_lag(lk, p, lc))
-                (sb if LINK_TO[lk["type"]] == "s" else fb).append(b)
-            for lk in ext_p.get(n, ()):
+                    else self.shift(lc, a, eff)
+                if LINK_TO[lk["type"]] == "s":
+                    sb.append(b)
+                    sp.append(lk["pred"])
+                else:
+                    fb.append(b)
+                    fp.append(lk["pred"])
+            for lk in plan["ext_p"].get(n, ()):
                 if lk["es"] or lk["ef"]:
                     a = lk["ef"] if LINK_FROM[lk["type"]] == "f" else lk["es"]
                     if a is not None:
-                        (sb if LINK_TO[lk["type"]] == "s" else fb).append(self.shift(self.lag_cal(lk["cal"], d["cal"]), a, lk["lag"]))
+                        b = self.shift(self.lag_cal(lk["cal"], d["cal"]), a, lk["lag"])
+                        (sb if LINK_TO[lk["type"]] == "s" else fb).append(b)
+                        (sp if LINK_TO[lk["type"]] == "s" else fp).append(None)
             if d["status_code"] == "TK_Active" and not retained:
-                sb, fb = [], []  # progress override: an in-progress activity ignores its predecessors
+                sb, fb, sp, fp = [], [], [], []  # progress override: an in-progress activity ignores its predecessors
             mand = None
             for ty, dt in ((d["cstr_type"], d["cstr_date"]), (d["cstr_type2"], d["cstr_date2"])):
                 if dt is None or d["status_code"] == "TK_Complete":
@@ -4229,43 +4380,62 @@ class _Cpm:
                     mand = (ty, dt)
                 elif ty in START_CSTR:
                     sb.append(dt)
+                    sp.append(None)
                 elif ty in FIN_CSTR:
                     fb.append(dt)
-            if d["status_code"] == "TK_Complete":
+                    fp.append(None)
+            if d["status_code"] == "TK_Complete" or d["task_type"] == "TT_FinMile":
                 x = max([dd] + sb + fb)
                 res[n] = {"es": x, "ef": x}
-                continue
-            if d["task_type"] == "TT_FinMile":
-                x = max([dd] + sb + fb)
-                res[n] = {"es": x, "ef": x}
+                if drivers is not None:
+                    drivers[n] = (x, sb + fb, sp + fp, None)
                 continue
             st = nws(max([dd] + sb))
-            rem = self.rem(d, st)
-            fin = self.shift(cal, st, rem)
-            if fb and max(fb) > fin:
+            rh = self.rem(d, st, None if rem is None else rem.get(n))
+            fin = self.shift(cal, st, rh)
+            by_fin = bool(fb) and max(fb) > fin
+            if by_fin:
                 fin = max(fb)
-                st = self.shift(cal, fin, -rem) if rem else fin
+                st = self.shift(cal, fin, -rh) if rh else fin
             if mand:
-                st, fin = (nws(mand[1]), self.shift(cal, nws(mand[1]), rem)) if mand[0] == "CS_MANDSTART" else \
-                    ((self.shift(cal, mand[1], -rem) if rem else mand[1]), mand[1])
+                st, fin = (nws(mand[1]), self.shift(cal, nws(mand[1]), rh)) if mand[0] == "CS_MANDSTART" else \
+                    ((self.shift(cal, mand[1], -rh) if rh else mand[1]), mand[1])
             if d["task_type"] == "TT_Mile":
                 fin = st
             res[n] = {"es": st, "ef": fin}
-        # backward
-        project_end = max((r["ef"] for i, r in res.items() if T[i]["task_type"] not in ("TT_LOE", "TT_WBS")), default=dd)
+            if drivers is not None:  # a mandatory constraint sets the dates: no driving link
+                drivers[n] = None if mand else (fin, fb, fp, None) if by_fin else (st, sb, sp, cal)
+        return res
+
+    @staticmethod
+    def ties(entry: Optional[tuple]) -> tuple:
+        """Predecessors (task_ids of the project) whose link sets an activity's dates, from its forward() drivers
+        entry (date, bounds, their predecessors, calendar of a start): a bound within a minute of the date, or for
+        a start one with no working time before it (next work start = the start). Empty when the data date, a
+        constraint, a link to another project or nothing sets them."""
+        if not entry:
+            return ()
+        ref, bounds, preds, cal = entry
+        return tuple(q for b, q in zip(bounds, preds) if q is not None and (
+            abs(b - ref) <= CPM_TOL or (cal is not None and cal.next_work_start(b) == ref)))
+
+    def backward(self, plan: dict, res: dict[int, dict]) -> None:
+        """Late dates and total float of every activity, added to the forward pass results res."""
+        T = self.t
+        project_end = max((r["ef"] for i, r in res.items() if T[i]["task_type"] not in ("TT_LOE", "TT_WBS")),
+                          default=self.dd)
         use_must = self.must is not None and self.opts.get("sched_use_project_end_date_for_float", "Y") != "N"
         open_lf = self.must if use_must else project_end
-        for n in reversed(order):
+        for n in reversed(plan["order"]):
             d, r = T[n], res[n]
             cal = d["cal"] if d["cal"] is not None and not d["cal"].error else None
             rem = self.rem(d, r["es"])
             lsb, lfb = [], []
-            for lk in by_p.get(n, []):
-                q, rq = T[lk["succ"]], res[lk["succ"]]
+            for lk, lc, eff in plan["by_p"].get(n, ()):
+                rq = res[lk["succ"]]
                 a = rq["ls"] if LINK_TO[lk["type"]] == "s" else rq["lf"]
-                lc = self.lag_cal(d["cal"], q["cal"])
-                (lfb if LINK_FROM[lk["type"]] == "f" else lsb).append(self.shift(lc, a, -self.eff_lag(lk, d, lc)))
-            for lk in ext_s.get(n, ()):
+                (lfb if LINK_FROM[lk["type"]] == "f" else lsb).append(self.shift(lc, a, -eff))
+            for lk in plan["ext_s"].get(n, ()):
                 a = lk["ls"] if LINK_TO[lk["type"]] == "s" else lk["lf"]
                 if a is not None:
                     lc = self.lag_cal(d["cal"], lk["cal"])
@@ -4306,7 +4476,6 @@ class _Cpm:
             r["tf_h"] = None if d["status_code"] == "TK_Complete" else (
                 st if ft == "FT_SF" else min(st, fin) if ft not in ("FT_FF", "FT_SF") else fin)
         self._wbs_spans(res)
-        return res
 
     def _wbs_spans(self, res: dict) -> None:
         """WBS summary activities span the activities of their own WBS node (approximation: child
@@ -4329,6 +4498,10 @@ class _Cpm:
         ends = [d for d in own if d["task_id"] not in succ and d["status_code"] != "TK_Complete"] or own
         fm = max(ends, key=lambda d: (res[d["task_id"]]["ef"], d["task_type"] == "TT_FinMile", d["task_code"]), default=None)
         return fm, max((res[d["task_id"]]["ef"] for d in own), default=self.dd)
+
+
+CPM_DIFF_LABELS = {"es": "early start", "ef": "early finish", "ls": "late start", "lf": "late finish",
+                   "tf_d": "total float (d)"}  # differences_text of p6_cpm_validate rows
 
 
 def _cpm_compare(cpm: _Cpm, res: dict, stale: bool, never: bool = False) -> dict:
@@ -4389,7 +4562,10 @@ def _cpm_compare(cpm: _Cpm, res: dict, stale: bool, never: bool = False) -> dict
         else:
             cause = "unknown (resource leveling, or an option this engine does not model)"
         rows.append({"task_code": d["task_code"], "task_name": d["task_name"], "task_type": d["task_type"],
-                     "status_code": d["status_code"], "differences": bad, "probable_cause": cause})
+                     "status_code": d["status_code"], "differences": bad,
+                     "differences_text": "; ".join(f"{CPM_DIFF_LABELS[k]}: stored {v['stored']}, engine {v['engine']}"
+                                                   for k, v in bad.items()),
+                     "probable_cause": cause})
     rows.sort(key=lambda r: (r["status_code"] == "TK_Complete", r["task_code"]))
     rate = lambda g: None if not stats[g] else round(1 - stats[g + "_bad"] / stats[g], 4)  # noqa: E731
     return {"rows": rows, "match_rate": rate("open"), "match_rate_completed": rate("completed"),
@@ -4405,8 +4581,9 @@ def p6_cpm_validate(project: ProjectId, offset: Offset = 0, limit: Limit = 50) -
     early dates; their late dates, unused by float, are counted apart). match_rate = share of open
     activities identical on all five (dates within a minute, float within 3 minutes); trusted when it
     is at least 0.99 (p6_schedule_whatif and the DCMA critical path test rely on it). Page of
-    mismatched activities: differences (stored, engine) and probable_cause. rules: what the engine
-    models. Read only."""
+    mismatched activities: differences (stored, engine), differences_text (the same in words) and
+    probable_cause. rules: what the engine models; engine_version: version of its date, calendar and
+    float rules. Read only."""
     con = _connect()
     pid = _project_id(con, project)
     con.execute("BEGIN")
@@ -4428,7 +4605,7 @@ def p6_cpm_validate(project: ProjectId, offset: Offset = 0, limit: Limit = 50) -
                                                       "sched_lag_early_start_flag", "sched_calendar_on_relationship_lag",
                                                       "sched_float_type", "sched_use_project_end_date_for_float",
                                                       "sched_use_expect_end_flag", "sched_open_critical_flag")},
-               seconds=secs, schedule_state=state,
+               seconds=secs, schedule_state=state, engine_version=ENGINE_VERSION,
                rules="retained logic placing every status (lag between two completed activities ignored), lag elapsed "
                      "before the data date dropped, calendars per activity, lag rule calendar, must finish date for open "
                      "ends, total float per sched_float_type; LOE, WBS summary, ALAP approximated; leveling not modelled")
@@ -4573,7 +4750,7 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     threshold (total float <= 0 h when the project uses the longest path), became_critical (count and up
     to 50 rows by float after) and no_longer_critical; page of changed activities (early dates or
     total float moved by more than a minute), largest finish change first. engine: match rate of the
-    unchanged network against the F9 (trusted at 0.99). Changes to make for real: the write tools,
+    unchanged network against the F9 (trusted at 0.99); engine_version. Changes to make for real: the write tools,
     then F9 in P6."""
     if compare_to not in get_args(CompareTo):
         raise ValueError("compare_to must be current or engine")
@@ -4663,9 +4840,335 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
                milestones=ms, float_change=float_change,
                engine={"match_rate": chk["match_rate"], "trusted": chk["match_rate"] is not None
                                       and chk["match_rate"] >= CPM_TRUST, "open_mismatched": chk["counts"]["open_mismatched"]},
-               schedule_state=state, note="In memory only: nothing was written. "
+               engine_version=ENGINE_VERSION, schedule_state=state, note="In memory only: nothing was written. "
                + ("" if compare_to == "engine" else "Before = P6's last F9; with an engine mismatch, compare_to='engine' "
                                                     "isolates the edits."))
+    return out
+
+
+# ----------------------------------------------------------------- schedule risk (Monte Carlo on the CPM engine)
+
+RISK_DEFAULT = (85.0, 100.0, 135.0)  # triangular min, mode, max in % of the remaining duration
+RISK_ITERATIONS = (100, 5000)  # iterations asked are clamped to this range
+RISK_WORK = 1_500_000  # at most iterations x activities recomputed per iteration (a run stays near 30 s)
+RISK_SOURCES = ("udf", "task", "code", "wbs", "default")  # where an activity's range comes from, by precedence
+RISK_CAVEAT = ("An estimate built on assumed duration ranges, not a forecast: each open activity's remaining duration "
+               "is drawn on its own (no correlation between activities is modelled), discrete risk events, resource "
+               "limits and changes of logic are not modelled, and the network, calendars and constraints are those of "
+               "the last F9.")
+
+
+class RiskPcts(TypedDict):
+    """A triangular range in % of the remaining duration: 0 <= min_pct <= mode_pct <= max_pct (100 = unchanged)."""
+    min_pct: float
+    mode_pct: float
+    max_pct: float
+
+
+class RiskRange(RiskPcts, total=False):
+    """A range for some activities, one selector: task_code (an Activity ID), wbs (a WBS code, full or relative
+    to the project node: every activity below it) or code_type with code_value (activities with that activity
+    code value or one of its child codes)."""
+    task_code: str
+    wbs: str
+    code_type: str
+    code_value: str
+
+
+RiskRanges = Annotated[list[RiskRange], Field(description="Ranges by Activity ID, WBS or activity code value.")]
+RiskIterations = Annotated[int, Field(description="Iterations: clamped to 100..5000, then to the network size cap.")]
+
+
+def _risk_pcts(item: Any, where: str) -> tuple[float, float, float]:
+    try:
+        v = tuple(float(item[k]) for k in ("min_pct", "mode_pct", "max_pct"))
+    except (KeyError, TypeError, ValueError):
+        raise ValueError(f"{where}: min_pct, mode_pct and max_pct are required numbers") from None
+    if not all(math.isfinite(x) for x in v) or not 0 <= v[0] <= v[1] <= v[2]:
+        raise ValueError(f"{where}: need 0 <= min_pct <= mode_pct <= max_pct (percent of the remaining duration)")
+    return v
+
+
+def _risk_ranges(con, pid: int, cpm: _Cpm, ranges: Optional[Sequence]) -> tuple[dict[int, tuple], list[dict]]:
+    """({task_id: (source, pcts, range index)} by precedence task > code > wbs (deepest node, then the earlier
+    range), the ranges as understood with the activities each one matches)."""
+    if ranges is None:
+        return {}, []
+    if not isinstance(ranges, (list, tuple)):
+        raise ValueError("ranges: a list of ranges")
+    keys, nodes, seen = set(RiskRange.__annotations__), None, set()
+    hits: dict[int, list] = {}  # task_id -> [(rank, index, source, pcts)]
+    echo = []
+    for i, r in enumerate(ranges):
+        where = f"ranges[{i}]"
+        if not isinstance(r, Mapping):
+            raise ValueError(f"{where}: an object with min_pct, mode_pct, max_pct and one selector")
+        if set(r) - keys:
+            raise ValueError(f"{where}: unknown keys {sorted(set(r) - keys)}; keys: {sorted(keys)}")
+        sel = [k for k in ("task_code", "wbs", "code_type") if r.get(k)]
+        if len(sel) != 1:
+            raise ValueError(f"{where}: give exactly one of task_code, wbs or code_type (with code_value)")
+        pcts = _risk_pcts(r, where)
+        if sel[0] == "task_code":
+            code = str(r["task_code"])
+            if code not in cpm.code:
+                raise ValueError(f"{where}: activity {code} not found in project {cpm.prj['proj_short_name']}")
+            if code in seen:
+                raise ValueError(f"{where}: activity {code} has two ranges")
+            seen.add(code)
+            ids, rank, src = {cpm.code[code]}, (0, 0), "task"
+        elif sel[0] == "wbs":
+            sep = _name_sep(con, pid)
+            nodes = nodes if nodes is not None else _wbs_tree(con, pid, sep)
+            if not nodes:
+                raise ValueError(f"{where}: the project has no project WBS node")
+            top, p = nodes[0]["wbs_code"], str(r["wbs"]).strip()
+            k = next((j for j, n in enumerate(nodes) if n["wbs_code"] in (p, top + sep + p)), None)
+            if k is None:
+                raise ValueError(f"{where}: WBS code {r['wbs']!r} not found (p6_list_wbs lists the codes)")
+            d0 = nodes[k]["depth"]
+            end = next((j for j in range(k + 1, len(nodes)) if nodes[j]["depth"] <= d0), len(nodes))
+            sub = {n["wbs_id"] for n in nodes[k:end]}
+            ids, rank, src = {t for t, d in cpm.t.items() if d["wbs_id"] in sub}, (2, -d0), "wbs"
+        else:
+            if not r.get("code_value"):
+                raise ValueError(f"{where}: code_type needs code_value")
+            cond, cargs, _ = _code_filter(con, pid, r["code_type"], r["code_value"], True)
+            ids = {x[0] for x in con.execute("SELECT t.task_id FROM TASK t WHERE t.proj_id = ?" + _alive(con, "TASK", "t")
+                                             + cond, [pid, *cargs])}
+            rank, src = (1, 0), "code"
+        for t in ids:
+            hits.setdefault(t, []).append((rank, i, src, pcts))
+        echo.append({**{k: r[k] for k in ("task_code", "wbs", "code_type", "code_value") if r.get(k)},
+                     "min_pct": pcts[0], "mode_pct": pcts[1], "max_pct": pcts[2], "matched": len(ids), "applied": 0})
+    best = {}
+    for t, hs in hits.items():
+        rank, i, src, pcts = min(hs, key=lambda h: (h[0], h[1]))
+        best[t] = (src, pcts, i)
+    return best, echo
+
+
+def _risk_udfs(con, pid: int, labels: Sequence[str]) -> tuple[dict[int, tuple], dict]:
+    """({task_id: (optimistic, most likely, pessimistic) days} of the activities with three valid values,
+    {labels, activities_with_values, invalid}) from three number UDFs of activities."""
+    types = [_udf_type(con, "TASK", u) for u in labels]
+    for y in types:
+        if UDF_VALUE.get(y["logical_data_type"]) != "udf_number":
+            raise ValueError(f"UDF {y['udf_type_label']!r} holds {UDF_KINDS.get(y['logical_data_type'])}, not a number "
+                             "of days")
+    vals: dict[int, list] = {}
+    for k, y in enumerate(types):
+        for tid, v in con.execute("SELECT v.fk_id, v.udf_number FROM UDFVALUE v JOIN TASK t ON t.task_id = v.fk_id "
+                                  "WHERE v.udf_type_id = ? AND t.proj_id = ?" + _alive(con, "UDFVALUE", "v")
+                                  + _alive(con, "TASK", "t"), (y["udf_type_id"], pid)):
+            if _num(v) is not None:
+                vals.setdefault(tid, [None] * 3)[k] = float(v)
+    good = {t: tuple(v) for t, v in vals.items() if None not in v and 0 <= v[0] <= v[1] <= v[2]}
+    return good, {"optimistic": types[0]["udf_type_label"], "most_likely": types[1]["udf_type_label"],
+                  "pessimistic": types[2]["udf_type_label"], "activities_with_values": len(good),
+                  "invalid": sum(1 for t in vals if t not in good)}
+
+
+def _pctl(vals: list, p: float):
+    """Nearest-rank percentile of a sorted list."""
+    return vals[max(0, math.ceil(p / 100 * len(vals)) - 1)]
+
+
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed: int = 1,
+                     milestones: Optional[list[ActivityId]] = None, default_range: Optional[RiskPcts] = None,
+                     ranges: Optional[RiskRanges] = None, udf_optimistic: Optional[str] = None,
+                     udf_most_likely: Optional[str] = None, udf_pessimistic: Optional[str] = None,
+                     offset: Offset = 0, limit: Limit = 50) -> dict:
+    """Monte Carlo schedule risk in memory (the database is never written): each iteration draws the remaining
+    duration of every open activity (not completed, not a milestone, LOE or WBS summary) from a triangular
+    range, then runs the forward pass of this server's CPM engine (the one of p6_schedule_whatif: activity
+    calendars, link types, lag calendar rule, constraints, data date, progress). Ranges in % of the remaining
+    duration: default_range (default min 85, mode 100, max 135), ranges= by task_code, activity code value
+    (code_type + code_value) or WBS (deepest node wins), and udf_optimistic / udf_most_likely /
+    udf_pessimistic (number UDFs in days of the activity calendar, used for the activities that have all
+    three); precedence UDF, task, code, WBS, default. Activities whose duration cannot move (expected finish in
+    use, mandatory finish) are not drawn. iterations (default 1000) are clamped to 100..5000, then to at most
+    1,500,000 activity passes (iterations_requested and iterations_note say so); seed (default 1) makes the
+    run repeatable: the same project, arguments and seed give the same output. deterministic: the engine on
+    unchanged durations (finish, finish_activity and its name, stored_finish = P6's last F9). finish: p10, p50,
+    p80, p90,
+    min, max of the project finish (latest early finish, LOE and WBS summary left out; nearest-rank
+    percentiles). on_time_probability: deterministic_pct (finish at or before the deterministic one) and
+    must_finish_pct (at or before the must finish by date; None without one). p80_buffer_wd: working days of
+    the project calendar from the deterministic finish to p80. milestones (given, else the finish activity
+    and every open constrained activity): deterministic, p10 to p90 of its finish, on_time_pct, constraint,
+    constraint_date, by_constraint_pct (its constrained date, start or finish, at or before the constraint
+    date), p80_buffer_wd (its calendar). histogram: weeks (P6 week start day) with count, pct, cum_pct.
+    Page of drivers by criticality: rows of open activities that sat on the critical path of at least one
+    iteration (the walk back from the project finish along the links that set each start or finish),
+    criticality_index (share of iterations, 0 to 1) and criticality_pct, on_deterministic_path, total_float_d
+    and rem_dur_d (stored), min_d / mode_d / max_d drawn (days of its calendar) and range_source. engine:
+    match rate of the unchanged network against the last F9 and a warning below 0.99 (see p6_cpm_validate);
+    engine_version; distribution: what was drawn; caveat: what this estimate leaves out. A logic loop is
+    refused, as P6 does."""
+    offset, limit = _check_page(offset, limit)
+    try:
+        n_req, seed = int(iterations), int(seed)
+    except (TypeError, ValueError):
+        raise ValueError("iterations and seed must be whole numbers") from None
+    labels = [udf_optimistic, udf_most_likely, udf_pessimistic]
+    if any(labels) and not all(labels):
+        raise ValueError("udf_optimistic, udf_most_likely and udf_pessimistic go together: give all three or none")
+    dflt = RISK_DEFAULT if default_range is None else _risk_pcts(default_range, "default_range")
+    con = _connect()
+    pid = _project_id(con, project)
+    con.execute("BEGIN")  # network, ranges and UDF values from one snapshot
+    try:
+        cpm = _Cpm(con, pid)
+        assign, echo = _risk_ranges(con, pid, cpm, ranges)
+        uvals, uinfo = _risk_udfs(con, pid, labels) if all(labels) else ({}, None)
+        week_day = _prefer(con, "week_start_day_num") or 1
+    finally:
+        con.rollback()
+    state = _schedule_state(con, pid)
+    full = cpm.run()  # refuses a logic loop and a missing data date
+    chk = _cpm_compare(cpm, full, state["stale"])
+    plan, T = cpm.plan(), cpm.t
+    dist: dict[int, tuple] = {}  # task_id -> (low, high, mode hours, source)
+    fixed = 0
+    for n in sorted(T):
+        d = T[n]
+        if d["status_code"] == "TK_Complete" or d["task_type"] in ("TT_LOE", "TT_WBS", "TT_Mile", "TT_FinMile"):
+            continue
+        if cpm.duration_fixed(d):
+            fixed += 1
+            continue
+        hpd = d["hpd"] or 8.0
+        if n in uvals:
+            lo, mo, hi = (x * hpd for x in uvals[n])
+            src = "udf"
+        else:
+            src, pcts, i = assign.get(n, ("default", dflt, None))
+            if i is not None:
+                echo[i]["applied"] += 1
+            lo, mo, hi = (d["rem"] * x / 100 for x in pcts)
+        dist[n] = (lo, hi, mo, src)
+    sampled = list(dist)
+    affected, stack = set(sampled), list(sampled)  # what a draw can move: the drawn activities and their successors
+    while stack:
+        for lk, _, _ in plan["by_p"].get(stack.pop(), ()):
+            if lk["succ"] not in affected:
+                affected.add(lk["succ"])
+                stack.append(lk["succ"])
+    sub = [n for n in plan["order"] if n in affected]
+    cap = max(RISK_ITERATIONS[0], RISK_WORK // max(1, len(sub)))
+    n_iter = min(max(n_req, RISK_ITERATIONS[0]), RISK_ITERATIONS[1], cap)
+    base_drv: dict = {}
+    base = cpm.forward(plan, drivers=base_drv)
+    own = [n for n in T if T[n]["task_type"] not in ("TT_LOE", "TT_WBS")]
+    own_sub = [n for n in own if n in affected]
+    own_fixed = [n for n in own if n not in affected]
+    fixed_end = max((base[n]["ef"] for n in own_fixed), default=cpm.dd)
+    fixed_top = [n for n in own_fixed if base[n]["ef"] >= fixed_end - CPM_TOL]
+    counted = {n for n in own if T[n]["status_code"] != "TK_Complete"}  # open activities get a criticality index
+    fixed_ties: dict[int, tuple] = {}  # ties of the activities no draw moves, worked out once
+
+    def path(res: dict, drv: dict, end: datetime) -> set:
+        """Open activities on the critical path of one pass: from those finishing at the project finish, back
+        along the links that set each one's dates (completed activities end the walk)."""
+        stack = [n for n in own_sub if res[n]["ef"] >= end - CPM_TOL] + (fixed_top if fixed_end >= end - CPM_TOL else [])
+        seen = set(stack)
+        while stack:
+            n = stack.pop()
+            if n in affected:
+                qs = cpm.ties(drv.get(n))
+            else:
+                qs = fixed_ties.get(n)
+                if qs is None:
+                    qs = fixed_ties[n] = cpm.ties(base_drv.get(n))
+            for q in qs:
+                if q not in seen and T[q]["status_code"] != "TK_Complete":
+                    seen.add(q)
+                    stack.append(q)
+        return seen & counted
+    det_end = max(fixed_end, max((base[n]["ef"] for n in own_sub), default=fixed_end))
+    det_path = path(base, base_drv, det_end)
+    fm0 = cpm.finish(full)[0]
+    keys = list(dict.fromkeys(milestones or ([fm0["task_code"]] if fm0 else []) + sorted(
+        d["task_code"] for d in T.values() if d["cstr_type"] and d["status_code"] != "TK_Complete")))
+    for code in keys:
+        if code not in cpm.code:
+            raise ValueError(f"milestones: activity {code} not found in project {project}")
+    mids = [cpm.code[c] for c in keys]
+    rng = random.Random(seed)
+    ends, crit, ms_vals = [], Counter(), {m: [] for m in mids}
+    for _ in range(n_iter):
+        rem = {n: rng.triangular(*dist[n][:3]) for n in sampled}
+        drv: dict = {}  # entries of the recomputed activities (the others keep base_drv)
+        res = cpm.forward(plan, rem, drv, (base, sub))
+        end = max(fixed_end, max((res[n]["ef"] for n in own_sub), default=fixed_end))
+        ends.append(end)
+        crit.update(path(res, drv, end))
+        for m in mids:
+            ms_vals[m].append((res[m]["es"], res[m]["ef"]))
+    ends.sort()
+    pct = lambda k: round(100 * k / n_iter, 2)  # noqa: E731
+    pcal = cpm.pcal if cpm.pcal is not None and not cpm.pcal.error else None
+    p80 = _pctl(ends, 80)
+    ms_rows = []
+    for m in mids:
+        d, v = T[m], ms_vals[m]
+        fins = sorted(x[1] for x in v)
+        det = base[m]["ef"]
+        cal = d["cal"] if d["cal"] is not None and not d["cal"].error else None
+        cdt = d["cstr_date"] if d["cstr_type"] and d["status_code"] != "TK_Complete" else None
+        side = 1 if d["cstr_type"] in CSTR_FINISH else 0
+        ms_rows.append({"task_code": d["task_code"], "task_name": d["task_name"], "task_type": d["task_type"],
+                        "deterministic": _fmt_dt(det), **{f"p{p}": _fmt_dt(_pctl(fins, p)) for p in (10, 50, 80, 90)},
+                        "on_time_pct": pct(sum(x <= det + CPM_TOL for x in fins)),
+                        "constraint": _cstr_label(d["cstr_type"]) if cdt else None,
+                        "constraint_date": cdt and _fmt_dt(cdt),
+                        "by_constraint_pct": None if cdt is None else pct(sum(x[side] <= cdt + CPM_TOL for x in v)),
+                        "p80_buffer_wd": None if cal is None else round(cal.work_days(det, _pctl(fins, 80)), 2) + 0.0})
+    edges = _period_edges(ends[0], ends[-1], "week", week_day)
+    hist, cum = [], 0
+    for a, b in zip(edges, edges[1:]):
+        k = bisect.bisect_left(ends, b) - bisect.bisect_left(ends, a)
+        cum += k
+        hist.append({"week_start": a.date().isoformat(), "week_end": (b - timedelta(days=1)).date().isoformat(),
+                     "count": k, "pct": pct(k), "cum_pct": pct(cum)})
+    rows = []
+    for n, k in sorted(crit.items(), key=lambda e: (-e[1], T[e[0]]["task_code"], e[0])):
+        d, hpd = T[n], T[n]["hpd"] or 8.0
+        lo, hi, mo, src = dist.get(n, (None, None, None, "milestone" if d["task_type"] in ("TT_Mile", "TT_FinMile")
+                                       else "duration_fixed"))
+        rows.append({"task_code": d["task_code"], "task_name": d["task_name"], "task_type": d["task_type"],
+                     "status_code": d["status_code"], "criticality_index": round(k / n_iter, 4),
+                     "criticality_pct": pct(k), "on_deterministic_path": n in det_path,
+                     "total_float_d": _days(d["total_float_hr_cnt"], hpd), "rem_dur_d": _days(d["rem"], hpd),
+                     "min_d": _days(lo, hpd), "mode_d": _days(mo, hpd), "max_d": _days(hi, hpd), "range_source": src})
+    must = cpm.must
+    out = _slice(rows, offset, limit)
+    out.update(project=project, iterations=n_iter, iterations_requested=n_req, seed=seed, engine_version=ENGINE_VERSION,
+               engine={"match_rate": chk["match_rate"], "trusted": chk["match_rate"] is not None
+                       and chk["match_rate"] >= CPM_TRUST, "open_mismatched": chk["counts"]["open_mismatched"],
+                       "warning": None if chk["match_rate"] is not None and chk["match_rate"] >= CPM_TRUST else (
+                           f"The engine matches the last F9 on {chk['match_rate']} of the open activities (needs "
+                           f"{CPM_TRUST}): the simulated dates may not follow P6's; see p6_cpm_validate.")},
+               distribution={"default": dict(zip(("min_pct", "mode_pct", "max_pct"), dflt)), "ranges": echo,
+                             "udfs": uinfo, "counts": {"drawn": len(dist), **{s: sum(1 for x in dist.values()
+                                                                                      if x[3] == s) for s in RISK_SOURCES},
+                                                       "duration_fixed": fixed, "recomputed_per_iteration": len(sub)}},
+               deterministic={"finish": _fmt_dt(det_end), "finish_activity": fm0 and fm0["task_code"],
+                              "finish_activity_name": fm0 and fm0["task_name"], "stored_finish": cpm.prj["scd_end_date"]},
+               finish={**{f"p{p}": _fmt_dt(_pctl(ends, p)) for p in (10, 50, 80, 90)}, "min": _fmt_dt(ends[0]),
+                       "max": _fmt_dt(ends[-1])},
+               must_finish=cpm.prj["plan_end_date"],
+               on_time_probability={"deterministic_pct": pct(sum(e <= det_end + CPM_TOL for e in ends)),
+                                    "must_finish_pct": None if must is None else pct(sum(e <= must + CPM_TOL for e in ends))},
+               p80_buffer_wd=None if pcal is None else round(pcal.work_days(det_end, p80), 2) + 0.0,
+               milestones=ms_rows, histogram=hist, caveat=RISK_CAVEAT, iterations_note=None, schedule_state=state)
+    if n_iter < min(max(n_req, RISK_ITERATIONS[0]), RISK_ITERATIONS[1]):
+        out["iterations_note"] = (f"{n_iter} iterations instead of {n_req}: {len(sub)} activities are recomputed per "
+                                  f"iteration and a run is capped at {RISK_WORK:,} activity passes")
+    elif n_iter != n_req:
+        out["iterations_note"] = f"iterations clamped to {RISK_ITERATIONS[0]}..{RISK_ITERATIONS[1]}"
     return out
 
 
@@ -4707,16 +5210,34 @@ def _cpt(con, pid: int) -> dict:
             "engine_match_rate": chk["match_rate"]}
 
 
-def _cmp_acts(con, dates: str) -> str:
+def _cmp_acts(con, dates: str, crit: tuple[str, str] = ("0", "0")) -> str:
     """CTEs a (project :pid) and b (other :oid) of the activity comparison: start and finish = actual,
-    else early ('planned' takes b's planned dates), hpd, original duration and total float hours."""
-    def side(p: str, st: str, fin: str) -> str:
+    else early ('planned' takes b's planned dates), hpd, original duration and total float hours, op (open:
+    not completed, not LOE or WBS summary) and crit (open and critical under crit, the condition on TASK t
+    of each side's critical definition, see _crit_named)."""
+    tcols = _cols(con, "TASK")
+    extra = ", ".join(f"t.{k}" if k in tcols else f"NULL AS {k}" for k in ("cstr_type2", "cstr_date2"))
+
+    def side(p: str, st: str, fin: str, cond: str) -> str:
+        op = f"(t.status_code <> 'TK_Complete' AND t.task_type NOT IN {SUMMARY_TYPES})"
         return (f"SELECT t.task_id, t.task_code, t.task_name, t.status_code, t.clndr_id, {HPD_SQL} AS hpd, "
-                f"t.target_drtn_hr_cnt AS orig_h, t.total_float_hr_cnt AS tf_h, {st} AS st, {fin} AS fin FROM TASK t "
+                f"t.target_drtn_hr_cnt AS orig_h, t.total_float_hr_cnt AS tf_h, {st} AS st, {fin} AS fin, {op} AS op, "
+                f"({op} AND COALESCE({cond}, 0)) AS crit, t.task_type, t.remain_drtn_hr_cnt AS rem_h, "
+                f"t.act_start_date AS as_d, t.act_end_date AS af_d, t.cstr_type, t.cstr_date, {extra} FROM TASK t "
                 f"LEFT JOIN CALENDAR c ON c.clndr_id = t.clndr_id WHERE t.proj_id = :{p}" + _alive(con, "TASK", "t"))
     cur = ("COALESCE(t.act_start_date, t.early_start_date)", "COALESCE(t.act_end_date, t.early_end_date)")
     oth = cur if dates == "current" else ("t.target_start_date", "t.target_end_date")
-    return f"WITH a AS {MAT_SQL}({side('pid', *cur)}), b AS {MAT_SQL}({side('oid', *oth)}) "
+    return f"WITH a AS {MAT_SQL}({side('pid', *cur, crit[0])}), b AS {MAT_SQL}({side('oid', *oth, crit[1])}) "
+
+
+def _crit_named(con, pid: int, key: str, args: dict) -> tuple[str, str]:
+    """(condition on TASK t, definition) of the project's critical definition (_critical_clause 'project')
+    with its value as the named parameter :key, added to args."""
+    cond, cargs, cdef = _critical_clause(con, pid, "project", None)[:3]
+    for i, v in enumerate(cargs):
+        args[f"{key}{i}"] = v
+        cond = cond.replace("?", f":{key}{i}", 1)
+    return cond, cdef
 
 
 SLIP_CAUSES = ("late_start", "longer_duration", "late_start_and_longer_duration", "on_time", "earlier")
@@ -4765,6 +5286,15 @@ def _cmp_links(con) -> str:
 LINK_KEY = "lb.pred = la.pred AND lb.succ = la.succ AND lb.type = la.type AND lb.pred_project IS la.pred_project"
 
 
+def _tf_change(before_d: Optional[float], after_d: Optional[float], crit_before, crit_after) -> dict:
+    """Total float and critical flags of an activity in the other project (before) and the project (after):
+    tf_delta_d = after - before (days of each side's calendar); None where a side lacks the activity."""
+    return {"total_float_before_d": before_d, "total_float_after_d": after_d,
+            "tf_delta_d": None if before_d is None or after_d is None else round(after_d - before_d, 2) + 0.0,
+            "critical_before": None if crit_before is None else bool(crit_before),
+            "critical_after": None if crit_after is None else bool(crit_after)}
+
+
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, section: CompareSection = "activities",
                         dates: BaselineDates = "current", min_variance_days: NonNegDays = 0,
@@ -4782,8 +5312,13 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
     actual, else early; variance_cd in calendar days, variance_wd in working days of the activity's
     calendar; start_variance_wd + duration_delta_wd = variance_wd (start-to-finish span in working days
     of the same calendar); slip_cause late_start, longer_duration, late_start_and_longer_duration,
-    on_time or earlier) or 'relationships' (added, removed, lag_changed; pred_name and succ_name of the project, of the other one for a removed link; lag days
-    under each project's lag rule)."""
+    on_time or earlier; total_float_before_d (other) and total_float_after_d (project), tf_delta_d =
+    after - before, critical_before and critical_after: open and critical under each project's own
+    definition, None where the activity is missing) or 'relationships' (added, removed, lag_changed;
+    pred_name and succ_name of the project, of the other one for a removed link; lag days under each
+    project's lag rule). summary.activities also counts, over the matched activities open in the project
+    (LOE and WBS summary left out), float_eroded (total float lower than in other), became_critical and
+    no_longer_critical; float_definition says it in words."""
     if section not in get_args(CompareSection):
         raise ValueError(f"section must be one of {list(get_args(CompareSection))}")
     if dates not in get_args(BaselineDates):
@@ -4804,7 +5339,9 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
     args = {"pid": pid, "oid": oid, "minv": minv}
     pcols = _cols(con, "PROJECT")
     pf = ("last_recalc_date", "scd_end_date", "plan_end_date")
-    acts, lnk = _cmp_acts(con, dates), _cmp_links(con)
+    (ca, cdef_a), (cb, cdef_b) = _crit_named(con, pid, "ca", args), _crit_named(con, oid, "cb", args)
+    args["tftol"] = CPM_TF_TOL_H
+    acts, lnk = _cmp_acts(con, dates, (ca, cb)), _cmp_links(con)
     var = "julianday(a.fin) - julianday(b.fin)"
     rule = {p: _lag_rule(con, p)[0] for p in (pid, oid)}
     con.execute("BEGIN")  # summary and page from one snapshot
@@ -4823,6 +5360,8 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
         cals = _calendars(con)
         causes = Counter(_slip(cals.get(r[0]), *r[1:])[2] for r in con.execute(
             acts + "SELECT a.clndr_id, a.st, a.fin, b.st, b.fin FROM a JOIN b ON b.task_code = a.task_code", args))
+        fl = con.execute(acts + "SELECT SUM(a.op AND a.tf_h < b.tf_h - :tftol), SUM(a.op AND a.crit AND NOT b.crit), "
+                         "SUM(a.op AND b.crit AND NOT a.crit) FROM a JOIN b ON b.task_code = a.task_code", args).fetchone()
         lsum = con.execute(lnk + "SELECT (SELECT COUNT(*) FROM la JOIN lb ON " + LINK_KEY + "), "
                            "(SELECT COUNT(*) FROM la WHERE NOT EXISTS (SELECT 1 FROM lb WHERE " + LINK_KEY + ")), "
                            "(SELECT COUNT(*) FROM lb WHERE NOT EXISTS (SELECT 1 FROM la WHERE " + LINK_KEY + ")), "
@@ -4833,10 +5372,10 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
                         "a.task_id AS tid, a.task_code, a.task_name, b.task_name AS other_name, a.status_code, "
                         "b.status_code AS other_status, a.clndr_id, a.hpd, b.hpd AS other_hpd, a.orig_h, b.orig_h AS other_orig_h, "
                         f"a.tf_h, b.tf_h AS other_tf_h, a.st, b.st AS other_st, a.fin, b.fin AS other_fin, {var} AS v, "
-                        "julianday(a.st) - julianday(b.st) AS sv FROM a LEFT JOIN b "
+                        "julianday(a.st) - julianday(b.st) AS sv, a.crit, b.crit AS other_crit FROM a LEFT JOIN b "
                         "ON b.task_code = a.task_code UNION ALL SELECT 'removed', b.task_id, b.task_code, NULL, b.task_name, "
                         "NULL, b.status_code, NULL, NULL, b.hpd, NULL, b.orig_h, NULL, b.tf_h, NULL, b.st, NULL, b.fin, NULL, "
-                        "NULL FROM b WHERE NOT EXISTS (SELECT 1 FROM a WHERE a.task_code = b.task_code)) "
+                        "NULL, NULL, b.crit FROM b WHERE NOT EXISTS (SELECT 1 FROM a WHERE a.task_code = b.task_code)) "
                         "WHERE change <> 'matched' OR :minv <= 0 OR ABS(v) >= :minv "
                         "ORDER BY change = 'matched', ROUND(ABS(COALESCE(v, 0)), 6) DESC, task_code, tid")
 
@@ -4855,7 +5394,9 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
                         "variance_cd": None if r["v"] is None else round(r["v"], 2), "variance_wd": wd,
                         "duration_delta_wd": dv, "slip_cause": cause,
                         "orig_dur_d": _days(r["orig_h"], r["hpd"]), "other_orig_dur_d": _days(r["other_orig_h"], r["other_hpd"]),
-                        "total_float_d": _days(r["tf_h"], r["hpd"]), "other_total_float_d": _days(r["other_tf_h"], r["other_hpd"])}
+                        "total_float_d": _days(r["tf_h"], r["hpd"]), "other_total_float_d": _days(r["other_tf_h"], r["other_hpd"]),
+                        **_tf_change(_days(r["other_tf_h"], r["other_hpd"]), _days(r["tf_h"], r["hpd"]),
+                                     r["other_crit"], r["crit"])}
         else:
             q = lnk + ("SELECT * FROM (SELECT CASE WHEN lb.rid IS NULL THEN 'added' ELSE 'lag_changed' END AS change, "
                        "la.rid, la.pred, la.succ, la.pred_name, la.succ_name, la.type, la.pred_project, la.lag_h, "
@@ -4889,13 +5430,311 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
                                       "later_max_cd": r2(s[6]), "earlier_max_cd": r2(s[7]), "status_changed": s[8] or 0,
                                       "orig_dur_changed": s[9] or 0, "name_changed": s[10] or 0,
                                       "slip_causes": {k: causes.get(k, 0) for k in SLIP_CAUSES},
-                                      "slip_cause_unknown": causes.get(None, 0)},
+                                      "slip_cause_unknown": causes.get(None, 0), "float_eroded": fl[0] or 0,
+                                      "became_critical": fl[1] or 0, "no_longer_critical": fl[2] or 0,
+                                      "float_definition": (
+                                          "over the matched activities open in the project (LOE and WBS summary left "
+                                          "out): float_eroded = total float lower than in the other one by more than "
+                                          f"{CPM_TF_TOL_H * 60:g} minutes; critical = open and critical under each "
+                                          f"project's own definition (project: {cdef_a}; other: {cdef_b})")},
                        "relationships": {"matched": lsum[0], "added": lsum[1], "removed": lsum[2], "lag_changed": lsum[3]}},
            "projects": {k: {"project": pa[k], "other": pb[k]} for k in pf},
            "basis": ("finish = actual, else early finish; other: " + ("same" if dates == "current" else "planned finish")
                      + "; variance = finish - other finish (positive = later)"),
            "schedule_state": _schedule_state(con, pid)}
     return res
+
+
+# ----------------------------------------------------------------- update integrity: an update against the previous one
+
+IntegrityFlag = Literal["open_end_to_finish", "negative_float_cleared_by_constraint", "must_finish_moved",
+                        "actuals_changed", "duration_cut", "links_removed_on_critical", "rel_type_or_lag_changed",
+                        "schedule_options_changed", "calendars_changed", "deleted_in_progress_or_critical", "data_date"]
+INTEGRITY_FLAGS: tuple[str, ...] = get_args(IntegrityFlag)
+INTEGRITY_CAVEAT = ("Each flag is a question to raise with whoever submitted the update, not proof of manipulation: a "
+                    "change can be a correct revision (new information, a re-plan, a corrected error). Ask for the "
+                    "reason and the evidence behind it.")
+INTEGRITY_DEFS = {
+    "open_end_to_finish": "activities that had no successor (or no predecessor) in the previous update and now have "
+                          "exactly one, straight to the project finish (the activity with the latest finish, or a "
+                          "finish milestone without successor) or from the project start (the earliest activity, or a "
+                          "start milestone without predecessor)",
+    "negative_float_cleared_by_constraint": "open activities with negative total float in the previous update and "
+                                            "zero or more now, where a constraint was removed or changed on the "
+                                            "activity or on the activity its float came from in the previous update "
+                                            "(as p6_float_origin), or the must finish by date it came from moved later",
+    "must_finish_moved": "the project must finish by date (PROJECT.plan_end_date) differs",
+    "actuals_changed": "actual start or finish dates the previous update already had that differ now by more than a "
+                       "minute, or are gone (reported history rewritten)",
+    "duration_cut": "activities not started in either update whose original or remaining duration is shorter now "
+                    "(critical: the ones critical in the previous update)",
+    "links_removed_on_critical": "links of the previous update missing now, both activities still in the project, "
+                                 "whose successor was open and critical, or within near_critical_days of total float, "
+                                 "in the previous update",
+    "rel_type_or_lag_changed": "links between the same two activities whose types changed (SS, FF or SF turned into "
+                               "FS, and back), and links of the same type whose lag changed or was removed",
+    "schedule_options_changed": "scheduling options (PROJPROP scheduling) and the critical definition (PROJECT "
+                                "critical_path_type, critical_drtn_hr_cnt) that differ",
+    "calendars_changed": "open activities whose calendar changed (by name), and calendars used by open activities "
+                         "whose work week or exceptions (holidays) differ from the same calendar of the previous update",
+    "deleted_in_progress_or_critical": "activities of the previous update missing now that were in progress or "
+                                       "critical in it",
+    "data_date": "the data date did not move forward since the previous update",
+}
+assert set(INTEGRITY_DEFS) == set(INTEGRITY_FLAGS)
+
+
+def _cstr_txt(ty, dt) -> str:
+    return "none" if not ty else f"{_cstr_label(ty)} {dt}" if dt else _cstr_label(ty)
+
+
+def _integrity(con, pid: int, oid: int, near_days: float) -> tuple[dict[str, list], dict]:
+    """({flag: rows}, facts) of p6_update_integrity: project pid (after) against oid (before, the previous update),
+    activities matched by Activity ID and links by (predecessor, successor, type, predecessor project) as
+    p6_compare_projects; run inside one read snapshot."""
+    args: dict[str, Any] = {"pid": pid, "oid": oid}
+    (ca, cdef_a), (cb, cdef_b) = _crit_named(con, pid, "ca", args), _crit_named(con, oid, "cb", args)
+    acts = _cmp_acts(con, "current", (ca, cb))
+    A: dict[str, dict] = {}
+    B: dict[str, dict] = {}
+    for side, out in (("a", A), ("b", B)):
+        for r in con.execute(acts + f"SELECT * FROM {side} ORDER BY task_id", args):
+            out.setdefault(r["task_code"], _dict(r))  # an Activity ID twice: the lowest task_id
+    LA: dict[tuple, dict] = {}
+    LB: dict[tuple, dict] = {}
+    for side, out in (("la", LA), ("lb", LB)):
+        for r in con.execute(_cmp_links(con) + f"SELECT * FROM {side} ORDER BY rid", args):
+            out[(r["pred"], r["succ"], r["type"], r["pred_project"])] = _dict(r)
+    pcols = _cols(con, "PROJECT")
+    prj = {p: _dict(con.execute("SELECT " + ", ".join(c if c in pcols else f"NULL AS {c}" for c in (
+        "last_recalc_date", "plan_end_date", "clndr_id", "critical_path_type", "critical_drtn_hr_cnt"))
+        + " FROM PROJECT WHERE proj_id = ?", (p,)).fetchone()) for p in (pid, oid)}
+    cals = _calendars(con)
+    rule = {p: _lag_rule(con, p)[0] for p in (pid, oid)}
+    net_b = _Net(con, oid)
+    tol, out = CPM_TF_TOL_H, {f: [] for f in INTEGRITY_FLAGS}
+    summ = lambda r: r["task_type"] in ("TT_LOE", "TT_WBS")  # noqa: E731
+    cst = lambda r: (r["cstr_type"], r["cstr_date"], r["cstr_type2"], r["cstr_date2"])  # noqa: E731
+    both = sorted(set(A) & set(B))
+
+    def lag_d(lk: dict, p: int) -> float:
+        return _days(lk["lag_h"] or 0, _lag_hpd(con, {"hpd": lk["pred_hpd"]}, {"hpd": lk["succ_hpd"]}, p, rule[p])[0])
+
+    def ends(L: dict, X: dict) -> tuple[dict, dict]:  # links inside the project between activities that are no summary
+        succ, pred = {}, {}
+        for k in L:
+            p, s, _ty, pp = k
+            if pp is None and p in X and s in X and not summ(X[p]) and not summ(X[s]):
+                succ.setdefault(p, []).append(k)
+                pred.setdefault(s, []).append(k)
+        return succ, pred
+    sa, pa = ends(LA, A)
+    sb, pb = ends(LB, B)
+    own = [c for c, r in A.items() if not summ(r)]
+    fin_a = max(own, key=lambda c: (A[c]["fin"] or "", A[c]["task_type"] == "TT_FinMile", c), default=None)
+    st_a = min(own, key=lambda c: (A[c]["st"] or "9999", A[c]["task_type"] != "TT_Mile", c), default=None)
+    targets = {"successor": {c for c in own if A[c]["task_type"] == "TT_FinMile" and c not in sa} | {fin_a},
+               "predecessor": {c for c in own if A[c]["task_type"] == "TT_Mile" and c not in pa} | {st_a}}
+    for c in both:
+        if summ(A[c]):
+            continue
+        for kind, before, now, end in (("successor", sb, sa, 1), ("predecessor", pb, pa, 0)):
+            if c in before or len(now.get(c, ())) != 1 or now[c][0] in LB or now[c][0][end] not in targets[kind]:
+                continue
+            k = now[c][0]
+            o = k[end]
+            lk = LA[k]
+            out["open_end_to_finish"].append({
+                "task_code": c, "task_name": A[c]["task_name"], "side": kind, "linked_to": o,
+                "linked_to_name": A[o]["task_name"], "type": REL_TYPES_REV.get(k[2], k[2]), "lag_d": lag_d(lk, pid),
+                "before": f"no {kind}", "after": f"{REL_TYPES_REV.get(k[2], k[2])} {lag_d(lk, pid):g} d "
+                                                 f"{'to' if kind == 'successor' else 'from'} {o}"})
+    must_b, must_a = (_db_dt(prj[p]["plan_end_date"]) for p in (oid, pid))
+    for c in both:
+        a, b = A[c], B[c]
+        if not (a["op"] and b["op"]) or a["tf_h"] is None or b["tf_h"] is None or not (b["tf_h"] < -tol <= a["tf_h"]):
+            continue
+        causes, source = [], None
+        if cst(a) != cst(b):
+            causes.append("its own constraint was removed or changed")
+        nb = net_b.t.get(b["task_id"])
+        if nb is not None and nb["lf"] is not None:
+            for s in _float_walk(net_b, nb)["sources"]:
+                if s["type"] == "activity_constraint" and s["task_code"] != c:
+                    na, ob = A.get(s["task_code"]), B.get(s["task_code"])
+                    if na is None or ob is None or cst(na) != cst(ob):
+                        causes.append(f"the constraint of {s['task_code']}, the source of its float, was removed or "
+                                      "changed")
+                        source = source or s["task_code"]
+                elif s["type"] == "project_must_finish" and must_b and (must_a is None or must_a > must_b):
+                    causes.append("the must finish by date, the source of its float, moved later")
+                    source = source or "must finish by"
+        if causes:
+            out["negative_float_cleared_by_constraint"].append({
+                "task_code": c, "task_name": a["task_name"], "total_float_before_d": _days(b["tf_h"], b["hpd"]),
+                "total_float_after_d": _days(a["tf_h"], a["hpd"]), "cause": "; ".join(dict.fromkeys(causes)),
+                "source": source, "constraint_before": _cstr_txt(b["cstr_type"], b["cstr_date"]),
+                "constraint_after": _cstr_txt(a["cstr_type"], a["cstr_date"])})
+    pcal = cals.get(prj[pid]["clndr_id"])
+    pcal = pcal if pcal is not None and not pcal.error else None
+    cd = lambda x, y: None if x is None or y is None else round((y - x).total_seconds() / 86400, 2) + 0.0  # noqa: E731
+    must = {"before": prj[oid]["plan_end_date"], "after": prj[pid]["plan_end_date"], "delta_cd": cd(must_b, must_a),
+            "delta_wd": None if pcal is None or not (must_a and must_b) else round(pcal.work_days(must_b, must_a), 2) + 0.0}
+    if must_a != must_b:
+        out["must_finish_moved"].append(dict(must))
+    for c in both:
+        for fld, name in (("as_d", "actual_start"), ("af_d", "actual_finish")):
+            vb, va = _db_dt(B[c][fld]), _db_dt(A[c][fld])
+            if vb is not None and (va is None or abs(va - vb) > CPM_TOL):
+                out["actuals_changed"].append({"task_code": c, "task_name": A[c]["task_name"], "field": name,
+                                               "before": B[c][fld], "after": A[c][fld], "delta_cd": cd(vb, va)})
+    for c in both:
+        a, b = A[c], B[c]
+        if summ(a) or a["task_type"] in ("TT_Mile", "TT_FinMile") or "TK_NotStart" != a["status_code"] or \
+                b["status_code"] != "TK_NotStart":
+            continue
+        if (b["orig_h"] or 0) - (a["orig_h"] or 0) > tol or (b["rem_h"] or 0) - (a["rem_h"] or 0) > tol:
+            out["duration_cut"].append({
+                "task_code": c, "task_name": a["task_name"], "original_before_d": _days(b["orig_h"], b["hpd"]),
+                "original_after_d": _days(a["orig_h"], a["hpd"]), "remaining_before_d": _days(b["rem_h"], b["hpd"]),
+                "remaining_after_d": _days(a["rem_h"], a["hpd"]), "critical_before": bool(b["crit"])})
+    pair_a: dict[tuple, dict] = {}
+    pair_b: dict[tuple, dict] = {}
+    for L, P in ((LA, pair_a), (LB, pair_b)):
+        for k, lk in L.items():
+            P.setdefault((k[0], k[1], k[3]), {})[k[2]] = lk
+    for k in sorted(set(LB) - set(LA), key=lambda k: (k[1], k[0], k[2], k[3] or "")):
+        p, s, ty, pp = k
+        if s not in A or (pp is None and p not in A) or s not in B or not B[s]["op"] or (p, s, pp) in pair_a:
+            continue  # a removed activity takes its links (deleted_in_progress_or_critical), a pair still
+            # linked by another type is a type change (rel_type_or_lag_changed)
+        sbf = B[s]
+        crit, near = bool(sbf["crit"]), sbf["tf_h"] is not None and sbf["tf_h"] <= near_days * (sbf["hpd"] or 8.0)
+        if crit or near:
+            lk = LB[k]
+            out["links_removed_on_critical"].append({
+                "pred_code": p, "pred_name": lk["pred_name"], "pred_project": pp, "succ_code": s,
+                "succ_name": lk["succ_name"], "type": REL_TYPES_REV.get(ty, ty), "lag_d": lag_d(lk, oid),
+                "successor_total_float_before_d": _days(sbf["tf_h"], sbf["hpd"]), "successor_critical_before": crit})
+    txt = lambda ts, p: ", ".join(f"{REL_TYPES_REV.get(t, t)} {lag_d(ts[t], p):g} d" for t in sorted(ts))  # noqa: E731
+    for pk in sorted(set(pair_a) & set(pair_b), key=lambda x: (x[1], x[0], x[2] or "")):
+        ta, tb = pair_a[pk], pair_b[pk]
+        row = {"pred_code": pk[0], "pred_name": next(iter(ta.values()))["pred_name"], "pred_project": pk[2],
+               "succ_code": pk[1], "succ_name": next(iter(ta.values()))["succ_name"]}
+        if set(ta) != set(tb):
+            out["rel_type_or_lag_changed"].append({**row, "change": "type", "before": txt(tb, oid), "after": txt(ta, pid),
+                                                   "lag_before_d": None, "lag_after_d": None})
+        for t in sorted(set(ta) & set(tb)):
+            if abs((ta[t]["lag_h"] or 0) - (tb[t]["lag_h"] or 0)) > 0.01:
+                out["rel_type_or_lag_changed"].append({**row, "change": "lag", "before": txt({t: tb[t]}, oid),
+                                                       "after": txt({t: ta[t]}, pid), "lag_before_d": lag_d(tb[t], oid),
+                                                       "lag_after_d": lag_d(ta[t], pid)})
+    code = lambda v: _db_task_code(con, v)  # noqa: E731
+    for o in _sched_diff(_sched_options(con, pid)[0], _sched_options(con, oid)[0], code, code):
+        if o["same"] is not True:
+            out["schedule_options_changed"].append({"option": o["option"], "before": o["xer"], "after": o["db"]})
+    for col in ("critical_path_type", "critical_drtn_hr_cnt"):
+        if not _opt_eq(prj[pid][col], prj[oid][col]):
+            out["schedule_options_changed"].append({"option": f"PROJECT.{col}", "before": prj[oid][col],
+                                                    "after": prj[pid][col]})
+    name = lambda cid: cals[cid].name if cid in cals else None  # noqa: E731
+    for c in both:
+        a, b = A[c], B[c]
+        if a["op"] and name(a["clndr_id"]) != name(b["clndr_id"]):
+            out["calendars_changed"].append({"kind": "activity", "item": c, "item_name": a["task_name"],
+                                             "before": name(b["clndr_id"]), "after": name(a["clndr_id"]),
+                                             "detail": "the activity is on another calendar"})
+    used_a: dict[str, int] = {}
+    used_b: dict[str, int] = {}
+    for X, U, op_only in ((A, used_a, True), (B, used_b, False)):
+        for r in X.values():
+            if r["clndr_id"] in cals and (r["op"] or not op_only):
+                U.setdefault(cals[r["clndr_id"]].name, r["clndr_id"])
+    for nm in sorted(set(used_a) & set(used_b)):
+        xa, xb = cals[used_a[nm]], cals[used_b[nm]]
+        if xa.clndr_id == xb.clndr_id:
+            continue  # the same calendar row: nothing can differ
+        days = [WEEKDAYS[i] for i in range(7) if xa.week[i] != xb.week[i]]
+        if days:
+            out["calendars_changed"].append({"kind": "calendar", "item": nm, "item_name": None,
+                                             "before": f"{sum(sum(f - s for s, f in d) for d in xb.week) / 60:g} h a week",
+                                             "after": f"{sum(sum(f - s for s, f in d) for d in xa.week) / 60:g} h a week",
+                                             "detail": "work week changed on " + ", ".join(days)})
+        added = sorted(d for d in xa.exc if xb.exc.get(d) != xa.exc[d])
+        removed = sorted(d for d in xb.exc if d not in xa.exc)
+        if added or removed:
+            show = lambda ds: ", ".join(d.isoformat() for d in ds[:5]) + (" ..." if len(ds) > 5 else "")  # noqa: E731
+            out["calendars_changed"].append({
+                "kind": "calendar", "item": nm, "item_name": None, "before": f"{len(xb.exc)} exceptions",
+                "after": f"{len(xa.exc)} exceptions",
+                "detail": "; ".join(filter(None, (added and f"{len(added)} added or changed ({show(added)})",
+                                                  removed and f"{len(removed)} removed ({show(removed)})")))})
+    for c in sorted(set(B) - set(A)):
+        b = B[c]
+        if not summ(b) and (b["status_code"] == "TK_Active" or b["crit"]):
+            out["deleted_in_progress_or_critical"].append({
+                "task_code": c, "task_name": b["task_name"], "status_before": b["status_code"],
+                "actual_start_before": b["as_d"], "total_float_before_d": _days(b["tf_h"], b["hpd"]),
+                "critical_before": bool(b["crit"])})
+    dd_b, dd_a = (prj[p]["last_recalc_date"] for p in (oid, pid))
+    dd = {"before": dd_b, "after": dd_a, "delta_cd": cd(_db_dt(dd_b), _db_dt(dd_a)),
+          "advanced": bool(dd_a and dd_b and _db_dt(dd_a) > _db_dt(dd_b))}
+    if not dd["advanced"]:
+        out["data_date"].append(dict(dd))
+    facts = {"data_date": dd, "must_finish": must,
+             "critical_definition": {"project": cdef_a, "other": cdef_b}}
+    return out, facts
+
+
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+def p6_update_integrity(project: ProjectId, other: ProjectId, flag: Optional[IntegrityFlag] = None,
+                        near_critical_days: NonNegDays = 10, sample_size: SampleSize = 10,
+                        offset: Offset = 0, limit: Limit = 100) -> dict:
+    """Integrity review of a schedule update against the previous update (other = its Project ID): the changes
+    reviewers question. The flags are questions to raise with whoever submitted the update, not proof of
+    manipulation (caveat says so). Activities are matched by Activity ID and links by (predecessor,
+    successor, type, predecessor project), as p6_compare_projects; before = other, after = project; open = not
+    completed, LOE and WBS summary left out; critical = each project's own definition. flags (each {count,
+    definition, sample: first sample_size rows with before / after values}): open_end_to_finish,
+    negative_float_cleared_by_constraint, must_finish_moved, actuals_changed, duration_cut (with critical:
+    those critical before), links_removed_on_critical (successor critical or within near_critical_days of total
+    float before), rel_type_or_lag_changed, schedule_options_changed, calendars_changed,
+    deleted_in_progress_or_critical, data_date (raised when it did not advance). summary: count per flag;
+    raised: the flags with a count; data_date {before, after, delta_cd, advanced}; must_finish {before,
+    after, delta_cd, delta_wd (working days of the project calendar)}. flag= returns that flag's rows as a page {total, offset, returned, next_offset, rows} with result
+    {count, definition}. DCMA counts before and after: p6_health_check on both projects, then
+    p6_health_check_compare(project, before=<snapshot id of other>, after=<snapshot id of project>). Values of
+    each project's last F9; read only."""
+    if flag is not None and flag not in INTEGRITY_FLAGS:
+        raise ValueError(f"flag must be one of {list(INTEGRITY_FLAGS)}")
+    near = _num(near_critical_days)
+    if near is None or near < 0:
+        raise ValueError("near_critical_days must be 0 or more")
+    size = int(sample_size)
+    if not 0 <= size <= 50:
+        raise ValueError("sample_size must be 0 to 50")
+    offset, limit = _check_page(offset, limit)
+    con = _connect()
+    pid, oid = _project_id(con, project), _project_id(con, other)
+    if pid == oid:
+        raise ValueError("other must be another project: the previous update of this one")
+    con.execute("BEGIN")  # both projects from one snapshot
+    try:
+        rows, facts = _integrity(con, pid, oid, near)
+    finally:
+        con.rollback()
+    state = _schedule_state(con, pid)
+    head = {"project": project, "other": other}
+    if flag:
+        return {**head, "flag": flag, "result": {"count": len(rows[flag]), "definition": INTEGRITY_DEFS[flag]},
+                **_slice(rows[flag], offset, limit), "caveat": INTEGRITY_CAVEAT, "schedule_state": state}
+    flags = {k: {"count": len(v), "definition": INTEGRITY_DEFS[k], "sample": v[:size]} for k, v in rows.items()}
+    flags["duration_cut"]["critical"] = sum(r["critical_before"] for r in rows["duration_cut"])
+    summary = {k: f["count"] for k, f in flags.items()}
+    raised = [k for k, n in summary.items() if n]
+    return {**head, "data_date": facts["data_date"], "summary": summary, "raised": raised, "raised_count": len(raised),
+            "flags": flags, "must_finish": facts["must_finish"], "critical_definition": facts["critical_definition"],
+            "near_critical_days": near, "caveat": INTEGRITY_CAVEAT, "schedule_state": state}
 
 
 # ----------------------------------------------------------------- reporting: groups, look-ahead, S-curve, summary
@@ -5314,11 +6153,25 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
 
 MS_VS = ("late", "early", "on_time")  # p6_milestones vs_baseline
 MsOrder = Literal["date", "variance"]
+MsCodes = Annotated[Union[list[str], str], Field(
+    description="Activity IDs to list instead of every milestone: a list, or one text with the IDs separated by commas.")]
+
+
+def _code_list(codes, name: str) -> list[str]:
+    """Activity IDs of a list or of a text separated by commas (blanks dropped, first occurrence kept)."""
+    items = codes.split(",") if isinstance(codes, str) else codes
+    if not isinstance(items, (list, tuple)) or not all(isinstance(c, str) for c in items):
+        raise ValueError(f"{name}: a list of Activity IDs, or one text with the IDs separated by commas")
+    out = list(dict.fromkeys(c.strip() for c in items if c.strip()))
+    if not out:
+        raise ValueError(f"{name}: give at least one Activity ID")
+    return out
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, baseline_dates: BaselineDates = "current",
-                  open_only: bool = False, order: MsOrder = "date", offset: Offset = 0, limit: Limit = 50) -> dict:
+                  open_only: bool = False, order: MsOrder = "date", codes: Optional[MsCodes] = None,
+                  offset: Offset = 0, limit: Limit = 50) -> dict:
     """Milestones of a project (TT_Mile start milestones, TT_FinMile finish milestones), one page by date
     then Activity ID (order='variance': the largest variance in working days first, calendar days when the
     calendar is unreadable, milestones without a baseline date last, then date): {total, offset, returned, next_offset, rows, counts, baseline, must_finish,
@@ -5332,21 +6185,31 @@ def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, base
     calendar; None when completed), critical (open and critical under the project definition, as
     p6_critical_path), constraint cstr_type / cstr_label / cstr_date. counts over every milestone listed:
     milestones, completed, open, critical, late, early, on_time, no_baseline, open_late. baseline= a
-    Project ID (default: the project baseline). open_only=True leaves completed milestones out."""
+    Project ID (default: the project baseline). open_only=True leaves completed milestones out.
+    codes= lists these Activity IDs instead of every milestone (any activity type: a task takes its
+    finish as its date), and not_found gives the IDs the project does not have. Every row also has
+    hard_constraint (its primary or secondary constraint is hard: start or finish on, on or before,
+    mandatory), predecessor_count (links into it), vs_constraint_wd (its date minus its constraint date in
+    working days of its calendar, positive = later; None without a constraint date), float_origin_type and
+    float_origin_explanation (where its total float comes from, as p6_float_origin; None when completed)."""
     if baseline_dates not in get_args(BaselineDates):
         raise ValueError(f"baseline_dates must be one of {list(get_args(BaselineDates))}")
     if order not in get_args(MsOrder):
         raise ValueError(f"order must be one of {list(get_args(MsOrder))}")
+    wanted = None if codes is None else _code_list(codes, "codes")
     con = _connect()
     pid = _project_id(con, project)
-    con.execute("BEGIN")  # milestones, baseline and settings from one snapshot
+    con.execute("BEGIN")  # milestones, baseline, settings and the network from one snapshot
     try:
         bid = _baseline_pid(con, pid, baseline)
         crit, cargs, cdef = _critical_clause(con, pid, "project", None)[:3]
+        sel = (f" AND t.task_code IN ({', '.join('?' * len(wanted))})" if wanted
+               else " AND t.task_type IN ('TT_Mile', 'TT_FinMile')")
         q = (_act_from(con).replace("SELECT t.*,", f"SELECT t.*, (t.status_code <> 'TK_Complete' AND "
                                     f"COALESCE({crit}, 0)) AS is_crit,", 1)
-             + " AND t.task_type IN ('TT_Mile', 'TT_FinMile')" + (" AND t.status_code <> 'TK_Complete'" if open_only else ""))
-        ms = [_dict(r) for r in con.execute(q + " ORDER BY t.task_id", [*cargs, pid])]
+             + sel + (" AND t.status_code <> 'TK_Complete'" if open_only else ""))
+        ms = [_dict(r) for r in con.execute(q + " ORDER BY t.task_id", [*cargs, pid, *(wanted or [])])]
+        net = _Net(con, pid)
         bl: dict[str, dict] = {}
         if bid is not None:
             for r in con.execute("SELECT task_code, act_start_date, act_end_date, early_start_date, early_end_date, "
@@ -5380,12 +6243,20 @@ def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, base
             vwd = round(wh / cal.hpd, 2) + 0.0 if ok else None
             vs = "late" if wh > GAP_TOL_H else "early" if wh < -GAP_TOL_H else "on_time"
         done = m["status_code"] == "TK_Complete"
+        cd = _db_dt(m.get("cstr_date"))
+        vcw = None if not (d and cd and ok) else round(cal.work_hours(cd, d) / cal.hpd, 2) + 0.0
+        nd = net.t[m["task_id"]]
+        fo = None if done or nd["lf"] is None else _float_walk(net, nd)
         rows.append({"task_code": m["task_code"], "task_name": m["task_name"], "task_type": m["task_type"],
                      "status_code": m["status_code"], "wbs_name": m.get("wbs_name"), "date": date, "date_kind": kind,
                      "baseline_date": bdate, "variance_cd": vcd, "variance_wd": vwd, "vs_baseline": vs,
                      "total_float_d": None if done else _days(m.get("total_float_hr_cnt"), m.get("hpd")),
                      "critical": bool(m["is_crit"]), "cstr_type": m.get("cstr_type"),
-                     "cstr_label": _cstr_label(m.get("cstr_type")), "cstr_date": m.get("cstr_date"), "_tid": m["task_id"]})
+                     "cstr_label": _cstr_label(m.get("cstr_type")), "cstr_date": m.get("cstr_date"),
+                     "hard_constraint": bool({m.get("cstr_type"), m.get("cstr_type2")} & HARD_CSTR_SET),
+                     "predecessor_count": len(net.by_succ.get(m["task_id"], ())), "vs_constraint_wd": vcw,
+                     "float_origin_type": fo and fo["origin"]["type"], "float_origin_explanation": fo and fo["explanation"],
+                     "_tid": m["task_id"]})
     rows.sort(key=lambda r: (_db_dt(r["date"]) or datetime.max, r["task_code"], r["_tid"]))
     if order == "variance":  # stable: equal variances keep the date order
         rows.sort(key=lambda r: (r["variance_cd"] is None, -(r["variance_wd"] if r["variance_wd"] is not None
@@ -5398,9 +6269,13 @@ def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, base
               "no_baseline": sum(r["vs_baseline"] is None for r in rows),
               "open_late": sum(r["vs_baseline"] == "late" and r["status_code"] != "TK_Complete" for r in rows)}
     res = _slice(rows, offset, limit)
+    found = {m["task_code"] for m in ms}
+    if wanted is not None:  # an open_only call leaves a completed ID out of not_found too
+        found |= {c for c in wanted if c in net.code}
     res.update(counts=counts, baseline=bname and {"project": bname, "dates": baseline_dates,
                                                     "source": "baseline=" if baseline else
                                                     "project baseline (PROJECT.sum_base_proj_id)"},
+               not_found=[] if wanted is None else [c for c in wanted if c not in found],
                must_finish=must, critical_definition=cdef + "; open activities", schedule_state=_schedule_state(con, pid),
                note="Dates of the last F9 (actual, else early). Variance = date - baseline date: positive = later."
                     + ("" if bid is not None else " No baseline: pass baseline= or set a project baseline in P6."))
@@ -9542,7 +10417,7 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
     top(ws, "Reports","Schedule quality (DCMA 14) and the sources, settings and definitions of this dashboard.")
     section(ws, 4, 1, 6, "Schedule quality (DCMA 14)")
     header(ws, 5, 1, ["Check", "Result", "Count", "Of", "Value", "Threshold"], [44, 16, 12, 12, 12, 14])
-    qrows = [k for k in DCMA_CHECKS if k in chk] + (["key_dates"] if "key_dates" in chk else [])
+    qrows = [k for k in DCMA_CHECKS if k in chk and k not in HC_UNSCORED] + (["key_dates"] if "key_dates" in chk else [])
     for i, k in enumerate(qrows):
         c, rule = chk[k], DCMA_CHECKS.get(k, (None, None))[1]
         ratio = rule == "ratio"
@@ -10053,7 +10928,8 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
             "baseline": rd["baseline"] and rd["baseline"]["proj_short_name"], "sheets": counts,
             "counts": {"wbs": len(rd["rows"]), "activities": len(rd["acts"]), "milestones": len(rd["milestones"]),
                        "critical": len(crit)},
-            "cards": cards, "dcma_failed": [k for k, c in hc["checks"].items() if c.get("pass") is False],
+            "cards": cards, "dcma_failed": [k for k, c in hc["checks"].items()
+                                            if c.get("pass") is False and k not in HC_UNSCORED],
             "warnings": warnings, "schedule_state": state,
             "note": "Values of the last F9 in P6. The Dashboard sheet is protected (no password) and prints on one A3 "
                     "landscape page."}

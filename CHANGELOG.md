@@ -3,20 +3,58 @@
 All notable changes to P6 MCP. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [Unreleased] (1.10.0)
+
+### Added
+
+- `p6_schedule_risk`: Monte Carlo schedule risk in memory. Each iteration draws the remaining duration of every
+  open activity from a triangular range (default 85 / 100 / 135 %; ranges by Activity ID, WBS or activity code
+  value; three-point estimates from number UDFs) and runs the forward pass of the same CPM engine as
+  `p6_schedule_whatif`. Result: deterministic finish, finish p10 / p50 / p80 / p90, on-time probability against
+  the deterministic finish and the must finish date, p80 buffer in working days, the same per milestone, a
+  weekly histogram, the activities by criticality index, the engine match rate, seed and engine version, and a
+  caveat. The same project, arguments and seed give the same output; a run is capped at 1,500,000 activity
+  passes (the result says when). Read only, Full profile.
+- `p6_update_integrity`: an update against the previous update, activities matched by Activity ID and links
+  by (predecessor, successor, type) as `p6_compare_projects`: open ends tied to the finish, negative float
+  cleared by a constraint change (on the activity or on the source of its float) or a later must finish date,
+  must finish date moved, actual dates rewritten, durations cut, links to critical work removed, link types
+  and lags changed, schedule options and critical definition changed, calendars changed, in-progress or
+  critical activities deleted, a data date that did not advance. Each flag gives a count and sample rows with
+  before and after values; `flag=` pages one flag. The flags are questions to raise, not proof of
+  manipulation. Read only, Full profile.
+- `p6_health_check`: `checks.logic_density` (links whose successor is open per open activity, at least 1.5;
+  outside `score` and `summary`, which stay the DCMA 14), `weighted_score` (points and grade A to F from
+  weighted checks with a warn band), `negative_float.worst` and `high_float.worst` (the activity with the
+  lowest or highest total float) and `engine_version`. Health snapshots keep the weighted score and the engine
+  version; `p6_health_check_compare` shows both and warns when the engine versions differ.
+- `p6_milestones`: `codes=` (Activity IDs, a list or a text separated by commas; any activity type) with
+  `not_found`, and per row `hard_constraint`, `predecessor_count`, `vs_constraint_wd`, `float_origin_type`
+  and `float_origin_explanation`.
+- `p6_compare_projects`: per activity `total_float_before_d`, `total_float_after_d`, `tf_delta_d`,
+  `critical_before`, `critical_after`; summary counts `float_eroded`, `became_critical`, `no_longer_critical`.
+- `p6_cpm_validate` rows `differences_text`; `engine_version` from `p6_cpm_validate` and
+  `p6_schedule_whatif` (the version of the CPM engine's date, calendar and float rules).
+- The public demo has a previous update, DEMO-SS225_PREV (a saved baseline of DEMO-SS225 at 19 Oct 2026) with
+  the integrity issues `p6_update_integrity` finds.
+- Tests for the 17 tools that had none (relationship edits one by one and in batches, float paths, dangling
+  ends, redundant links, progress check, group and resource summaries, calendars, health check snapshots
+  compared, schedule options read and written, EPS creation, XER inspection), plus checks that every tool is
+  named in a test and declares its annotations literally.
 
 ### Changed
 
 - Every tool now declares its four MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
   `openWorldHint`) as a literal on its own line of the source, so directory scanners that read the code see
   them. The values sent to MCP clients are unchanged.
-
-### Added
-
-- Tests for the 17 tools that had none (relationship edits one by one and in batches, float paths, dangling
-  ends, redundant links, progress check, group and resource summaries, calendars, health check snapshots
-  compared, schedule options read and written, EPS creation, XER inspection), plus checks that every tool is
-  named in a test and declares its annotations literally.
+- The CPM engine's passes are split (forward, backward) and the calendars add working hours through their
+  cumulative index: same results, faster runs.
+- A skill's reference file may hold 12,000 characters (10,000 before): skills with a larger file need P6 MCP
+  1.10.0 (shared skills carry the sharer's version, so older versions never install them).
+- The core set has 15 skills: update-integrity-audit, schedule-risk and logic-date-integrity are new;
+  schedule-quality-audit v3 (engine check, weighted grade, where the worst float comes from),
+  weekly-update-review v3 (optional previous update), milestone-tracker v2 (optional contract milestones) and
+  update-import-safely v3 (suggests logic-date-integrity before F9) are updated. The bundled copy follows.
 
 ## [1.9.0] - 2026-10-28
 

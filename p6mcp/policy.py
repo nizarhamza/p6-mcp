@@ -28,7 +28,7 @@ TOOL_KIND: dict[str, str] = {
     "p6_project_summary": READ, "p6_query_activities": READ, "p6_get_activity": READ,
     "p6_get_relationships": READ, "p6_critical_path": READ, "p6_driving_path": READ,
     "p6_float_analysis": READ, "p6_float_paths": READ, "p6_float_origin": READ, "p6_lookahead": READ,
-    "p6_milestones": READ,
+    "p6_milestones": READ, "p6_schedule_risk": READ, "p6_update_integrity": READ,
     "p6_progress_check": READ, "p6_progress_curve": READ, "p6_resource_summary": READ,
     "p6_group_summary": READ, "p6_health_check": READ, "p6_health_check_compare": READ,
     "p6_compare_projects": READ, "p6_cpm_validate": READ, "p6_dangling": READ, "p6_redundant_links": READ,

@@ -157,7 +157,7 @@ def test_strict_rules_for_new_skills_only(server):
                      (dict(MINE, files=[{"path": "../up.md", "text": "x"}]), "reference file"),
                      (dict(MINE, files=[{"path": "run.ps1", "text": "x"}]), "reference file"),
                      (dict(MINE, files=[{"path": "con.md", "text": "x"}]), "reserved"),
-                     (dict(MINE, files=[{"path": "a.md", "text": "x" * 10001}]), "longer"),
+                     (dict(MINE, files=[{"path": "a.md", "text": "x" * (skills.MAX_FILE_TEXT + 1)}]), "longer"),
                      (dict(MINE, files=[{"path": f"f{i}.md", "text": "x"} for i in range(6)]), "at most 5"),
                      (dict(MINE, files=[{"path": "A.md", "text": "x"}, {"path": "a.md", "text": "y"}]), "twice")):
         with pytest.raises(ValueError, match=why):

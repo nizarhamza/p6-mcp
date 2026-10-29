@@ -21,14 +21,17 @@ server computes the answers; the model explains them.
 - **Schedule analysis**: projects and EPS, WBS roll-ups, activities with filters and activity codes,
   relationships with lag calendars, critical path (total float or longest path), driving path, float
   paths, where an activity's float comes from, float distribution, look-ahead windows.
-- **Health and progress**: DCMA 14-point check with the project's own P6 thresholds (and comparison over
-  time), out-of-sequence progress, dangling and redundant logic, S-curves and earned value at the data
+- **Health and progress**: DCMA 14-point check with the project's own P6 thresholds, logic density and a
+  weighted score with a grade (and comparison over time), out-of-sequence progress, dangling and redundant logic, S-curves and earned value at the data
   date, resource and cost summaries, grouping by status, WBS or code.
 - **User defined fields (UDFs)**: list the UDF columns with their use, filter activities on UDF values
   and show them as columns.
-- **Comparisons and what-if**: compare two updates or a baseline activity by activity and link by link;
-  a CPM engine that reproduces P6's F9 on the projects it was checked against, for what-if scenarios
-  run in memory, never written.
+- **Comparisons and what-if**: compare two updates or a baseline activity by activity and link by link,
+  float erosion included; an update integrity review against the previous update (open ends tied to the
+  finish, constraints removed to clear negative float, actual dates rewritten, durations cut, links and
+  options changed: questions to raise, not proof); a CPM engine that reproduces P6's F9 on the projects
+  it was checked against, for what-if scenarios and Monte Carlo schedule risk (finish percentiles,
+  on-time probability, criticality index) run in memory, never written.
 - **Excel dashboard**: one call writes a project controls workbook (Full profile): a one-page A3
   dashboard with cards, S-curve, finish variance and progress by WBS against the baseline, milestones,
   critical and delayed activities; every activity grouped by WBS; the P6 float paths; the DCMA checks.
@@ -89,7 +92,8 @@ From the command line (the installer uses the same commands):
 ### P6 skills
 
 P6 skills are ready-made workflows that chain the tools into one fixed report (weekly update review,
-schedule quality audit, safe update import, delay what-if, baseline variance, Excel dashboard and more).
+schedule quality audit, safe update import, update integrity audit, schedule risk, delay what-if, baseline variance,
+Excel dashboard and more).
 Since 1.9 none is built into the app: they all come from the [skill shop](#skill-shop). At its first start
 the Settings app installs the **core set** from the shop (when GitHub cannot be reached, from the copy of the
 core set shipped with P6 MCP, updated from the shop later); the skills you had turned off in 1.8 stay off,
@@ -153,7 +157,7 @@ under the Apache-2.0 license. Without a GitHub account, **Export** the skill to 
 
 ![Settings: tools and safety](docs/images/settings-tools.png)
 
-- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 52).
+- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 58).
 - **Writes are off by default.** With the Full profile and "Allow write operations", every write takes
   two calls: a dry run that shows the plan and returns a single-use confirmation token, then, after your
   explicit yes, the same call with that token. Deleting a project or an activity and restoring a backup

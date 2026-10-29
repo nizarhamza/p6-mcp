@@ -148,7 +148,8 @@ def test_enriched_project_workbook(p6, tmp_path):
                                                                     for c in res["cards"]]
     assert all(c["detail"] == d.cell(8, 3 + 4 * k).value for k, c in enumerate(res["cards"]))
     hc = p6.call("p6_health_check", project="DEMO-A", save_snapshot=False)
-    assert res["dcma_failed"] == [k for k, c in hc["checks"].items() if c.get("pass") is False]
+    assert res["dcma_failed"] == [k for k, c in hc["checks"].items()
+                                  if c.get("pass") is False and k not in p6.s.HC_UNSCORED]  # the DCMA 14 only
     with __import__("zipfile").ZipFile(path) as z:
         charts = "".join(z.read(n).decode() for n in z.namelist() if n.startswith("xl/charts/"))
     assert 'srgbClr val="C0392B"' in charts

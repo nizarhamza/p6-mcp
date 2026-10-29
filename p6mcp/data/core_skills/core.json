@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "catalog": "nizarhamza/p6-mcp-shop",
-  "commit": "7205d5b9fb171a077642340d291cb8e2f31715a7",
+  "commit": "6bc742bf12a79b6517898088a0b5510e2bd6556a",
   "skills": [
     {
       "name": "baseline-variance",
@@ -29,14 +29,19 @@
       "sha256": "4f98dbb74b2659d51de2cdb4bcdd83aead8642f69a60ebc3c317914fa1fc5f93"
     },
     {
+      "name": "logic-date-integrity",
+      "version": 1,
+      "sha256": "9c4659d7ea23e8a1fda1a4dbfa008f3d5d4fc321724ff7c749c880f1c4247f99"
+    },
+    {
       "name": "lookahead-brief",
       "version": 4,
       "sha256": "ab33069c040dda9b6dd93dd361b5313fbd44d40c63f0ea931decfe28d22d0061"
     },
     {
       "name": "milestone-tracker",
-      "version": 1,
-      "sha256": "3377d6bc33ba97e84411151ebe4fb0e7e05673dc84a7b220aaa7c5604c580a57"
+      "version": 2,
+      "sha256": "3fde882ab3f83f7a62dddf85206cf452f9e3b5130c455050e0521e337e93e9b1"
     },
     {
       "name": "progress-earned-value",
@@ -50,18 +55,28 @@
     },
     {
       "name": "schedule-quality-audit",
-      "version": 2,
-      "sha256": "ad5e5acaa64eafdd9c9876e74d71a15b5221e18f3fa05ef12290809612654703"
+      "version": 3,
+      "sha256": "6b0bbe9d662ef10c0e1aaed7996e8fa1b4eb0cacc9065370f3b9a4815d5ba66a"
+    },
+    {
+      "name": "schedule-risk",
+      "version": 1,
+      "sha256": "840cd108f806175568acda11e79640dc53e05b6c2b4f267baa26324d3cdbb064"
     },
     {
       "name": "update-import-safely",
-      "version": 2,
-      "sha256": "968b885f18b0c34f5f84f9c113f99d067c0806227156ee6493811ff7d2cdf289"
+      "version": 3,
+      "sha256": "934f8e63f5c6ed8a929f8e5c52d5d588ee66e6dab19d4c942b2c8293699d694f"
+    },
+    {
+      "name": "update-integrity-audit",
+      "version": 1,
+      "sha256": "11bd4b6f4139eb31465990dd64a4fdd1c2175c91cccedb3bc5099c3255522873"
     },
     {
       "name": "weekly-update-review",
-      "version": 2,
-      "sha256": "c737ff7cc85d0be4e9169253d7f419b6a1a9e836911ae30073dff60a9dc6e8bd"
+      "version": 3,
+      "sha256": "fdaeba0ea7058f606adf5f733c21ad4172f8a0f214279b61e8625f0e0280734c"
     }
   ]
 }

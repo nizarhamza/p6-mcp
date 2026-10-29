@@ -1,22 +1,26 @@
-"""Public demo project DEMO-SS225 (225/63 kV GIS substation, 214 activities): two XER files made with
-the server's CPM engine, and a test database with both imported.
+"""Public demo project DEMO-SS225 (225/63 kV GIS substation, 214 activities): three XER files made with
+the server's CPM engine, and a test database with them imported.
 
-  DEMO-SS225_BL.xer  the baseline: nothing started, data date = project start (2 Feb 2026)
-  DEMO-SS225.xer     the update at the data date 26 Oct 2026: actuals, remaining work, late items,
-                     driving path and float paths
+  DEMO-SS225_BL.xer    the baseline: nothing started, data date = project start (2 Feb 2026)
+  DEMO-SS225.xer       the update at the data date 26 Oct 2026: actuals, remaining work, late items,
+                       driving path and float paths
+  DEMO-SS225_PREV.xer  the previous update at the data date 19 Oct 2026, from the same performed work,
+                       with the integrity issues p6_update_integrity raises against the update (see
+                       previous()): what a reviewer of DEMO-SS225 finds it changed since then
 
 Every name and value is invented, resources included (labor crews, one crane, one cable material).
 Dates, late dates and float come from the CPM engine (p6mcp.server._Cpm, P6's F9 rules) run in
 memory: first on the baseline network, then on an "as performed" network (longer durations and late
-starts) that gives the actual dates before the data date, then on the update. Everything is seeded,
-so a run always gives the same files.
+starts) that gives the actual dates before the data date, then on the update and on the previous
+update. Everything is seeded, so a run always gives the same files.
 
 build_db(path) = make_db.build(path), the P6 columns the demo carries that make_db leaves out, then
-p6_import_xer: the update as a new project in EPS-DEMO, the baseline as its project baseline. The
-server must not be configured for another database: build_db points it at path (a throwaway config
-when the process has none, never the user's settings).
+p6_import_xer: the update as a new project in EPS-DEMO, the baseline as its project baseline, the
+previous update as another baseline of it (a saved update, as P6 users keep them; p6_list_projects
+leaves baselines out). The server must not be configured for another database: build_db points it at
+path (a throwaway config when the process has none, never the user's settings).
 
-    python tests/fixtures/make_demo.py [output folder]   # the two XER files and demo.db
+    python tests/fixtures/make_demo.py [output folder]   # the three XER files and demo.db
 """
 
 from __future__ import annotations
@@ -35,13 +39,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 
 import make_db  # noqa: E402
 
-PROJ, PROJ_BL = "DEMO-SS225", "DEMO-SS225_BL"
+PROJ, PROJ_BL, PROJ_PREV = "DEMO-SS225", "DEMO-SS225_BL", "DEMO-SS225_PREV"
 NAME = "225/63 kV GIS Substation - Demo Project"
 EPS = "EPS-DEMO"  # EPS node of make_db
 START = datetime(2026, 2, 2, 8, 0)  # notice to proceed, Monday
 DD = datetime(2026, 10, 26, 8, 0)  # data date of the update
 LAST_F9 = datetime(2026, 10, 26, 17, 30)
+DD_PREV, LAST_F9_PREV = datetime(2026, 10, 19, 8, 0), datetime(2026, 10, 19, 17, 30)  # the previous update
 CAL_ID, CAL_NAME = 1, "DEMO 5-Day Workweek 8h"
+CAL6_ID, CAL6_NAME = 2, "DEMO 6-Day Workweek 8h"  # only in the previous update (one activity on it)
 HOLIDAYS = ["2026-04-06", "2026-05-01", "2026-05-14", "2026-05-25", "2026-07-14", "2026-11-11", "2026-12-24",
             "2026-12-25", "2026-12-28", "2026-12-29", "2026-12-30", "2026-12-31", "2027-01-01", "2027-03-29",
             "2027-05-06", "2027-05-17", "2027-07-14", "2027-11-11"]
@@ -346,15 +352,27 @@ link(MS["mc"], MS["rfe"])
 
 CODES = list(ACTS)
 TID = {c: i + 1 for i, c in enumerate(CODES)}
+NET = {"codes": CODES, "acts": ACTS, "links": LINKS, "opts": OPTS}  # the network of the baseline and the update
 
 # ---------------------------------------------------------------- calendar and engine
 SERIAL0 = date(1899, 12, 30)
 DAYS_XML = "".join(
     f"(0||{n}()())" if n in (1, 7) else f"(0||{n}()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))"
     for n in range(1, 8))
-EXC_XML = "".join(f"(0||{i}(d|{(date.fromisoformat(h) - SERIAL0).days})())" for i, h in enumerate(HOLIDAYS))
-CLNDR_DATA = (f"(0||CalendarData()((0||DaysOfWeek()({DAYS_XML}))(0||VIEW(ShowTotal|Y)())"
-              f"(0||Exceptions()({EXC_XML}))))")
+def clndr_data(workdays: tuple, holidays: list) -> str:
+    """P6 calendar text: 08:00-12:00 and 13:00-17:00 on the P6 day numbers given (1 = Sunday), the holidays off."""
+    days = "".join(f"(0||{n}()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))" if n in workdays
+                   else f"(0||{n}()())" for n in range(1, 8))
+    exc = "".join(f"(0||{i}(d|{(date.fromisoformat(h) - SERIAL0).days})())" for i, h in enumerate(holidays))
+    return (f"(0||CalendarData()((0||DaysOfWeek()({days}))(0||VIEW(ShowTotal|Y)())"
+            f"(0||Exceptions()({exc}))))")
+
+
+CLNDR_DATA = clndr_data((2, 3, 4, 5, 6), HOLIDAYS)
+assert DAYS_XML in CLNDR_DATA
+# the previous update: its 5-day calendar did not have the last holiday yet, the 6-day one works on Saturdays
+CLNDR_PREV = clndr_data((2, 3, 4, 5, 6), HOLIDAYS[:-1])
+CLNDR6_PREV = clndr_data((2, 3, 4, 5, 6, 7), HOLIDAYS[:-1])
 ENV_KEYS = ("P6_DB_PATH", "P6_USER", "P6_BACKUP_DIR", "P6_LOG_DIR", "P6MCP_TOOL_PROFILE", "P6MCP_ALLOW_WRITES")
 
 
@@ -373,41 +391,50 @@ def server():
 _CAL = []
 
 
-def cal():
+def cal(data: str = None, cid: int = CAL_ID, name: str = CAL_NAME):
+    """The project calendar (another calendar text: a new _Cal of it)."""
+    if data is not None:
+        week, exc = server()._cal_parse(data)
+        return server()._Cal(cid, name, HPD, week, dict(exc))
     if not _CAL:
-        s = server()
-        week, exc = s._cal_parse(CLNDR_DATA)
-        _CAL.append(s._Cal(CAL_ID, CAL_NAME, HPD, week, dict(exc)))
+        _CAL.append(cal(CLNDR_DATA))
     return _CAL[0]
 
 
-def engine(dd, must, rem_h, status=None, actual=None, cstr=None):
-    """Run the server's CPM engine on the network in memory: ({code: {es, ef, ls, lf, tf_h}}, engine)."""
-    s, cl = server(), cal()
+def engine(dd, must, rem_h, status=None, actual=None, cstr=None, net=None):
+    """Run the server's CPM engine on the network in memory: ({code: {es, ef, ls, lf, tf_h}}, engine). cstr:
+    code -> a date (start on or after) or (constraint type, date); net: another network (previous())."""
+    s, net = server(), net or NET
+    cl = net.get("cal") or cal()
+    codes, acts = net["codes"], net["acts"]
+    tid = {c: i + 1 for i, c in enumerate(codes)}
     cpm = object.__new__(s._Cpm)
-    cpm.pid, cpm.dd, cpm.must, cpm.opts = 1, dd, must, dict(OPTS)
+    cpm.pid, cpm.dd, cpm.must, cpm.opts = 1, dd, must, dict(net["opts"])
     cpm.prj = {"proj_short_name": PROJ, "last_recalc_date": dd, "plan_end_date": must, "scd_end_date": None,
                "clndr_id": CAL_ID, "critical_drtn_hr_cnt": 0}
-    cpm.rule, cpm.cals, cpm.pcal = OPTS["sched_calendar_on_relationship_lag"], {CAL_ID: cl}, cl
+    cpm.rule, cpm.pcal = net["opts"]["sched_calendar_on_relationship_lag"], cl
+    cpm.cals = {CAL_ID: cl, **{c.clndr_id: c for c in net.get("task_cals", {}).values()}}
     cpm.t = {}
-    for c in CODES:
-        a = ACTS[c]
+    for c in codes:
+        a = acts[c]
         st = (status or {}).get(c, "TK_NotStart")
         ad = (actual or {}).get(c, (None, None))
         ct = (cstr or {}).get(c)
-        cpm.t[TID[c]] = {"task_id": TID[c], "task_code": c, "task_name": a["name"], "proj_id": 1, "wbs_id": a["wbs"],
-                         "task_type": a["type"], "status_code": st, "clndr_id": CAL_ID, "cal": cl, "hpd": HPD,
+        ct = ("CS_MSOA", ct) if isinstance(ct, datetime) else ct or (None, None)
+        tc = net.get("task_cals", {}).get(c, cl)
+        cpm.t[tid[c]] = {"task_id": tid[c], "task_code": c, "task_name": a["name"], "proj_id": 1, "wbs_id": a["wbs"],
+                         "task_type": a["type"], "status_code": st, "clndr_id": tc.clndr_id, "cal": tc, "hpd": HPD,
                          "rem": rem_h.get(c, 0.0), "act_start_date": ad[0], "act_end_date": ad[1],
-                         "cstr_type": ct and "CS_MSOA", "cstr_date": ct, "cstr_type2": None, "cstr_date2": None,
+                         "cstr_type": ct[0], "cstr_date": ct[1], "cstr_type2": None, "cstr_date2": None,
                          "expect_end_date": None, "suspend_date": None, "resume_date": None,
                          "early_start_date": None, "early_end_date": None, "late_start_date": None,
                          "late_end_date": None, "total_float_hr_cnt": None, "remain_drtn_hr_cnt": rem_h.get(c, 0.0)}
-    cpm.code = {c: TID[c] for c in CODES}
-    cpm.links = [{"id": i + 1, "succ": TID[q], "pred": TID[p], "type": t, "lag": lag * HPD}
-                 for i, (p, q, t, lag) in enumerate(LINKS)]
+    cpm.code = dict(tid)
+    cpm.links = [{"id": i + 1, "succ": tid[q], "pred": tid[p], "type": t, "lag": lag * HPD}
+                 for i, (p, q, t, lag) in enumerate(net["links"])]
     cpm.ext_pred, cpm.ext_succ = [], []
     res = cpm.run()
-    return {c: res[TID[c]] for c in CODES}, cpm
+    return {c: res[tid[c]] for c in codes}, cpm
 
 
 def wh(a, b):
@@ -453,50 +480,113 @@ def schedules():
     cstr = {c: cal().add_work_hours(base[c]["es"], d * HPD) for c, d in late_start.items()}
     perf, _ = engine(START, must, perf_h, cstr=cstr)
     # 3. the update at the data date
+    status, actual, rem_h, pct = progress(perf, DD, plan_h, rnd)
+    if status[P["GIS63"]["mfg"]] == "TK_NotStart":  # a re-estimate known at the data date
+        rem_h[P["GIS63"]["mfg"]] = plan_h[P["GIS63"]["mfg"]] + 10 * HPD
+    cur, cpm = engine(DD, must, rem_h, status, actual)
+    out = {"base": base, "cur": cur, "cpm": cpm, "must": must, "plan_h": plan_h, "perf": perf, "status": status,
+           "actual": actual, "rem_h": rem_h, "pct": pct}
+    out["prev"] = previous(out)
+    return out
+
+
+def progress(perf, dd, plan_h, rnd, codes=None, acts=None):
+    """(status, actual dates, remaining hours, physical %) at the data date dd of the performed dates perf."""
     status, actual, rem_h, pct = {}, {}, {}, {}
-    for c in CODES:
-        a, x = ACTS[c], perf[c]
-        done = x["es"] < DD if a["type"] == "TT_Mile" else x["ef"] <= DD
+    acts = acts or ACTS
+    for c in codes or CODES:
+        a, x = acts[c], perf[c]
+        done = x["es"] < dd if a["type"] == "TT_Mile" else x["ef"] <= dd
         if done:
             status[c] = "TK_Complete"
             actual[c] = (x["es"], x["ef"]) if a["type"] == "TT_Task" else ((x["es"],) * 2 if a["type"] == "TT_Mile"
                                                                             else (x["ef"],) * 2)
             rem_h[c], pct[c] = 0.0, 100
-        elif a["type"] == "TT_Task" and x["es"] < DD:
+        elif a["type"] == "TT_Task" and x["es"] < dd:
             status[c] = "TK_Active"
             actual[c] = (x["es"], None)
-            rem_h[c] = wh(DD, x["ef"])
-            done_h = wh(x["es"], DD)
+            rem_h[c] = wh(dd, x["ef"])
+            done_h = wh(x["es"], dd)
             pct[c] = min(95, max(5, round(100 * done_h / (done_h + rem_h[c]) + rnd.uniform(-6, 6))))
         else:
             status[c] = "TK_NotStart"
             rem_h[c], pct[c] = plan_h[c], 0
-    if status[P["GIS63"]["mfg"]] == "TK_NotStart":  # a re-estimate known at the data date
-        rem_h[P["GIS63"]["mfg"]] = plan_h[P["GIS63"]["mfg"]] + 10 * HPD
-    cur, cpm = engine(DD, must, rem_h, status, actual)
-    return {"base": base, "cur": cur, "cpm": cpm, "must": must, "plan_h": plan_h, "perf": perf, "status": status,
-            "actual": actual, "rem_h": rem_h, "pct": pct}
+    return status, actual, rem_h, pct
 
 
-def gaps(res, status, cpm):
+# The previous update: what the update DEMO-SS225 changed since it (p6_update_integrity's flags)
+TEMP = "CON-SITE-1050"  # in progress in the previous update, deleted in the update
+PREV_CHANGES = {
+    "duration_cut": {"COM-ENR-1050": 30, "CON-SEC-1060": 20},  # days in the previous update (update: 20 and 15)
+    "constraint_removed": ("CON-SEC-1010", "CS_MEOB", datetime(2026, 10, 30, 17, 0)),  # its negative float clears
+    "must_finish_wd_earlier": 10,
+    "actual_start": ("PRC-GIS225-1040", datetime(2026, 7, 23, 8, 0)),  # update: 2026-07-16 08:00
+    "actual_finish": ("PRC-MVS-1040", datetime(2026, 9, 24, 17, 0)),  # update: 2026-09-25 17:00
+    "calendar": ("CON-HV-1000", CAL6_ID),  # the 6-day calendar in the previous update
+    "option": ("sched_open_critical_flag", "Y"),  # update: N
+}
+
+
+def previous(sch) -> dict:
+    """The previous update DEMO-SS225_PREV at DD_PREV, from the same performed network, and what differs from the
+    update DEMO-SS225 (PREV_CHANGES; each is what the update changed): durations cut, Operator training tied to
+    Project completion (no successor before), a Finish On or Before constraint removed (its negative float
+    clears) with the must finish date 10 working days later, an actual start and an actual finish rewritten,
+    the link Auxiliary systems tests -> Energization procedure approval (a critical successor) removed, an SS
+    10 d link turned FS, a lag changed from 3 to 5 days, an option changed, an activity moved off the 6-day
+    calendar and a holiday added to the 5-day one, and the in-progress Temporary site facilities deleted."""
+    ch = PREV_CHANGES
+    acts = {c: dict(a) for c, a in ACTS.items()}
+    for c, days in ch["duration_cut"].items():
+        acts[c]["days"] = days
+    acts[TEMP] = {"code": TEMP, "name": "Temporary site facilities", "wbs": "CON.CIV.SITE", "days": 25,
+                  "type": "TT_Task", "res": [("DM-LABOR", 2)]}
+    codes = CODES + [TEMP]
+    links = [x for x in LINKS if (x[0], x[1]) != (K["train"], MS["end"])]
+    links = [(p, q, "PR_SS", 10) if (p, q) == (C["hvc"], C["hvt"]) else (p, q, t, 3) if (p, q) == (C["gisf"], C["gisb"])
+             else (p, q, t, lag) for p, q, t, lag in links]
+    links += [(K["auxt"], K["proc"], "PR_FS", 0), (C["mob"], TEMP, "PR_FS", 0), (TEMP, MS["civ_done"], "PR_FS", 0)]
+    plan_h = {c: acts[c]["days"] * HPD for c in codes}
+    perf = dict(sch["perf"])
+    perf[TEMP] = {"es": datetime(2026, 10, 5, 8, 0), "ef": cal().add_work_hours(datetime(2026, 10, 5, 8, 0), 25 * HPD)}
+    status, actual, rem_h, pct = progress(perf, DD_PREV, plan_h, random.Random(19), codes, acts)
+    code, when = ch["actual_start"]
+    actual[code] = (when, actual[code][1])
+    code, when = ch["actual_finish"]
+    actual[code] = (actual[code][0], when)
+    must = sch["must"] - timedelta(days=14)
+    assert wh(must, sch["must"]) == ch["must_finish_wd_earlier"] * HPD
+    code, ctype, cdate = ch["constraint_removed"]
+    cstr = {code: (ctype, cdate)}
+    net = {"codes": codes, "acts": acts, "links": links, "opts": dict(OPTS, **dict([ch["option"]])),
+           "cal": cal(CLNDR_PREV), "task_cals": {ch["calendar"][0]: cal(CLNDR6_PREV, CAL6_ID, CAL6_NAME)}}
+    res, cpm = engine(DD_PREV, must, rem_h, status, actual, cstr, net)
+    assert res[code]["tf_h"] < 0 and sch["cur"][code]["tf_h"] >= 0
+    return {"kind": "previous", "name": PROJ_PREV, "res": res, "status": status, "actual": actual, "rem_h": rem_h,
+            "pct": pct, "dd": DD_PREV, "must": must, "plan_h": plan_h, "net": net, "cstr": cstr,
+            "cals": {CAL_ID: (CAL_NAME, CLNDR_PREV, 40.0), CAL6_ID: (CAL6_NAME, CLNDR6_PREV, 48.0)},
+            "task_cal": {ch["calendar"][0]: CAL6_ID}, "last_f9": LAST_F9_PREV, "paths": True, "seed": 65}
+
+
+def gaps(res, status, cpm, links=None):
     """(pred, succ, type) -> working hours from the link's anchor (predecessor date plus lag) to the
-    successor date, for links whose predecessor is open."""
+    successor date, for links whose predecessor is open (on the project calendar)."""
     s, cl = server(), cal()
     out = {}
-    for p, q, t, lag in LINKS:
+    for p, q, t, lag in links or LINKS:
         if status.get(p) == "TK_Complete":
             continue
         a = res[p]["ef"] if s.LINK_FROM[t] == "f" else res[p]["es"]
-        b = cpm.shift(cl, a, cpm.eff_lag({"type": t, "lag": lag * HPD}, cpm.t[TID[p]], cl))
+        b = cpm.shift(cl, a, cpm.eff_lag({"type": t, "lag": lag * HPD}, cpm.t[cpm.code[p]], cl))
         out[(p, q, t)] = wh(b, res[q]["es"] if s.LINK_TO[t] == "s" else res[q]["ef"])
     return out
 
 
-def free_float(res, status, gap, must):
+def free_float(res, status, gap, must, codes=None):
     """Free float in hours of the open activities: the smallest gap to a successor (else to the must
     finish date), as P6 shows it for finish float."""
     out = {}
-    for c in CODES:
+    for c in codes or CODES:
         if status.get(c, "TK_NotStart") == "TK_Complete":
             continue
         g = [v for (p, _q, _t), v in gap.items() if p == c]
@@ -504,7 +594,7 @@ def free_float(res, status, gap, must):
     return out
 
 
-def float_paths(res, status, gap):
+def float_paths(res, status, gap, codes=None):
     """{code: (float_path, float_path_order)} of the open activities on the first FLOAT_PATHS paths
     (total float mode): path 1 traces back from the project finish through links without a gap; each
     next path starts at the open activity off the earlier paths with the least total float (latest
@@ -513,7 +603,7 @@ def float_paths(res, status, gap):
     for (p, q, _t), v in gap.items():
         if abs(v) < 0.01:
             drive.setdefault(q, []).append(p)
-    opened = [c for c in CODES if status.get(c, "TK_NotStart") != "TK_Complete"]
+    opened = [c for c in codes or CODES if status.get(c, "TK_NotStart") != "TK_Complete"]
     out, used = {}, set()
     for k in range(1, FLOAT_PATHS + 1):
         left = [c for c in opened if c not in used]
@@ -587,33 +677,44 @@ def rows_of(table, values):
     return [{f: fmt(v.get(f)) for f in FIELDS[table]} for v in values]
 
 
-def project_tables(sch, baseline: bool) -> dict:
-    res = sch["base"] if baseline else sch["cur"]
-    status = {} if baseline else sch["status"]
-    actual = {} if baseline else sch["actual"]
-    rem_h = sch["plan_h"] if baseline else sch["rem_h"]
-    pct = {} if baseline else sch["pct"]
-    dd = START if baseline else DD
-    cpm = engine(dd, sch["must"], rem_h, status or None, actual or None)[1]
-    gap = gaps(res, status, cpm)
-    ff = free_float(res, status, gap, sch["must"])
-    paths = {} if baseline else float_paths(res, status, gap)
+def variant(sch, kind: str) -> dict:
+    """What the XER of one demo project holds: kind 'baseline', 'update' or 'previous' (previous())."""
+    if kind == "previous":
+        return sch["prev"]
+    bl = kind == "baseline"
+    return {"kind": kind, "name": PROJ_BL if bl else PROJ, "res": sch["base"] if bl else sch["cur"],
+            "status": {} if bl else sch["status"], "actual": {} if bl else sch["actual"],
+            "rem_h": sch["plan_h"] if bl else sch["rem_h"], "pct": {} if bl else sch["pct"], "dd": START if bl else DD,
+            "must": sch["must"], "plan_h": sch["plan_h"], "net": NET, "cstr": {},
+            "cals": {CAL_ID: (CAL_NAME, CLNDR_DATA, 40.0)}, "task_cal": {},
+            "last_f9": START + timedelta(hours=1) if bl else LAST_F9, "paths": not bl, "seed": 63 if bl else 64}
+
+
+def project_tables(sch, baseline: bool = False, kind: str = None) -> dict:
+    v = variant(sch, kind or ("baseline" if baseline else "update"))
+    res, status, actual, rem_h, pct, dd = (v[k] for k in ("res", "status", "actual", "rem_h", "pct", "dd"))
+    codes, acts = v["net"]["codes"], v["net"]["acts"]
+    tid = {c: i + 1 for i, c in enumerate(codes)}
+    cpm = engine(dd, v["must"], rem_h, status or None, actual or None, v["cstr"] or None, v["net"])[1]
+    gap = gaps(res, status, cpm, v["net"]["links"])
+    ff = free_float(res, status, gap, v["must"], codes)
+    paths = float_paths(res, status, gap, codes) if v["paths"] else {}
     drive = {c for c, (k, _i) in paths.items() if k == 1}
     finish = max(r["ef"] for r in res.values())
     t = {"OBS": rows_of("OBS", [{"obs_id": 1, "seq_num": 0, "obs_name": "Enterprise"}])}
     t["PROJECT"] = rows_of("PROJECT", [{
         "proj_id": 1, "project_flag": "Y", "name_sep_char": ".", "def_complete_pct_type": "CP_Phys",
-        "proj_short_name": PROJ_BL if baseline else PROJ, "clndr_id": CAL_ID, "task_code_base": "1000",
+        "proj_short_name": v["name"], "clndr_id": CAL_ID, "task_code_base": "1000",
         "task_code_step": "10", "critical_drtn_hr_cnt": 0.0, "last_recalc_date": dd, "plan_start_date": START,
-        "plan_end_date": sch["must"], "scd_end_date": finish, "add_date": START, "def_duration_type": "DT_FixedDUR2",
+        "plan_end_date": v["must"], "scd_end_date": finish, "add_date": START, "def_duration_type": "DT_FixedDUR2",
         "task_code_prefix": "A", "def_task_type": "TT_Task", "critical_path_type": "CT_TotFloat",
-        "rem_target_link_flag": "Y", "export_flag": "Y",
-        "last_schedule_date": START + timedelta(hours=1) if baseline else LAST_F9}])
+        "rem_target_link_flag": "Y", "export_flag": "Y", "last_schedule_date": v["last_f9"]}])
     t["CALENDAR"] = rows_of("CALENDAR", [{
-        "clndr_id": CAL_ID, "default_flag": "N", "clndr_name": CAL_NAME, "proj_id": 1,
-        "last_chng_date": "2026-01-15 00:00", "clndr_type": "CA_Project", "day_hr_cnt": 8.0, "week_hr_cnt": 40.0,
-        "month_hr_cnt": 172.0, "year_hr_cnt": 2000.0, "rsrc_private": "N", "clndr_data": CLNDR_DATA}])
-    so = dict(OPTS, schedoptions_id="1", proj_id="1", level_float_thrs_cnt="0", level_outer_assign_flag="N",
+        "clndr_id": cid, "default_flag": "N", "clndr_name": cname, "proj_id": 1,
+        "last_chng_date": "2026-01-15 00:00", "clndr_type": "CA_Project", "day_hr_cnt": 8.0, "week_hr_cnt": week_h,
+        "month_hr_cnt": float(round(week_h * 4.3)), "year_hr_cnt": week_h * 50, "rsrc_private": "N", "clndr_data": data}
+        for cid, (cname, data, week_h) in v["cals"].items()])
+    so = dict(v["net"]["opts"], schedoptions_id="1", proj_id="1", level_float_thrs_cnt="0", level_outer_assign_flag="N",
               level_outer_assign_priority="1", level_over_alloc_pct="0", level_within_float_flag="N",
               level_keep_sched_date_flag="Y", level_all_rsrc_flag="Y", enable_multiple_longest_path_calc="Y",
               limit_multiple_longest_path_calc="Y", max_multiple_longest_path=str(FLOAT_PATHS),
@@ -623,7 +724,7 @@ def project_tables(sch, baseline: bool) -> dict:
     t["PROJWBS"] = rows_of("PROJWBS", [
         {"wbs_id": wid[k], "proj_id": 1, "obs_id": 1, "seq_num": 10 * (i + 1), "est_wt": 1,
          "proj_node_flag": "Y" if par is None else "N", "sum_data_flag": "N", "status_code": "WS_Open",
-         "wbs_short_name": PROJ_BL if par is None and baseline else short, "wbs_name": name,
+         "wbs_short_name": v["name"] if par is None else short, "wbs_name": name,
          "parent_wbs_id": wid.get(par), "ev_compute_type": "EC_Cmp_pct", "ev_etc_compute_type": "EE_Rem_hr"}
         for i, (k, par, short, name) in enumerate(WBS)])
     rid = {r: i + 1 for i, r in enumerate(RES)}
@@ -632,21 +733,21 @@ def project_tables(sch, baseline: bool) -> dict:
                                   "cost_qty_type": "QT_Hour", "def_qty_per_hr": 1.0, "ot_flag": "N",
                                   "auto_compute_act_flag": "Y"} for r, (nm, typ, _rate) in RES.items()])
     tasks, asgs = [], []
-    rnd = random.Random(63 if baseline else 64)
-    for c in CODES:
-        a, x = ACTS[c], res[c]
+    rnd = random.Random(v["seed"])
+    for c in codes:
+        a, x = acts[c], res[c]
         st = status.get(c, "TK_NotStart")
         as_, af = actual.get(c, (None, None))
         is_open = st != "TK_Complete"
-        bx = sch["base"][c]
+        bx = sch["base"].get(c, x)  # an activity the baseline lacks: its own dates
         tgt = (bx["es"], bx["ef"]) if st != "TK_NotStart" else (x["es"], x["ef"])
         if a["type"] == "TT_Mile":
             tgt = (tgt[0], tgt[0])
         elif a["type"] == "TT_FinMile":
             tgt = (tgt[1], tgt[1])
-        plan = sch["plan_h"][c]
+        plan = v["plan_h"][c]
         rem = rem_h[c] if is_open else 0.0
-        done_h = wh(as_, af or DD) if as_ and a["type"] == "TT_Task" else 0.0
+        done_h = wh(as_, af or dd) if as_ and a["type"] == "TT_Task" else 0.0
         work = {"work": [0.0, 0.0, 0.0], "equip": [0.0, 0.0, 0.0]}  # target, actual, remaining
         for r, people in a["res"]:
             typ, rate = RES[r][1], RES[r][2]
@@ -666,7 +767,7 @@ def project_tables(sch, baseline: bool) -> dict:
                 acc[1] += act_q
                 acc[2] += rem_q
             per_hr = target / plan if plan else float(people)
-            asgs.append({"taskrsrc_id": len(asgs) + 1, "task_id": TID[c], "proj_id": 1, "cost_qty_link_flag": "Y",
+            asgs.append({"taskrsrc_id": len(asgs) + 1, "task_id": tid[c], "proj_id": 1, "cost_qty_link_flag": "Y",
                          "rsrc_id": rid[r], "remain_qty": rem_q, "target_qty": target,
                          "remain_qty_per_hr": rem_q / rem if rem else per_hr, "target_qty_per_hr": per_hr,
                          "act_ot_qty": 0.0, "act_reg_qty": act_q, "cost_per_qty": float(rate),
@@ -678,8 +779,9 @@ def project_tables(sch, baseline: bool) -> dict:
                          "rem_late_end_date": x["lf"] if is_open else None, "rsrc_type": typ})
         ms = a["type"] in ("TT_Mile", "TT_FinMile")
         fp = paths.get(c, (None, None))
+        ct = v["cstr"].get(c, (None, None))
         tasks.append({
-            "task_id": TID[c], "proj_id": 1, "wbs_id": wid[a["wbs"]], "clndr_id": CAL_ID,
+            "task_id": tid[c], "proj_id": 1, "wbs_id": wid[a["wbs"]], "clndr_id": v["task_cal"].get(c, CAL_ID),
             "phys_complete_pct": float(pct.get(c, 0)), "rev_fdbk_flag": "N", "est_wt": 1, "lock_plan_flag": "N",
             "auto_compute_act_flag": "N", "complete_pct_type": "CP_Phys", "task_type": a["type"],
             "duration_type": "DT_FixedDrtn" if ms else "DT_FixedDUR2", "status_code": st, "task_code": c,
@@ -696,18 +798,18 @@ def project_tables(sch, baseline: bool) -> dict:
             "target_start_date": tgt[0], "target_end_date": tgt[1],
             "rem_late_start_date": x["ls"] if is_open else None, "rem_late_end_date": x["lf"] if is_open else None,
             "priority_type": "PT_Normal", "float_path": fp[0], "float_path_order": fp[1],
-            "driving_path_flag": "Y" if c in drive else "N"})
+            "driving_path_flag": "Y" if c in drive else "N", "cstr_type": ct[0], "cstr_date": ct[1]})
     t["TASK"] = rows_of("TASK", tasks)
     t["TASKPRED"] = rows_of("TASKPRED", [
-        {"task_pred_id": i + 1, "task_id": TID[q], "pred_task_id": TID[p], "proj_id": 1, "pred_proj_id": 1,
-         "pred_type": typ, "lag_hr_cnt": lag * HPD} for i, (p, q, typ, lag) in enumerate(LINKS)])
+        {"task_pred_id": i + 1, "task_id": tid[q], "pred_task_id": tid[p], "proj_id": 1, "pred_proj_id": 1,
+         "pred_type": typ, "lag_hr_cnt": lag * HPD} for i, (p, q, typ, lag) in enumerate(v["net"]["links"])])
     t["TASKRSRC"] = rows_of("TASKRSRC", asgs)
     return t
 
 
-def write_xer(path, tables) -> None:
+def write_xer(path, tables, exported: datetime = DD) -> None:
     s = server()
-    head = ["ERMHDR", "24.12", DD.strftime("%Y-%m-%d"), "Project", "ADMIN", "ADMIN", "dbxDatabaseNoName",
+    head = ["ERMHDR", "24.12", exported.strftime("%Y-%m-%d"), "Project", "ADMIN", "ADMIN", "dbxDatabaseNoName",
             "Project Management", "USD"]
     lines = ["\t".join(head)]
     for name in s.XER_EXPORT_TABLES:
@@ -724,12 +826,14 @@ def write_xer(path, tables) -> None:
 
 
 def write_xers(out_dir: str) -> dict:
-    """The two XER files in out_dir and a summary of the schedule."""
+    """The three XER files in out_dir and a summary of the schedule (of the update)."""
     sch = schedules()
     out = {}
     for baseline, name in ((True, PROJ_BL), (False, PROJ)):
         out[name] = os.path.join(out_dir, name + ".xer")
         write_xer(out[name], project_tables(sch, baseline))
+    out[PROJ_PREV] = os.path.join(out_dir, PROJ_PREV + ".xer")
+    write_xer(out[PROJ_PREV], project_tables(sch, kind="previous"), DD_PREV)
     st, cur, base = sch["status"], sch["cur"], sch["base"]
     out.update({
         "activities": len(CODES), "links": len(LINKS), "wbs_nodes": len(WBS), "resources": len(RES),
@@ -767,7 +871,8 @@ def use_db(path: str, work: str):
 
 
 def build_db(path: str, work: str = None) -> dict:
-    """make_db's database at path with DEMO-SS225 imported (the baseline as its project baseline);
+    """make_db's database at path with DEMO-SS225 imported (the baseline as its project baseline, the
+    previous update as another baseline of it, with its schedule options);
     the XER files, backups and edit log go to work (default: the folder of path). Returns the
     write_xers summary."""
     path = os.path.abspath(path)
@@ -783,7 +888,9 @@ def build_db(path: str, work: str = None) -> dict:
     con.close()
     s = use_db(path, work)
     for kw in ({"path": info[PROJ], "mode": "new", "eps": EPS},
-               {"path": info[PROJ_BL], "mode": "baseline", "project": PROJ, "set_as_project_baseline": True}):
+               {"path": info[PROJ_BL], "mode": "baseline", "project": PROJ, "set_as_project_baseline": True},
+               {"path": info[PROJ_PREV], "mode": "baseline", "project": PROJ, "set_as_project_baseline": False,
+                "import_schedule_options": True}):
         res = s.p6_import_xer(confirm=True, **kw)
         if res.get("applied") is False or res.get("would_refuse"):
             raise RuntimeError(f"demo import refused: {json.dumps(res, default=str)[:2000]}")
