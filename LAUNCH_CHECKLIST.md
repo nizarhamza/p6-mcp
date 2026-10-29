@@ -16,12 +16,11 @@ Names used below:
 
 ## A. Before pushing
 
-- [ ] Record the demo GIF (20 to 40 seconds, 1280 px wide, under 5 MB, for example with ScreenToGif) on the
-      public demo project, never on real data: build it with `python tests/fixtures/make_demo.py <folder>`, select
-      `<folder>\demo.db` in the Settings window, then in Claude Desktop ask "What drives MS-1100 - Project
-      completion in DEMO-SS225?" and "What if PRC-TR-1040 finishes 15 working days earlier?". Save it as
-      `docs/images/demo.gif`, point the README image (under the DEMO GIF PLACEHOLDER comment) at it, delete
-      `docs/images/demo-placeholder.png`, commit.
+- [x] Demo GIF `docs/images/demo.gif` (30 seconds, 1280 x 720, 0.5 MB): a rendered replay of a real run, not a
+      screen recording. The questions "What drives MS-1100 - Project completion in DEMO-SS225?" and "What if
+      PRC-TR-1040 finishes 15 working days earlier?" went through the installed server (1.9.0) on the demo database
+      of `python tests/fixtures/make_demo.py <folder>`; the GIF shows those tool calls and results. Done
+      2026-10-29.
 - [ ] Read the README and the site once more. Preview the site with
       `python -m http.server 8765 --directory site` and open `http://localhost:8765/`.
 - [ ] Optional follow-up, not blocking: the skill shop catalog (its README, issue form, authoring guide and the

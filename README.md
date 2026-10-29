@@ -20,9 +20,7 @@ backed up first and recorded in an edit log.
 > MCP for Primavera P6 is an independent project. It is not affiliated with, endorsed or sponsored by Oracle.
 > Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates.
 
-<!-- DEMO GIF PLACEHOLDER: record a 20 to 40 second capture (see LAUNCH_CHECKLIST.md), save it as
-     docs/images/demo.gif and point the image below at it. -->
-![Demo: an AI assistant traces the driving path of a P6 activity, then runs a what-if](docs/images/demo-placeholder.png)
+![Demo, a replay of a real run on the synthetic demo project DEMO-SS225: an AI assistant traces the driving path of MS-1100 - Project completion, then runs a what-if on PRC-TR-1040](docs/images/demo.gif)
 
 **Contents:** [What it does](#what-it-does) · [Install](#install) · [Connect your MCP client](#connect-your-mcp-client) ·
 [Tools](#tools) · [Compared with XER-only servers](#compared-with-xer-only-mcp-servers) · [Safety](#safety) ·
