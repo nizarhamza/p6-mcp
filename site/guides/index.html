@@ -10,8 +10,9 @@
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="preload" href="/assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
+<noscript><style>@media (max-width: 47.99rem) { .menu-toggle { display: none !important; } .masthead .wrap { flex-wrap: wrap !important; } .site-nav { position: static !important; display: flex !important; flex-direction: row !important; flex-wrap: wrap !important; opacity: 1 !important; visibility: visible !important; translate: none !important; padding: 0 !important; background: none !important; box-shadow: none !important; border: 0 !important; } .site-nav a { border: 0 !important; font-size: 0.95rem !important; padding: 0.35rem 0.1rem !important; } .home .hero { padding-top: calc(var(--masthead-h) + 4.5rem) !important; } }</style></noscript>
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="MCP for Primavera P6">
 <meta property="og:title" content="Primavera P6 and AI guides">
@@ -55,18 +56,20 @@
       <svg viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect x="4" y="56" width="16" height="8" rx="4" fill="#fff"/><path d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z" fill="#fff"/><rect x="58" y="42" width="46" height="12" rx="6" fill="#58A6FF"/><rect x="58" y="66" width="26" height="12" rx="6" fill="#58A6FF"/><path d="M96 64L104 72L96 80L88 72Z" fill="#58A6FF"/></g></svg>
       <span><span class="brand-name">MCP</span> <span class="brand-tag">for Primavera P6</span></span>
     </a>
-    <nav class="site-nav" aria-label="Main">
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span class="menu-icon" aria-hidden="true"></span><span class="menu-label">Menu</span></button>
+    <nav class="site-nav" id="site-nav" aria-label="Main">
       <a href="/guides/" aria-current="page">Guides</a>
       <a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">Tools</a>
       <a href="/#faq">FAQ</a>
       <a href="https://github.com/nizarhamza/mcp-for-primavera-p6">GitHub</a>
-      <a class="btn btn-primary btn-small" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a>
+      <a class="btn btn-primary btn-small btn-nav" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>Download</a>
     </nav>
   </div>
 </header>
 
 <main id="main">
-  <section class="doc-head on-navy" aria-labelledby="page-title">
+  <section class="doc-head on-navy has-photo" aria-labelledby="page-title">
+    <img class="doc-photo" src="/assets/img/photo-1652145595413-0a79398e5888-1600x672.webp" srcset="/assets/img/photo-1652145595413-0a79398e5888-960x403.webp 960w, /assets/img/photo-1652145595413-0a79398e5888-1600x672.webp 1600w, /assets/img/photo-1652145595413-0a79398e5888-2400x1008.webp 2400w" sizes="100vw" width="1600" height="672" alt="" fetchpriority="high" decoding="async">
     <div class="wrap">
       <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li aria-current="page">Guides</li></ol></nav>
       <h1 id="page-title">Primavera P6 with an AI assistant: guides</h1>
@@ -77,11 +80,11 @@
 
   <section class="section" aria-label="Guides">
     <div class="wrap">
-      <ul class="toc">
-        <li><a href="/guides/dcma-14-point-check-ai/"><strong>DCMA 14-point check with AI</strong><span>Run the 14 checks with the thresholds set in P6, read each failed check, drill into the activities behind it and follow the trend between updates.</span></a></li>
-        <li><a href="/guides/driving-path-p6-claude/"><strong>Driving path in P6 with Claude</strong><span>Trace what drives an activity back to its root cause, see where its total float comes from, then test a change in memory.</span></a></li>
-        <li><a href="/guides/compare-p6-updates-ai/"><strong>Comparing two P6 updates with AI</strong><span>Activities and links compared one by one, slip causes, float erosion, and the integrity flags that explain a finish date that moved.</span></a></li>
-        <li><a href="/guides/review-xer-before-submission/"><strong>AI review of an XER before submission</strong><span>File checks, logic, progress and integrity of an update XER, without importing it, before it goes to the client or after it arrives.</span></a></li>
+      <ul class="toc toc-media">
+        <li><a href="/guides/dcma-14-point-check-ai/"><img src="/assets/img/photo-1551288049-bebda4e38f71-800x500.webp" srcset="/assets/img/photo-1551288049-bebda4e38f71-480x300.webp 480w, /assets/img/photo-1551288049-bebda4e38f71-800x500.webp 800w, /assets/img/photo-1551288049-bebda4e38f71-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>DCMA 14-point check with AI</strong><span>Run the 14 checks with the thresholds set in P6, read each failed check, drill into the activities behind it and follow the trend between updates.</span></a></li>
+        <li><a href="/guides/driving-path-p6-claude/"><img src="/assets/img/photo-1531403009284-440f080d1e12-800x500.webp" srcset="/assets/img/photo-1531403009284-440f080d1e12-480x300.webp 480w, /assets/img/photo-1531403009284-440f080d1e12-800x500.webp 800w, /assets/img/photo-1531403009284-440f080d1e12-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>Driving path in P6 with Claude</strong><span>Trace what drives an activity back to its root cause, see where its total float comes from, then test a change in memory.</span></a></li>
+        <li><a href="/guides/compare-p6-updates-ai/"><img src="/assets/img/photo-1599658880436-c61792e70672-800x500.webp" srcset="/assets/img/photo-1599658880436-c61792e70672-480x300.webp 480w, /assets/img/photo-1599658880436-c61792e70672-800x500.webp 800w, /assets/img/photo-1599658880436-c61792e70672-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>Comparing two P6 updates with AI</strong><span>Activities and links compared one by one, slip causes, float erosion, and the integrity flags that explain a finish date that moved.</span></a></li>
+        <li><a href="/guides/review-xer-before-submission/"><img src="/assets/img/photo-1608303588026-884930af2559-800x500.webp" srcset="/assets/img/photo-1608303588026-884930af2559-480x300.webp 480w, /assets/img/photo-1608303588026-884930af2559-800x500.webp 800w, /assets/img/photo-1608303588026-884930af2559-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>AI review of an XER before submission</strong><span>File checks, logic, progress and integrity of an update XER, without importing it, before it goes to the client or after it arrives.</span></a></li>
       </ul>
       <div class="cta-row">
         <a class="btn btn-primary" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download for Windows</a>
@@ -119,8 +122,11 @@
       </nav>
     </div>
     <p class="legal">MCP for Primavera P6 is an independent project, not affiliated with, endorsed or sponsored by Oracle. Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. The demo project shown on this site is synthetic.</p>
+    <p class="credits">Photographs from Unsplash: <a href="https://unsplash.com/photos/a-room-with-many-screens-and-monitors-wrx2tdzzgDw">control room</a> by Ana Garnica, <a href="https://unsplash.com/photos/graphs-of-performance-analytics-on-a-laptop-screen-JKUTrJ4vK00">analytics dashboard</a> by Luke Chesser, <a href="https://unsplash.com/photos/person-working-on-blue-and-white-paper-on-board-qWwpHwip31M">planning board</a> by Alvaro Reyes, <a href="https://unsplash.com/photos/person-using-macbook-pro-on-black-table-eveI7MOcSmw">dashboard on a laptop</a> by Myriam Jessier, <a href="https://unsplash.com/photos/people-reviewing-architectural-blueprints-on-desk-3QzMBrvCeyQ">drawing review</a> by Pedro Miranda.</p>
   </div>
 </footer>
+<script src="/assets/vendor/gsap/gsap.min.js" defer></script>
+<script src="/assets/vendor/gsap/ScrollTrigger.min.js" defer></script>
 <script src="/assets/site.js" defer></script>
 </body>
 </html>

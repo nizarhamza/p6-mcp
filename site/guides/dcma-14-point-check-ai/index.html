@@ -10,8 +10,9 @@
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="preload" href="/assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
+<noscript><style>@media (max-width: 47.99rem) { .menu-toggle { display: none !important; } .masthead .wrap { flex-wrap: wrap !important; } .site-nav { position: static !important; display: flex !important; flex-direction: row !important; flex-wrap: wrap !important; opacity: 1 !important; visibility: visible !important; translate: none !important; padding: 0 !important; background: none !important; box-shadow: none !important; border: 0 !important; } .site-nav a { border: 0 !important; font-size: 0.95rem !important; padding: 0.35rem 0.1rem !important; } .home .hero { padding-top: calc(var(--masthead-h) + 4.5rem) !important; } }</style></noscript>
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="MCP for Primavera P6">
 <meta property="og:title" content="DCMA 14-point check with AI in Primavera P6">
@@ -59,18 +60,20 @@
       <svg viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect x="4" y="56" width="16" height="8" rx="4" fill="#fff"/><path d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z" fill="#fff"/><rect x="58" y="42" width="46" height="12" rx="6" fill="#58A6FF"/><rect x="58" y="66" width="26" height="12" rx="6" fill="#58A6FF"/><path d="M96 64L104 72L96 80L88 72Z" fill="#58A6FF"/></g></svg>
       <span><span class="brand-name">MCP</span> <span class="brand-tag">for Primavera P6</span></span>
     </a>
-    <nav class="site-nav" aria-label="Main">
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span class="menu-icon" aria-hidden="true"></span><span class="menu-label">Menu</span></button>
+    <nav class="site-nav" id="site-nav" aria-label="Main">
       <a href="/guides/" aria-current="page">Guides</a>
       <a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">Tools</a>
       <a href="/#faq">FAQ</a>
       <a href="https://github.com/nizarhamza/mcp-for-primavera-p6">GitHub</a>
-      <a class="btn btn-primary btn-small" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a>
+      <a class="btn btn-primary btn-small btn-nav" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>Download</a>
     </nav>
   </div>
 </header>
 
 <main id="main">
-  <section class="doc-head on-navy" aria-labelledby="page-title">
+  <section class="doc-head on-navy has-photo" aria-labelledby="page-title">
+    <img class="doc-photo" src="/assets/img/photo-1551288049-bebda4e38f71-1600x672.webp" srcset="/assets/img/photo-1551288049-bebda4e38f71-960x403.webp 960w, /assets/img/photo-1551288049-bebda4e38f71-1600x672.webp 1600w, /assets/img/photo-1551288049-bebda4e38f71-2400x1008.webp 2400w" sizes="100vw" width="1600" height="672" alt="" fetchpriority="high" decoding="async">
     <div class="wrap">
       <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">Guides</a></li><li aria-current="page">DCMA 14-point check</li></ol></nav>
       <h1 id="page-title">DCMA 14-point check with AI in Primavera P6</h1>
@@ -184,11 +187,20 @@
           <li><a href="/guides/driving-path-p6-claude/"><strong>Driving path in P6 with Claude</strong><span>Find what drives the negative float back to its root cause.</span></a></li>
           <li><a href="/guides/compare-p6-updates-ai/"><strong>Comparing two P6 updates with AI</strong><span>See what changed between two updates and why.</span></a></li>
         </ul>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download for Windows</a>
-        </div>
       </div>
     </article>
+    <aside class="doc-rail" aria-labelledby="rail-title">
+      <div class="rail-card">
+        <h2 id="rail-title">Try it on your own schedule</h2>
+        <p>Free Windows installer. It registers the server with Claude, Cursor, VS Code and the other MCP clients it finds, and works on your P6 database or on an XER file.</p>
+        <a class="btn btn-primary btn-download btn-rail" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">
+          <span class="btn-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></span>
+          <span class="btn-text">Download for Windows<small>Version 2.0.0, Windows 10 and 11</small></span>
+        </a>
+        <a class="rail-link" href="/#install">How to install</a>
+      </div>
+      <p class="rail-note">Every result on this page comes from DEMO-SS225, a public demo project with synthetic data.</p>
+    </aside>
   </div>
 </main>
 
@@ -220,8 +232,11 @@
       </nav>
     </div>
     <p class="legal">MCP for Primavera P6 is an independent project, not affiliated with, endorsed or sponsored by Oracle. Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. The demo project shown on this site is synthetic.</p>
+    <p class="credits">Photographs from Unsplash: <a href="https://unsplash.com/photos/graphs-of-performance-analytics-on-a-laptop-screen-JKUTrJ4vK00">analytics dashboard</a> by Luke Chesser.</p>
   </div>
 </footer>
+<script src="/assets/vendor/gsap/gsap.min.js" defer></script>
+<script src="/assets/vendor/gsap/ScrollTrigger.min.js" defer></script>
 <script src="/assets/site.js" defer></script>
 </body>
 </html>

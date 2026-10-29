@@ -10,9 +10,9 @@
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="preload" href="/assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/assets/fonts/plex-sans-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
+<noscript><style>@media (max-width: 47.99rem) { .menu-toggle { display: none !important; } .masthead .wrap { flex-wrap: wrap !important; } .site-nav { position: static !important; display: flex !important; flex-direction: row !important; flex-wrap: wrap !important; opacity: 1 !important; visibility: visible !important; translate: none !important; padding: 0 !important; background: none !important; box-shadow: none !important; border: 0 !important; } .site-nav a { border: 0 !important; font-size: 0.95rem !important; padding: 0.35rem 0.1rem !important; } .home .hero { padding-top: calc(var(--masthead-h) + 4.5rem) !important; } }</style></noscript>
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="MCP for Primavera P6">
 <meta property="og:title" content="Primavera P6 MCP Server: connect Claude, ChatGPT and Cursor to P6">
@@ -77,39 +77,41 @@
 }
 </script>
 </head>
-<body>
+<body class="home">
 <a class="skip-link" href="#main">Skip to content</a>
 
-<header class="masthead on-navy">
+<header class="masthead masthead-over on-navy">
   <div class="wrap">
     <a class="brand" href="/" aria-label="MCP for Primavera P6, home">
       <svg viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect x="4" y="56" width="16" height="8" rx="4" fill="#fff"/><path d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z" fill="#fff"/><rect x="58" y="42" width="46" height="12" rx="6" fill="#58A6FF"/><rect x="58" y="66" width="26" height="12" rx="6" fill="#58A6FF"/><path d="M96 64L104 72L96 80L88 72Z" fill="#58A6FF"/></g></svg>
       <span><span class="brand-name">MCP</span> <span class="brand-tag">for Primavera P6</span></span>
     </a>
-    <nav class="site-nav" aria-label="Main">
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span class="menu-icon" aria-hidden="true"></span><span class="menu-label">Menu</span></button>
+    <nav class="site-nav" id="site-nav" aria-label="Main">
       <a href="/guides/">Guides</a>
       <a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">Tools</a>
       <a href="#faq">FAQ</a>
       <a href="https://github.com/nizarhamza/mcp-for-primavera-p6">GitHub</a>
-      <a class="btn btn-primary btn-small" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a>
+      <a class="btn btn-primary btn-small btn-nav" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>Download</a>
     </nav>
   </div>
 </header>
 
 <main id="main">
   <section class="hero on-navy" aria-labelledby="hero-title">
+    <img class="hero-photo" src="/assets/img/photo-1526628953301-3e589a6a8b74-1920.webp" srcset="/assets/img/photo-1526628953301-3e589a6a8b74-1280.webp 1280w, /assets/img/photo-1526628953301-3e589a6a8b74-1920.webp 1920w, /assets/img/photo-1526628953301-3e589a6a8b74-2560.webp 2560w" sizes="100vw" width="1920" height="1280" alt="" fetchpriority="high" decoding="async">
     <div class="wrap hero-grid">
-      <div>
+      <div class="hero-copy">
         <h1 id="hero-title">Ask your Primavera&nbsp;P6 schedule, in plain language</h1>
         <p class="lede">A local <strong>Primavera P6 MCP server</strong> for Claude, ChatGPT, Cursor and VS Code. It reads the P6 Professional database or XER files and computes the answer from the schedule: driving path, total float, the DCMA 14-point check, what changed since the last update, what-if. When you allow it, it <strong>edits the schedule too</strong>: previewed, confirmed by you, backed up and logged.</p>
         <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">
-            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
-            Download for Windows
+          <a class="btn btn-primary btn-download" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">
+            <span class="btn-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></span>
+            <span class="btn-text">Download for Windows<small>Version 2.0.0 installer, Windows 10 and 11</small></span>
           </a>
           <a class="btn btn-ghost" href="/guides/">Read the guides</a>
         </div>
-        <p class="cta-note">Version 2.0.0 &middot; Windows 10 and 11 &middot; free, Apache 2.0 &middot; not affiliated with Oracle</p>
+        <p class="cta-note">Free and open source under Apache 2.0. Not affiliated with Oracle.</p>
       </div>
 
       <figure class="transcript" aria-labelledby="demo-caption">
@@ -146,11 +148,83 @@
     </div>
   </section>
 
+  <section class="section path" aria-labelledby="path-title">
+    <div class="path-stage">
+      <div class="wrap">
+        <div class="path-grid">
+          <div class="section-head path-copy">
+            <h2 id="path-title">Every update, the same questions</h2>
+            <ol class="path-notes">
+              <li class="is-current">
+                <p class="note-when">Data date 26 Oct 2026</p>
+                <h3>What drives the finish date?</h3>
+                <p><code>p6_driving_path</code> follows the driving predecessors of MS-1100 back to the root cause: transformer manufacturing, still in progress at the data date. <code>p6_float_origin</code> explains the -36 days of float: the must finish by date of 16 Aug 2027.</p>
+              </li>
+              <li>
+                <p class="note-when">Example: June 2027 update</p>
+                <h3>What changed since the last update?</h3>
+                <p><code>p6_compare_projects</code> compares the new update with the previous one, activity by activity and link by link: which dates slipped, why, and how much float was lost. <code>p6_update_integrity</code> lists the changes a reviewer should question.</p>
+              </li>
+              <li>
+                <p class="note-when">Example: August 2027 update</p>
+                <h3>Does the schedule still pass the DCMA check?</h3>
+                <p><code>p6_health_check</code> runs the 14 checks with the thresholds set in P6 for the project, plus the critical path test, CPLI and BEI, and lists the activities behind every failed check.</p>
+              </li>
+              <li>
+                <p class="note-when">Forecast finish 5 Oct 2027</p>
+                <h3>Will the finish date hold?</h3>
+                <p><code>p6_schedule_risk</code> runs a Monte Carlo simulation on the remaining durations: the P50 and P80 finish dates, the chance of finishing on time and how often each activity is critical.</p>
+              </li>
+            </ol>
+            <p class="path-hint"><span class="scroll-only">Scroll to move the data date through the year. </span>Demo project with synthetic data: its update is dated 26 Oct 2026, the June and August 2027 updates are examples.</p>
+          </div>
+          <ol class="path-frames">
+            <li data-start="25" style="--n:0">
+              <figure>
+                <div class="frame"><img src="/assets/img/photo-1769738360873-3ba6cac0b308-1200x760.webp" srcset="/assets/img/photo-1769738360873-3ba6cac0b308-640x405.webp 640w, /assets/img/photo-1769738360873-3ba6cac0b308-960x608.webp 960w, /assets/img/photo-1769738360873-3ba6cac0b308-1400x886.webp 1400w" sizes="(min-width: 64rem) 52vw, 74vw" width="1200" height="760" alt="A planner drawing a flowchart on a whiteboard" loading="lazy" decoding="async"></div>
+                <figcaption><b>p6_driving_path</b>What drives the finish date?<time>Data date 26 Oct 2026</time></figcaption>
+              </figure>
+            </li>
+            <li data-start="244" style="--n:1">
+              <figure>
+                <div class="frame"><img src="/assets/img/photo-1581092446327-9b52bd1570c2-1200x760.webp" srcset="/assets/img/photo-1581092446327-9b52bd1570c2-640x405.webp 640w, /assets/img/photo-1581092446327-9b52bd1570c2-960x608.webp 960w, /assets/img/photo-1581092446327-9b52bd1570c2-1400x886.webp 1400w" sizes="(min-width: 64rem) 52vw, 74vw" width="1200" height="760" alt="Two engineers reviewing drawings at a desk" loading="lazy" decoding="async"></div>
+                <figcaption><b>p6_compare_projects</b>What changed since the last update?<time>Example: June 2027 update</time></figcaption>
+              </figure>
+            </li>
+            <li data-start="308" style="--n:2">
+              <figure>
+                <div class="frame"><img src="/assets/img/photo-1460925895917-afdab827c52f-1200x760.webp" srcset="/assets/img/photo-1460925895917-afdab827c52f-640x405.webp 640w, /assets/img/photo-1460925895917-afdab827c52f-960x608.webp 960w, /assets/img/photo-1460925895917-afdab827c52f-1400x886.webp 1400w" sizes="(min-width: 64rem) 52vw, 74vw" width="1200" height="760" alt="A laptop showing charts on a dashboard" loading="lazy" decoding="async"></div>
+                <figcaption><b>p6_health_check</b>Does the schedule still pass the DCMA check?<time>Example: August 2027 update</time></figcaption>
+              </figure>
+            </li>
+            <li data-start="369" style="--n:3">
+              <figure>
+                <div class="frame"><img src="/assets/img/photo-1546263463-02ec45e884fd-1200x760.webp" srcset="/assets/img/photo-1546263463-02ec45e884fd-640x405.webp 640w, /assets/img/photo-1546263463-02ec45e884fd-960x608.webp 960w, /assets/img/photo-1546263463-02ec45e884fd-1400x886.webp 1400w" sizes="(min-width: 64rem) 52vw, 74vw" width="1200" height="760" alt="A wall calendar with past days crossed out" loading="lazy" decoding="async"></div>
+                <figcaption><b>p6_schedule_risk</b>Will the finish date hold?<time>Forecast finish 5 Oct 2027</time></figcaption>
+              </figure>
+            </li>
+          </ol>
+        </div>
+        <div class="path-timeline" aria-hidden="true">
+          <div class="path-axis" style="--dd:25">
+            <span class="bar" style="--s:25;--d:159"></span>
+            <span class="bar" style="--s:244;--d:28"></span>
+            <span class="bar" style="--s:308;--d:7"></span>
+            <span class="diamond" style="--s:369"></span>
+            <span class="playhead"><span class="playhead-date">26 Oct 2026</span></span>
+          </div>
+          <ol class="axis-months"><li>Oct 2026</li><li>Nov</li><li>Dec</li><li>Jan 2027</li><li>Feb</li><li>Mar</li><li>Apr</li><li>May</li><li>Jun</li><li>Jul</li><li>Aug</li><li>Sep</li><li>Oct</li></ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="section" aria-labelledby="ask-title">
-    <div class="wrap">
+    <div class="wrap ask">
       <div class="section-head">
         <h2 id="ask-title">Questions a scheduler asks, answered from the schedule</h2>
         <p>The server does the scheduling arithmetic on P6's own data; the model only explains the result. Dates and float come from the last schedule run (F9).</p>
+        <p class="more"><a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">All 58 tools, with what each one reads or writes</a></p>
       </div>
       <dl class="qa">
         <div><dt>What drives the finish date?</dt><dd><code>p6_driving_path</code> follows the driving predecessors back to the root cause (a constraint, the data date, an actual date); <code>p6_float_origin</code> says where the total float comes from.</dd></div>
@@ -161,11 +235,10 @@
         <div><dt>What is coming up in the next two weeks?</dt><dd><code>p6_lookahead</code> lists what starts, finishes or runs in the window, critical work first; <code>p6_milestones</code> sets each milestone against its baseline date.</dd></div>
         <div><dt>Is this XER ready to submit?</dt><dd><code>p6_inspect_xer</code> runs the import pre-flight checks without importing; XER-only mode then runs every analysis on the file alone. <a href="/guides/review-xer-before-submission/">XER review guide</a></dd></div>
       </dl>
-      <p class="more"><a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">All 58 tools, with what each one reads or writes</a></p>
     </div>
   </section>
 
-  <section class="section" aria-labelledby="writes-title">
+  <section class="section writes tinted" aria-labelledby="writes-title">
     <div class="wrap split">
       <div>
         <h2 id="writes-title">Edits go through the steps you would take yourself</h2>
@@ -179,28 +252,32 @@
           <li><div><h3>F9 in P6</h3><p>Planned, early and late dates and float are never written: open P6 and schedule.</p></div></li>
         </ol>
       </div>
-      <aside class="aside-note" aria-labelledby="scope-title">
-        <h3 id="scope-title">What it does not do</h3>
-        <ul>
-          <li>No P6 EPPM, no P6 on SQL Server or Oracle: P6 Professional standalone (SQLite) and XER files only.</li>
-          <li>Windows only, like P6 Professional.</li>
-          <li>No new activities except through an XER import.</li>
-          <li>No cloud service and no telemetry. What the tools return goes to the model your MCP client uses: pick a local model for confidential schedules.</li>
-        </ul>
-      </aside>
+      <div>
+        <figure class="writes-photo"><img src="/assets/img/photo-1581092795360-fd1ca04f0952-960x600.webp" srcset="/assets/img/photo-1581092795360-fd1ca04f0952-640x400.webp 640w, /assets/img/photo-1581092795360-fd1ca04f0952-960x600.webp 960w, /assets/img/photo-1581092795360-fd1ca04f0952-1280x800.webp 1280w" sizes="(min-width: 60rem) 34rem, 100vw" width="960" height="600" alt="Engineers at a desk with several monitors" loading="lazy" decoding="async"></figure>
+        <aside class="aside-note" aria-labelledby="scope-title">
+          <h3 id="scope-title">What it does not do</h3>
+          <ul>
+            <li>No P6 EPPM, no P6 on SQL Server or Oracle: P6 Professional standalone (SQLite) and XER files only.</li>
+            <li>Windows only, like P6 Professional.</li>
+            <li>No new activities except through an XER import.</li>
+            <li>No cloud service and no telemetry. What the tools return goes to the model your MCP client uses: pick a local model for confidential schedules.</li>
+          </ul>
+        </aside>
+      </div>
     </div>
   </section>
 
   <section class="section" aria-labelledby="compare-title">
     <div class="wrap">
       <div class="section-head">
-        <h2 id="compare-title">Compared with XER-only MCP servers</h2>
+        <h2 id="compare-title">Compared with XER‑only MCP servers</h2>
         <p>Several MCP servers parse P6 XER files. This one works on the P6 database itself and reads XER files too.</p>
       </div>
       <div class="table-wrap">
-        <table>
+        <table class="compare">
           <caption>"Varies": some XER servers do it, others do not.</caption>
-          <thead><tr><th scope="col">Capability</th><th scope="col">MCP for Primavera P6</th><th scope="col">Typical XER-file MCP server</th></tr></thead>
+          <colgroup><col><col class="ours"><col></colgroup>
+          <thead><tr><th scope="col">Capability</th><th scope="col" class="ours">MCP for Primavera P6</th><th scope="col">Typical XER-file MCP server</th></tr></thead>
           <tbody>
             <tr><th scope="row">Reads the P6 Professional database directly</th><td class="yes">Yes, every project, baseline, code, UDF and schedule option</td><td>No: export an XER first</td></tr>
             <tr><th scope="row">Writes changes back to P6</th><td class="yes">Yes, into the database; then F9 in P6</td><td>No, or edits an XER you import again</td></tr>
@@ -216,7 +293,7 @@
     </div>
   </section>
 
-  <section class="section" id="install" aria-labelledby="install-title">
+  <section class="section tinted" id="install" aria-labelledby="install-title">
     <div class="wrap split">
       <div>
         <h2 id="install-title">Install in five minutes</h2>
@@ -253,24 +330,26 @@
         <h2 id="guides-title">Guides</h2>
         <p>Step by step, with the prompts to type and real results from the public demo project.</p>
       </div>
-      <ul class="toc">
-        <li><a href="/guides/dcma-14-point-check-ai/"><strong>DCMA 14-point check with AI</strong><span>Run the check with your P6 thresholds, read each failed check and drill into the activities behind it.</span></a></li>
-        <li><a href="/guides/driving-path-p6-claude/"><strong>Driving path in P6 with Claude</strong><span>Trace what drives an activity back to its root cause and where its total float comes from.</span></a></li>
-        <li><a href="/guides/compare-p6-updates-ai/"><strong>Comparing two P6 updates with AI</strong><span>Slips, slip causes, float erosion and logic changes, then the questions to ask about the update.</span></a></li>
-        <li><a href="/guides/review-xer-before-submission/"><strong>AI review of an XER before submission</strong><span>File checks, logic, progress and integrity of an update XER before it goes to the client.</span></a></li>
+      <ul class="toc toc-media">
+        <li><a href="/guides/dcma-14-point-check-ai/"><img src="/assets/img/photo-1551288049-bebda4e38f71-800x500.webp" srcset="/assets/img/photo-1551288049-bebda4e38f71-480x300.webp 480w, /assets/img/photo-1551288049-bebda4e38f71-800x500.webp 800w, /assets/img/photo-1551288049-bebda4e38f71-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>DCMA 14-point check with AI</strong><span>Run the check with your P6 thresholds, read each failed check and drill into the activities behind it.</span></a></li>
+        <li><a href="/guides/driving-path-p6-claude/"><img src="/assets/img/photo-1531403009284-440f080d1e12-800x500.webp" srcset="/assets/img/photo-1531403009284-440f080d1e12-480x300.webp 480w, /assets/img/photo-1531403009284-440f080d1e12-800x500.webp 800w, /assets/img/photo-1531403009284-440f080d1e12-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>Driving path in P6 with Claude</strong><span>Trace what drives an activity back to its root cause and where its total float comes from.</span></a></li>
+        <li><a href="/guides/compare-p6-updates-ai/"><img src="/assets/img/photo-1599658880436-c61792e70672-800x500.webp" srcset="/assets/img/photo-1599658880436-c61792e70672-480x300.webp 480w, /assets/img/photo-1599658880436-c61792e70672-800x500.webp 800w, /assets/img/photo-1599658880436-c61792e70672-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>Comparing two P6 updates with AI</strong><span>Slips, slip causes, float erosion and logic changes, then the questions to ask about the update.</span></a></li>
+        <li><a href="/guides/review-xer-before-submission/"><img src="/assets/img/photo-1608303588026-884930af2559-800x500.webp" srcset="/assets/img/photo-1608303588026-884930af2559-480x300.webp 480w, /assets/img/photo-1608303588026-884930af2559-800x500.webp 800w, /assets/img/photo-1608303588026-884930af2559-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>AI review of an XER before submission</strong><span>File checks, logic, progress and integrity of an update XER before it goes to the client.</span></a></li>
       </ul>
     </div>
   </section>
 
   <section class="section faq" id="faq" aria-labelledby="faq-title">
-    <div class="wrap">
-      <div class="section-head"><h2 id="faq-title">FAQ</h2></div>
+    <div class="wrap ask">
+      <div class="section-head"><h2 id="faq-title">FAQ</h2><p>Scope, privacy and what the AI is allowed to change.</p></div>
+      <div>
       <details><summary>What is an MCP server for Primavera P6?</summary><div><p>MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant 58 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model.</p></div></details>
       <details><summary>Can the AI change my P6 schedule?</summary><div><p>Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9.</p></div></details>
       <details><summary>Does my schedule leave my PC?</summary><div><p>The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio.</p></div></details>
       <details><summary>Which P6 versions and databases are supported?</summary><div><p>P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM and P6 Professional on SQL Server or Oracle are not supported.</p></div></details>
       <details><summary>Does it work with ChatGPT?</summary><div><p>Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented in the <a href="https://github.com/nizarhamza/mcp-for-primavera-p6#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer.</p></div></details>
       <details><summary>Does it run on macOS or Linux?</summary><div><p>No. P6 Professional is a Windows program and the server is built for Windows 10 and 11.</p></div></details>
+      </div>
     </div>
   </section>
 </main>
@@ -303,8 +382,11 @@
       </nav>
     </div>
     <p class="legal">MCP for Primavera P6 is an independent project, not affiliated with, endorsed or sponsored by Oracle. Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. The demo project shown on this site is synthetic.</p>
+    <p class="credits">Photographs from Unsplash: <a href="https://unsplash.com/photos/turned-on-monitoring-screen-qwtCeJ5cLYs">dashboard</a> by Stephen Dawson, <a href="https://unsplash.com/photos/woman-drawing-a-flowchart-on-a-whiteboard-46G4xEr122c">whiteboard</a> by Beatriz Cattel, <a href="https://unsplash.com/photos/man-in-orange-and-white-striped-polo-shirt-beside-woman-in-black-and-white-floral-dress-df7erzy97sg">plan review</a> by ThisisEngineering, <a href="https://unsplash.com/photos/laptop-computer-on-glass-top-table-hpjSkU2UYSU">charts on a laptop</a> by Carlos Muza, <a href="https://unsplash.com/photos/2018-december-calendar-with-crossout-marks-OJWivczp3aY">calendar</a> by Adam Tinworth, <a href="https://unsplash.com/photos/man-in-black-and-white-checkered-dress-shirt-sitting-on-black-office-rolling-chair-w_zE6qlkQKA">engineers at their screens</a> by ThisisEngineering, <a href="https://unsplash.com/photos/graphs-of-performance-analytics-on-a-laptop-screen-JKUTrJ4vK00">analytics dashboard</a> by Luke Chesser, <a href="https://unsplash.com/photos/person-working-on-blue-and-white-paper-on-board-qWwpHwip31M">planning board</a> by Alvaro Reyes, <a href="https://unsplash.com/photos/person-using-macbook-pro-on-black-table-eveI7MOcSmw">dashboard on a laptop</a> by Myriam Jessier, <a href="https://unsplash.com/photos/people-reviewing-architectural-blueprints-on-desk-3QzMBrvCeyQ">drawing review</a> by Pedro Miranda.</p>
   </div>
 </footer>
+<script src="/assets/vendor/gsap/gsap.min.js" defer></script>
+<script src="/assets/vendor/gsap/ScrollTrigger.min.js" defer></script>
 <script src="/assets/site.js" defer></script>
 </body>
 </html>

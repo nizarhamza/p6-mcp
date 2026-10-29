@@ -1,11 +1,17 @@
-P6 MCP for Primavera P6
+MCP for Primavera P6
 Copyright 2026 Nizar Hamza
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
-P6 MCP is an independent project. It is not affiliated with, endorsed by or sponsored by Oracle.
+MCP for Primavera P6 is an independent project. It is not affiliated with, endorsed by or sponsored by Oracle.
 Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. No Oracle software,
 binaries, schema documentation or sample data is distributed with this product.
 
 The Windows builds include third-party open source components (Python, Qt for Python, the MCP
 Python SDK and their dependencies), each under its own license.
+
+The landing site (site/) includes third-party files under their own licenses: the Archivo and
+IBM Plex Mono fonts (SIL Open Font License 1.1, see site/assets/fonts), GSAP and ScrollTrigger
+3.15.0 (GSAP Standard License, https://gsap.com/standard-license, see site/assets/vendor/gsap) and
+photographs from Unsplash (Unsplash License, https://unsplash.com/license), credited on the pages
+that show them.
