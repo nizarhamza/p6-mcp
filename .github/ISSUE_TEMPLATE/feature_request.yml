@@ -15,4 +15,4 @@ body:
   - type: textarea
     id: idea
     attributes:
-      label: How could P6 MCP help?
+      label: How could MCP for Primavera P6 help?

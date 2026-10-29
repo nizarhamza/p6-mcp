@@ -90,7 +90,8 @@ def by_name(data: dict) -> dict:
 def test_check_shared():
     assert shop.check_shared(shop.meta(SKILL)) == []
     assert any("kind" in e for e in shop.check_shared(dict(shop.meta(SKILL), kind="other")))
-    assert any("needs P6 MCP 99.0.0" in e for e in shop.check_shared(dict(SKILL, min_app_version="99.0.0")))
+    newer = shop.check_shared(dict(SKILL, min_app_version="99.0.0"))
+    assert any("needs MCP for Primavera P6 99.0.0" in e for e in newer)
     assert any("unknown tools p6_nope" in e for e in shop.check_shared(dict(SKILL, template="Use p6_nope.")))
     assert shop.check_shared(dict(SKILL, name="delay-whatif")) == []  # no built-in name reserved since 1.9
     assert any("description is empty" in e for e in shop.check_shared(dict(SKILL, description="")))
@@ -341,7 +342,7 @@ def test_updates_leave_an_edited_skill_alone():
     forced = shop.install(new, shop.fetch_skill(v2.entry("other"), v2.opener))  # Update on the Shop page (asked)
     assert not skills.edited(by_name(forced)["other"]) and shop.status(forced, v2.entry("other")) == shop.INSTALLED
     v3 = Catalog(dict(SKILL, version=3, min_app_version="99.0.0"))
-    assert core_skills.updates(forced, v3.opener)[1]["updated"] == []  # needs a newer P6 MCP: not installed
+    assert core_skills.updates(forced, v3.opener)[1]["updated"] == []  # needs a newer app: not installed
     assert "offline" in core_skills.updates(forced, offline)[1]["error"]
 
 

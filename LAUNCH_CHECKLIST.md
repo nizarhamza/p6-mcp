@@ -1,0 +1,188 @@
+# Launch checklist: MCP for Primavera P6 2.0.0
+
+The manual steps that follow the local commits: release, repository rename, landing site, search engines, MCP
+directories and content. The order of sections A to C matters (see "Repository name" in
+[docs/RELEASING.md](docs/RELEASING.md)): versions 1.x only download updates from the old repository name.
+
+Names used below:
+
+| Item | Value |
+|---|---|
+| Product | MCP for Primavera P6 (P6 MCP before 2.0) |
+| Repository | `nizarhamza/p6-mcp` today, `nizarhamza/mcp-for-primavera-p6` after the rename |
+| MCP Registry name | `io.github.nizarhamza/mcp-for-primavera-p6` |
+| Site | `https://mcp-for-primavera-p6.pages.dev/` (Cloudflare Pages project `mcp-for-primavera-p6`) |
+| Skill shop catalog | `nizarhamza/p6-mcp-shop` (unchanged) |
+
+## A. Before pushing
+
+- [ ] Record the demo GIF (20 to 40 seconds, 1280 px wide, under 5 MB, for example with ScreenToGif) on the
+      public demo project, never on real data: build it with `python tests/fixtures/make_demo.py <folder>`, select
+      `<folder>\demo.db` in the Settings window, then in Claude Desktop ask "What drives MS-1100 - Project
+      completion in DEMO-SS225?" and "What if PRC-TR-1040 finishes 15 working days earlier?". Save it as
+      `docs/images/demo.gif`, point the README image (under the DEMO GIF PLACEHOLDER comment) at it, delete
+      `docs/images/demo-placeholder.png`, commit.
+- [ ] Read the README and the site once more. Preview the site with
+      `python -m http.server 8765 --directory site` and open `http://localhost:8765/`.
+- [ ] Optional follow-up, not blocking: the skill shop catalog (its README, issue form, authoring guide and the
+      core skills' texts) still says "P6 MCP".
+
+## B. Release 2.0.0 under the current name
+
+- [ ] Push `main` and the tag (the tag starts the Release workflow, which builds a draft release):
+
+  ```bash
+  git -C D:/HAMZA/Documents/p6mcp push origin main
+  ```
+
+  ```bash
+  git -C D:/HAMZA/Documents/p6mcp tag v2.0.0
+  ```
+
+  ```bash
+  git -C D:/HAMZA/Documents/p6mcp push origin v2.0.0
+  ```
+
+- [ ] Run the manual test checklist of `docs/RELEASING.md` on the draft. For 2.0 add: an update over 1.9.0
+      shows "MCP for Primavera P6" in Windows Settings > Apps and in the Start menu, the old "P6 MCP Settings"
+      shortcut is gone, the client entries (`p6mcp`) and the settings are unchanged.
+- [ ] Choose when the MCP Registry entry is published:
+  - **Recommended: after the rename**, so the entry of 2.0.0 carries the new repository URL. Before publishing
+    the release, run `gh workflow disable registry.yml -R nizarhamza/p6-mcp`; enable and run it in section C.
+  - Or now: publishing the release runs the workflow at once; the entry then names the old URL, which GitHub
+    redirects. A version cannot be republished, so 2.0.0 keeps it.
+- [ ] Publish the release (GitHub, Releases, the v2.0.0 draft, Publish). The installed 1.x copies update
+      themselves to 2.0.0 within their next checks.
+
+## C. Rename the repository (once the 1.x installs have updated, a few days later)
+
+- [ ] Check that this PC runs 2.0.0 (Settings, About).
+- [ ] Rename, then point the local clone at the new name:
+
+  ```bash
+  gh repo rename mcp-for-primavera-p6 -R nizarhamza/p6-mcp --yes
+  ```
+
+  ```bash
+  git -C D:/HAMZA/Documents/p6mcp remote set-url origin https://github.com/nizarhamza/mcp-for-primavera-p6.git
+  ```
+
+- [ ] Never create a new repository named `p6-mcp`: it would break the redirect the 1.x copies rely on.
+- [ ] Push the catalog commit that pins `P6MCP_REF` to `v2.0.0` and checks out the new repository name, then
+      check that "Check the catalog" is green:
+
+  ```bash
+  git -C D:/HAMZA/Documents/p6-mcp-shop push origin main
+  ```
+
+- [ ] If the Registry workflow was disabled in section B, enable it and publish 2.0.0:
+
+  ```bash
+  gh workflow enable registry.yml -R nizarhamza/mcp-for-primavera-p6
+  ```
+
+  ```bash
+  gh workflow run registry.yml -R nizarhamza/mcp-for-primavera-p6 -f tag=v2.0.0
+  ```
+
+- [ ] Check the entry:
+
+  ```bash
+  curl "https://registry.modelcontextprotocol.io/v0/servers?search=mcp-for-primavera-p6"
+  ```
+
+- [ ] M8ven: the README badge URL contains the old slug (`nizarhamza-p6-mcp-151l9d`): ask for a rescan under
+      the new name and update the badge line.
+- [ ] hol-guard listing: open the follow-up PR (tools added since 1.9, new name).
+
+## D. Landing site on Cloudflare Pages
+
+- [ ] Cloudflare dashboard > Workers & Pages > Create > Pages > Connect to Git > `nizarhamza/mcp-for-primavera-p6`.
+      Project name `mcp-for-primavera-p6`, production branch `main`, framework preset None, build command empty,
+      build output directory `site`. Every push to `main` deploys.
+- [ ] Check `/`, `/guides/`, the four guides, `/llms.txt`, `/sitemap.xml`, `/robots.txt`, a missing URL (the
+      404 page) and the response headers from `site/_headers` (Content-Security-Policy, cache).
+- [ ] Set the repository homepage:
+
+  ```bash
+  gh repo edit nizarhamza/mcp-for-primavera-p6 --homepage https://mcp-for-primavera-p6.pages.dev/
+  ```
+
+- [ ] If Cloudflare gives another subdomain (name taken) or you add a custom domain, replace
+      `https://mcp-for-primavera-p6.pages.dev` everywhere: `site/` (canonical, Open Graph, JSON-LD, sitemap,
+      robots, llms.txt), `server.json` (websiteUrl, icon), `packaging/bundle.py` (SITE) and the README FAQ link.
+      `tests/test_registry.py` checks that server.json and the bundle agree.
+- [ ] Trademark note: Oracle's guidelines ask third parties not to use Oracle marks in domain names. A custom
+      domain without "primavera" or "p6" is the safer long-term choice.
+- [ ] The site has no analytics. If you add Cloudflare Web Analytics, allow its script in the
+      Content-Security-Policy of `site/_headers`.
+
+## E. Search engines
+
+- [ ] Google Search Console: add a URL-prefix property for `https://mcp-for-primavera-p6.pages.dev/`, verify it
+      with the HTML file method (put the `google<id>.html` file in `site/`, commit, wait for the deploy), submit
+      `sitemap.xml`, then URL inspection > Request indexing for the home page and the four guides.
+- [ ] Rich Results Test on the home page: the SoftwareApplication and FAQ data are read. Google shows a software
+      rich result only with ratings or reviews; there are none, and none should be invented.
+- [ ] Bing Webmaster Tools: import the site from Search Console and submit the sitemap (Bing also feeds the
+      search of ChatGPT and Copilot).
+- [ ] After two to four weeks, check the queries in Search Console: "primavera p6 mcp", "mcp server
+      primavera", "dcma 14 point check ai", "driving path p6". Adjust titles of pages with impressions and no
+      clicks.
+
+## F. MCP directories
+
+- [ ] Official MCP Registry: section C (or automatic in B).
+- [ ] GitHub's MCP registry (github.com/mcp) and VS Code's MCP gallery draw on the official registry: a few days
+      after publishing, check whether the entry appears there.
+- [ ] Glama: `glama.json` is at the repository root (maintainer `nizarhamza`). On glama.ai/mcp/servers, add the
+      repository URL, then use Claim. Glama's build check runs in Linux containers and cannot start a Windows
+      server: expect the listing without a passing build.
+- [ ] Smithery: local servers are published as MCPB bundles:
+
+  ```bash
+  npx -y @smithery/cli mcp publish packaging/dist/p6mcp-2.0.0.mcpb -n nizarhamza/mcp-for-primavera-p6
+  ```
+
+  Check the command against Smithery's publishing docs first (smithery.ai/docs/build/publish). The bundle is
+  Windows only and about 27 MB; if Smithery refuses it, skip Smithery.
+- [ ] mcp.so: Submit (top bar, sign-in needed) with the repository URL.
+- [ ] MCP Server Finder: it takes submissions by email at info@mcpserverfinder.com: name, repository, site, one
+      line ("Local MCP server for Primavera P6 Professional: analysis, DCMA check, what-if and safe write-back to
+      the P6 database"), category (productivity or project management).
+- [ ] awesome-mcp-servers (punkpeye): a pull request adding one line, alphabetically, under "Workplace &
+      Productivity" (no Primavera server is listed there as of 2026-10-29). Follow the list's format: repository
+      link, the Glama score badge once listed, the legend markers for Python, local service and Windows, then:
+      "Primavera P6 Professional schedules (database or XER): critical and driving path, DCMA 14-point check,
+      update comparison, CPM what-if, and edits written back to the P6 database after a dry run, a confirmation
+      and a backup."
+- [ ] Also worth a submission: PulseMCP (pulsemcp.com), mcpservers.org, MCP Market (mcpmarket.com), the Cline MCP
+      Marketplace (an issue in `cline/mcp-marketplace` with a 400 x 400 PNG logo: `assets/brand/png/p6mcp-icon-512.png`
+      resized), cursor.directory.
+
+## G. Content
+
+Say who made the tool in every post, link the guide that answers the question rather than the download, and
+never show a real client schedule: use DEMO-SS225.
+
+- [ ] Planning Planet (Primavera forum): one post that starts from a scheduler's problem, for example "Tracing
+      the driving path back to the root cause in seconds: a free local tool for P6 Professional", with the
+      driving path guide link; answer the questions in the thread.
+- [ ] LinkedIn: an article "What an AI assistant can and cannot do with a Primavera P6 schedule" (the write path
+      and its safeguards, the DCMA check, the integrity review), plus the demo video uploaded natively (60 to 90
+      seconds, captions on).
+- [ ] YouTube: a 3 to 6 minute demo, title "Primavera P6 + Claude: driving path, DCMA check and safe edits (MCP
+      server)", chapters (install, driving path, DCMA check, compare updates, a confirmed edit and F9), links to
+      the site and the release in the description.
+- [ ] dev.to: a technical article, "Letting an AI assistant write to a Primavera P6 database safely" (dry run and
+      single-use tokens, backups, edit log, refusing writes while P6 runs, a CPM engine checked against F9),
+      tags `mcp`, `ai`, `python`, `productivity`, with the canonical link to the article itself and a link to
+      the site.
+
+## H. After the launch
+
+- [ ] When a guide changes, update its `dateModified` (JSON-LD) and the `lastmod` of `site/sitemap.xml`.
+- [ ] The guide figures come from the public demo project: when a tool's output changes, rebuild the demo
+      (`tests/fixtures/make_demo.py`) and refresh them.
+- [ ] `python tools/gen_docs.py` after adding or renaming a tool (the tests fail until the README and
+      `site/llms.txt` tables are regenerated).

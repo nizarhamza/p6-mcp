@@ -37,7 +37,7 @@ VERSION_TEMPLATE = """VSVersionInfo(
       StringStruct('InternalName', '{name}'),
       StringStruct('LegalCopyright', 'Copyright 2026 Nizar Hamza. Apache License 2.0. Not affiliated with Oracle.'),
       StringStruct('OriginalFilename', '{name}.exe'),
-      StringStruct('ProductName', 'P6 MCP for Primavera P6'),
+      StringStruct('ProductName', 'MCP for Primavera P6'),
       StringStruct('ProductVersion', '{v}')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
@@ -50,7 +50,8 @@ def main() -> None:
     shutil.copyfile(brand("ico", "p6mcp.ico"), os.path.join(OUT, "p6mcp.ico"))
     shutil.copyfile(brand("png", "p6mcp-icon-256.png"), os.path.join(OUT, "icon.png"))
     v, t = version()
-    for name, desc in (("p6mcp-server", "P6 MCP server"), ("p6mcp-settings", "P6 MCP Settings")):
+    for name, desc in (("p6mcp-server", "MCP for Primavera P6 server"),
+                       ("p6mcp-settings", "MCP for Primavera P6 Settings")):
         with open(os.path.join(OUT, f"version_{name}.txt"), "w", encoding="utf-8") as fh:
             fh.write(VERSION_TEMPLATE.format(t=t, v=v, name=name, desc=desc))
     with open(os.path.join(OUT, "version.txt"), "w", encoding="utf-8") as fh:

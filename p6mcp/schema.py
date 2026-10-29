@@ -91,5 +91,5 @@ def write_refusal(info: dict) -> str:
         return (f"This file does not look like a P6 Professional database (missing {info['missing'][:8]}). "
                 "Writes are refused.")
     return (f"Unknown P6 schema (fingerprint {info['fingerprint'][:12]}): this P6 version was not tested, so "
-            "the database is read only. Reads work. To allow writes anyway, accept this schema in P6 MCP "
+            "the database is read only. Reads work. To allow writes anyway, accept this schema in MCP for Primavera P6 "
             "Settings (Database, Trust this schema) after backing up the database.")

@@ -1,0 +1,119 @@
+# MCP for Primavera P6
+
+> Local Model Context Protocol (MCP) server for Oracle Primavera P6 Professional schedules on Windows. It reads the P6 Professional standalone database (SQLite) or XER files and gives an AI assistant (Claude, ChatGPT through Codex or OpenAI's Secure MCP Tunnel, Cursor, VS Code, LM Studio, Cline) 58 tools: critical path, driving path, total float, DCMA 14-point check, update comparison and integrity review, CPM what-if, Monte Carlo risk, XER import and export, an Excel dashboard, and edits written back to the P6 database after a dry run, a confirmation token and a backup. Independent project, not affiliated with Oracle.
+
+Facts an assistant should get right:
+
+- Platform: Windows 10 and 11. P6 Professional standalone (SQLite), tested with 25.12; other versions read only until tested or trusted. XER files work without P6 (XER-only mode). P6 EPPM and P6 on SQL Server or Oracle are not supported.
+- Install: per-user Windows installer from GitHub Releases (P6MCP-Setup-<version>.exe); the database is chosen in the Settings window, never automatically. Also a portable zip and an MCP bundle (.mcpb) for Claude Desktop, listed in the official MCP Registry as io.github.nizarhamza/mcp-for-primavera-p6.
+- Writes are off by default. When allowed (Full profile), every write is a dry run first, then applied only with a single-use confirmation token after the user's explicit yes, with P6 closed, after a backup, and recorded in an edit log. Planned, early and late dates and float are never written: the user presses F9 in P6.
+- Dates and float come from P6's last schedule run (F9). What-if and risk use the server's CPM engine; p6_cpm_validate reports how closely it matches P6.
+- Activities are named as "Activity ID - Activity name".
+- Called P6 MCP before version 2.0.
+- License: Apache 2.0. Author: Nizar Hamza.
+
+## Guides
+
+- [DCMA 14-point check with AI in Primavera P6](https://mcp-for-primavera-p6.pages.dev/guides/dcma-14-point-check-ai/): the 14 checks, thresholds from P6, drilling into failed checks, trend between updates
+- [Find the driving path in Primavera P6 with Claude](https://mcp-for-primavera-p6.pages.dev/guides/driving-path-p6-claude/): driving predecessors back to the root cause, where total float comes from, what-if on the driver
+- [Compare two Primavera P6 updates with AI](https://mcp-for-primavera-p6.pages.dev/guides/compare-p6-updates-ai/): activity and link changes, slip causes, float erosion, integrity flags
+- [AI review of a P6 XER file before submission](https://mcp-for-primavera-p6.pages.dev/guides/review-xer-before-submission/): file checks, logic, progress, changes since the last submission, schedule options
+
+## Documentation
+
+- [README](https://github.com/nizarhamza/mcp-for-primavera-p6/blob/main/README.md): install, client setup (Claude Desktop, Cursor, VS Code, ChatGPT, others), tools, safety, privacy, FAQ
+- [Security](https://github.com/nizarhamza/mcp-for-primavera-p6/blob/main/SECURITY.md): what the write tools can change
+- [Changelog](https://github.com/nizarhamza/mcp-for-primavera-p6/blob/main/CHANGELOG.md)
+- [Releases](https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest)
+
+## Tools
+
+<!-- tools:start -->
+### Projects and structure
+
+- `p6_list_projects`: Projects with data date, start, finish, status, baseline and EPS; filter by EPS (read)
+- `p6_list_eps`: EPS tree with depth, path and project counts (read)
+- `p6_project_summary`: One-call overview: dates, activity counts, critical counts, % complete by units, physical and duration, baseline variance and SPI (read)
+- `p6_list_wbs`: WBS tree in P6 order with roll-ups: activities, dates, float, units % and baseline planned % (read)
+- `p6_list_calendars`: Calendars with work week, hours per day and holiday exceptions (read)
+- `p6_list_udfs`: User defined fields (UDF columns) with how much each one is used (read)
+- `p6_schedule_options`: Schedule options of a project, of an XER file, or both side by side (read)
+
+### Activities and relationships
+
+- `p6_query_activities`: Search activities by name, Activity ID, WBS, status, total float, dates, activity code or UDF, with chosen columns (read)
+- `p6_get_activity`: Everything about one activity: dates, durations, float, constraints, logic, resources, codes, UDFs, notebooks (read)
+- `p6_get_relationships`: Predecessors and successors of an activity, lags in hours and days (read)
+- `p6_lookahead`: What starts, finishes or is in progress in the next weeks, critical work flagged (read)
+- `p6_milestones`: Milestones against the baseline: variance in working and calendar days, float, critical (read)
+
+### Critical path and float
+
+- `p6_critical_path`: Critical activities as the project defines them (total float or longest path) (read)
+- `p6_driving_path`: The chain of driving predecessors behind an activity's dates, back to its root cause (read)
+- `p6_float_paths`: Float paths of the last P6 schedule run, in P6 order (read)
+- `p6_float_origin`: Where an activity's total float comes from: the successor chain that sets its late dates (read)
+- `p6_float_analysis`: Total and free float distribution by range (read)
+
+### Schedule quality
+
+- `p6_health_check`: DCMA 14-point check (the project's own P6 thresholds when set), critical path test, CPLI, BEI and a weighted score (read)
+- `p6_health_check_compare`: Health check now against an earlier run: what got better or worse (read)
+- `p6_dangling`: Open starts and open finishes, each with a suggested link to close it (read)
+- `p6_redundant_links`: Links that are candidates for removal (transitive, duplicate, to completed work) (read)
+- `p6_progress_check`: Out-of-sequence progress and status inconsistencies (read)
+
+### Progress and reporting
+
+- `p6_progress_curve`: S-curve by month or week (units or cost) against the baseline, earned value at the data date (read)
+- `p6_group_summary`: Activities, units and dates grouped by status, type, WBS level or activity code (read)
+- `p6_resource_summary`: Units and costs per resource, and activities per status (read)
+- `p6_export_dashboard`: Excel project controls dashboard: one A3 page with charts, plus detail sheets (writes a file)
+
+### Comparison, what-if and risk
+
+- `p6_compare_projects`: Two updates or a baseline compared activity by activity and link by link, with slip causes and float erosion (read)
+- `p6_update_integrity`: Review of an update against the previous one: changes a reviewer should question (read)
+- `p6_cpm_validate`: Runs the built-in CPM engine and compares it with P6's last F9, activity by activity (read)
+- `p6_schedule_whatif`: What-if in memory: add or remove links, change durations or constraints, see the new finish (read)
+- `p6_schedule_risk`: Monte Carlo schedule risk in memory: finish percentiles, on-time probability, criticality index (read)
+
+### XER files
+
+- `p6_inspect_xer`: Reads an XER file without importing it and runs the import pre-flight checks (read)
+- `p6_import_xer`: Imports an XER as a new project, a baseline or an update of an existing project (write)
+- `p6_export_xer`: Exports a project to an XER file, schedule options included (writes a file)
+
+### Edits (off by default)
+
+- `p6_update_activity`: Edits an activity: name, durations, constraint, actual dates, physical % complete (write)
+- `p6_update_assignment`: Sets budgeted, actual or remaining units of one resource assignment (write)
+- `p6_update_assignments`: Sets the units of many assignments in one all-or-nothing change (write)
+- `p6_update_udf`: Sets or clears one activity UDF value (write)
+- `p6_update_udfs`: Sets or clears many activity UDF values in one change (write)
+- `p6_add_relationship`: Adds a relationship (FS, SS, FF, SF, with lag) (write)
+- `p6_add_relationships`: Adds many relationships in one all-or-nothing change (write)
+- `p6_update_relationship`: Changes the type or lag of a relationship (write)
+- `p6_update_relationships`: Changes many relationships in one change (write)
+- `p6_delete_relationship`: Deletes a relationship (write)
+- `p6_delete_relationships`: Deletes many relationships in one change (write)
+- `p6_set_schedule_options`: Writes a project's schedule options, or copies them from an XER file (write)
+- `p6_create_eps`: Creates an EPS node (write)
+- `p6_delete_activity`: Deletes an activity and everything attached to it, as P6 does (delete or replace)
+- `p6_delete_project`: Deletes one or more projects, as P6 does (delete or replace)
+
+### Backups, log and diagnostics
+
+- `p6_backup_database`: Takes a backup of the P6 database now (write)
+- `p6_list_backups`: Lists the backups, automatic (before writes) and manual (read)
+- `p6_restore_backup`: Puts a backup back in place, after a safety backup of the current database (delete or replace)
+- `p6_edit_log`: Every confirmed write, with its parameters, before and after values (read)
+- `p6_diagnose`: Configuration, database, P6 version and P6 running state at a glance (read)
+- `p6_sql_select`: Read-only SQL on the P6 database, as a last resort (read)
+
+### Skill shop
+
+- `p6_shop_search`: Searches the skill shop (ready-made P6 workflows shared on GitHub) (read)
+- `p6_shop_get`: Shows one skill of the shop in full (read)
+- `p6_shop_install`: Installs or updates a skill from the shop, after your confirmation (app settings)
+<!-- tools:end -->

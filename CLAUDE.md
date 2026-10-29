@@ -4,8 +4,8 @@ Guidance for Claude Code in this repository.
 
 ## What this is
 
-P6 MCP: a local MCP server for **Primavera P6 Professional standalone (SQLite)** databases, packaged as a
-Windows product (server exe + Settings/tray app, installer, GitHub releases). Not affiliated with Oracle.
+MCP for Primavera P6 (called P6 MCP before 2.0; package, exe, folder and config names keep `p6mcp` / `P6MCP`): a
+local MCP server for **Primavera P6 Professional standalone (SQLite)** databases, packaged as a Windows product (server exe + Settings/tray app, installer, GitHub releases). Not affiliated with Oracle.
 Python 3.10+ (3.13 locally), FastMCP from the `mcp` SDK (1.8+ or 2.x shim).
 
 **Never commit real project data**: no .db, .xer, logs, backups, screenshots or client names. Tests use the
@@ -192,8 +192,9 @@ stay outside this repository.
   are the seams tests replace), Tools page "Allow the skill shop", and `SettingsWindow.save` asks
   overwrite / reload (`ask_changed`) when config.json changed on disk since it was read (`file_stamp`).
 - `p6mcp/updates.py`: with the skill shop the only network calls. `check()` reads the latest published release of
-  `nizarhamza/p6-mcp` (tag, page, assets); `download()` fetches `SHA256SUMS.txt` and the
-  `P6MCP-Setup-<v>.exe` asset (only URLs under `DOWNLOAD_PREFIX`) into `%LOCALAPPDATA%\P6MCP\updates` and
+  `nizarhamza/mcp-for-primavera-p6` (on a 404, the old name `OLD_REPOS` nizarhamza/p6-mcp: 2.0 ships before the
+  rename so 1.x copies, which only download from the old name, can update); `download()` fetches `SHA256SUMS.txt` and the
+  `P6MCP-Setup-<v>.exe` asset (only URLs under `DOWNLOAD_PREFIXES`, both names) into `%LOCALAPPDATA%\P6MCP\updates` and
   deletes a file whose SHA256 does not match; `client_servers()` = `p6mcp-server.exe` processes that are
   not descendants of this process (toolhelp snapshot: servers of MCP clients, not the tray's HTTP child);
   `launch_install()` starts `cmd /c ping (3 s) & setup /VERYSILENT ... /AUTOUPDATE=1` detached, so the
@@ -213,9 +214,9 @@ stay outside this repository.
   `skills_changed` makes the tray reload a window without unsaved changes. With
   `auto_update` on the tray stays after the window closes. Tests replace `p6mcp.updates.*`: never call
   the network or start an installer in tests.
-- Public repository: https://github.com/nizarhamza/p6-mcp (Apache 2.0, Copyright 2026 Nizar Hamza; LICENSE,
+- Public repository: https://github.com/nizarhamza/mcp-for-primavera-p6 (nizarhamza/p6-mcp until the rename after 2.0.0; Apache 2.0, Copyright 2026 Nizar Hamza; LICENSE,
   NOTICE, SECURITY.md, CHANGELOG.md, issue templates; README screenshots in `docs/images`, rendered from the
-  synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release; 1.0.1 = fixes of the 2026-10-20 server review; 1.1.0 = assignment units tools and the XER export of schedule options; 1.2.0 = UDF tools (list, filter and columns, set and clear activity values); 1.3.0 = automatic updates; 1.6.0 = Excel dashboard (`p6_export_dashboard`); 1.7.0 = `export-dashboard` command (dashboard result gives `cards` and `dcma_failed`); 1.8.0 = P6 commands became skills (SKILL.md folders) and the skill shop on GitHub; 1.8.1 = share through the clipboard (short link); 1.9.0 = no built-in skills: the core set installed from the shop (bundled copy offline), automatic skill updates; 1.10.0 (unreleased) = `p6_schedule_risk`, `p6_update_integrity`, logic density and weighted score, milestone and compare fields for the shop skills.
+  synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release; 1.0.1 = fixes of the 2026-10-20 server review; 1.1.0 = assignment units tools and the XER export of schedule options; 1.2.0 = UDF tools (list, filter and columns, set and clear activity values); 1.3.0 = automatic updates; 1.6.0 = Excel dashboard (`p6_export_dashboard`); 1.7.0 = `export-dashboard` command (dashboard result gives `cards` and `dcma_failed`); 1.8.0 = P6 commands became skills (SKILL.md folders) and the skill shop on GitHub; 1.8.1 = share through the clipboard (short link); 1.9.0 = no built-in skills: the core set installed from the shop (bundled copy offline), automatic skill updates; 2.0.0 (unreleased; absorbs the unreleased 1.10.0) = renamed MCP for Primavera P6 (brand, installer names, wordmark by `tools/make_brand.py`), `p6_schedule_risk`, `p6_update_integrity`, logic density and weighted score, milestone and compare fields for the shop skills, MCP Registry listing (`server.json`), landing site (`site/`).
 
 ## Running
 

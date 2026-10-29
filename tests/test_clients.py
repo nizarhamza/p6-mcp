@@ -151,7 +151,7 @@ def test_legacy_entry_removal(home):
     ad = clients.get("claude_desktop")
     path = os.path.join(home["roaming"], "Claude", "claude_desktop_config.json")
     put(path, CLAUDE)
-    with pytest.raises(ValueError, match="not a P6 MCP entry"):
+    with pytest.raises(ValueError, match="not a MCP for Primavera P6 entry"):
         ad.unregister("filesystem")
     ad.unregister("primavera-p6")
     data = json.loads(raw(path))

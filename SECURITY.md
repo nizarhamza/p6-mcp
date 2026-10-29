@@ -1,8 +1,8 @@
 # Security
 
-## What P6 MCP can change
+## What MCP for Primavera P6 can change
 
-P6 MCP reads a Primavera P6 Professional standalone (SQLite) database, or XER files, on your PC. When
+MCP for Primavera P6 reads a Primavera P6 Professional standalone (SQLite) database, or XER files, on your PC. When
 you allow it, its write tools change that database **directly, without P6's own application logic**:
 
 | Tool | Changes |
@@ -26,7 +26,7 @@ Planned, early and late dates and float are never written: P6 recalculates them 
 
 - Nothing is read until you select a database and confirm it after a read-only connection test.
 - Writes need all of: the Full tool profile, "Allow write operations" (off by default), a P6 schema
-  version P6 MCP was tested with (or one you explicitly trust), a dry run, and a second call carrying
+  version MCP for Primavera P6 was tested with (or one you explicitly trust), a dry run, and a second call carrying
   the single-use confirmation token of that dry run (15 minutes; refused if the database changed in
   between). Deleting a project or an activity and restoring a backup also need a confirmation text.
 - A backup is taken before every write (unless you turn it off after a warning), writes are refused
@@ -43,7 +43,7 @@ Planned, early and late dates and float are never written: P6 recalculates them 
   nizarhamza/p6-mcp-shop under raw.githubusercontent.com, when the Shop page or a `p6_shop_*` tool asks, at
   the first start of the Settings app and on Restore core skills for the core set, and with automatic updates
   on for newer versions of the shop skills not edited locally; each skill file is checked against the
-  catalog index's SHA256; with the shop off, the core set comes from the copy shipped with P6 MCP). P6 MCP
+  catalog index's SHA256; with the shop off, the core set comes from the copy shipped with MCP for Primavera P6). MCP for Primavera P6
   never sends anything to the
   catalog: sharing a skill is a GitHub issue the user creates in the browser.
 - Skills are text only: SKILL.md and up to 5 text reference files (.md, .txt, .csv, .json); scripts are

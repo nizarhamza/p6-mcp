@@ -12,7 +12,8 @@ READ_DB_TOOLS = {"p6_list_projects": {}, "p6_list_eps": {}, "p6_query_activities
 def test_no_database_configured(p6):
     p6.set(databases=[], active_database=None)
     for tool, kw in READ_DB_TOOLS.items():
-        with pytest.raises(RuntimeError, match="No database configured. Open P6 MCP Settings to select one."):
+        with pytest.raises(RuntimeError, match="No database configured. Open MCP for Primavera P6 Settings to "
+                                               "select one."):
             p6.call(tool, **kw)
     with pytest.raises(RuntimeError, match="No database configured"):
         p6.call("p6_update_activity", project="DEMO-A", task_code="A1020", physical_pct=10)

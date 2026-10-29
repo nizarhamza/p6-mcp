@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Review of a P6 XER File Before Submission: a checklist</title>
+<meta name="description" content="Check a Primavera P6 XER update with an AI assistant before you submit it, or when you receive one: file checks, logic, progress, integrity against the previous update.">
+<link rel="canonical" href="https://mcp-for-primavera-p6.pages.dev/guides/review-xer-before-submission/">
+<meta name="theme-color" content="#0A1A33">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="MCP for Primavera P6">
+<meta property="og:title" content="AI review of a P6 XER file before submission">
+<meta property="og:description" content="File checks, logic, progress and integrity of an update XER, without importing it.">
+<meta property="og:url" content="https://mcp-for-primavera-p6.pages.dev/guides/review-xer-before-submission/">
+<meta property="og:image" content="https://mcp-for-primavera-p6.pages.dev/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "AI review of a P6 XER file before submission",
+      "description": "Check a Primavera P6 XER update with an AI assistant and an MCP server before you submit it, or when you receive one: file checks, logic, progress, integrity against the previous update.",
+      "url": "https://mcp-for-primavera-p6.pages.dev/guides/review-xer-before-submission/",
+      "datePublished": "2026-10-29",
+      "dateModified": "2026-10-29",
+      "inLanguage": "en",
+      "proficiencyLevel": "Expert",
+      "author": { "@type": "Person", "name": "Nizar Hamza", "url": "https://github.com/nizarhamza" },
+      "about": [ { "@type": "Thing", "name": "XER file" }, { "@type": "Thing", "name": "Schedule submission review" }, { "@type": "SoftwareApplication", "name": "Primavera P6 Professional" } ],
+      "mentions": { "@id": "https://mcp-for-primavera-p6.pages.dev/#app" },
+      "image": "https://mcp-for-primavera-p6.pages.dev/assets/og.png",
+      "isPartOf": { "@id": "https://mcp-for-primavera-p6.pages.dev/#site" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://mcp-for-primavera-p6.pages.dev/" },
+        { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://mcp-for-primavera-p6.pages.dev/guides/" },
+        { "@type": "ListItem", "position": 3, "name": "AI review of an XER before submission", "item": "https://mcp-for-primavera-p6.pages.dev/guides/review-xer-before-submission/" }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="masthead on-navy">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="MCP for Primavera P6, home">
+      <svg viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect x="4" y="56" width="16" height="8" rx="4" fill="#fff"/><path d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z" fill="#fff"/><rect x="58" y="42" width="46" height="12" rx="6" fill="#58A6FF"/><rect x="58" y="66" width="26" height="12" rx="6" fill="#58A6FF"/><path d="M96 64L104 72L96 80L88 72Z" fill="#58A6FF"/></g></svg>
+      <span><span class="brand-name">MCP</span> <span class="brand-tag">for Primavera P6</span></span>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="/guides/" aria-current="page">Guides</a>
+      <a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">Tools</a>
+      <a href="/#faq">FAQ</a>
+      <a href="https://github.com/nizarhamza/mcp-for-primavera-p6">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="doc-head on-navy" aria-labelledby="page-title">
+    <div class="wrap">
+      <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">Guides</a></li><li aria-current="page">XER review</li></ol></nav>
+      <h1 id="page-title">AI review of a P6 XER file before submission</h1>
+      <p class="lede">The monthly update XER is what the client sees. Check it the way their reviewer will, before it leaves: the file itself, the logic, the progress and what changed since the last submission. The same steps work when you are the reviewer.</p>
+      <p class="doc-meta">Tools: <code>p6_inspect_xer</code>, <code>p6_health_check</code>, <code>p6_dangling</code>, <code>p6_redundant_links</code>, <code>p6_progress_check</code>, <code>p6_update_integrity</code>, <code>p6_schedule_options</code> &middot; Profile: Full</p>
+      <div class="timescale" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <div class="wrap doc">
+    <nav class="doc-nav" aria-labelledby="toc-title">
+      <h2 id="toc-title">On this page</h2>
+      <ol>
+        <li><a href="#load">Open the XER without importing it</a></li>
+        <li><a href="#file">1. The file</a></li>
+        <li><a href="#logic">2. Logic and quality</a></li>
+        <li><a href="#progress">3. Progress</a></li>
+        <li><a href="#changes">4. Changes since the last submission</a></li>
+        <li><a href="#options">5. Schedule options</a></li>
+        <li><a href="#checklist">Checklist</a></li>
+        <li><a href="#privacy">Confidential projects</a></li>
+      </ol>
+    </nav>
+
+    <article class="article">
+      <h2 id="load">Open the XER without importing it</h2>
+      <p>Nothing here writes to a P6 database. In the Settings window choose <strong>Database &gt; Data source &gt; XER files only</strong>, add the XER you are about to send, and the previous submission if you have it, then click <strong>Load and check</strong>. The files are read into a private read-only copy and every read tool works on it. P6 does not need to be installed.</p>
+
+      <h2 id="file">1. The file</h2>
+      <pre class="prompt" data-copy="prompt">Inspect D:\Submissions\DEMO-SS225_2026-10.xer and tell me if anything would fail or be lost on import.</pre>
+      <p><code>p6_inspect_xer</code> reads the file without importing it: header and P6 version, encoding (UTF-8, or cp1252 with the offset of the first non UTF-8 byte), the end marker, rows per table, projects with their data dates, and the import pre-flight. The pre-flight reports errors that would stop an import (an activity without WBS or calendar, a duplicate Activity ID, an assignment of an activity missing from the file, a row whose field count does not match its table) and warnings.</p>
+      <p>On the demo update: exported by P6 24.12, UTF-8 without byte order mark, end marker present, one project (DEMO-SS225, data date 26 Oct 2026) with 214 activities, 332 relationships and 257 resource assignments, no errors and no warnings.</p>
+
+      <h2 id="logic">2. Logic and quality</h2>
+      <pre class="prompt" data-copy="prompt">Run the DCMA 14-point check on the XER project, then list its open starts and open finishes and the links that are candidates for removal.</pre>
+      <ul>
+        <li><code>p6_health_check</code>: the DCMA 14 checks (see the <a href="/guides/dcma-14-point-check-ai/">DCMA guide</a>). An XER carries no P6 schedule check settings, so the DCMA defaults apply unless you give thresholds.</li>
+        <li><code>p6_dangling</code>: activities whose start or finish is not driven by logic, with a suggested link for each. The demo update has none.</li>
+        <li><code>p6_redundant_links</code>: links implied by another chain of finish-to-start links, duplicates, and links from completed predecessors to open work, each with what removing it would change.</li>
+      </ul>
+
+      <h2 id="progress">3. Progress</h2>
+      <pre class="prompt" data-copy="prompt">Check the progress of the XER project: out-of-sequence links and status inconsistencies.</pre>
+      <p><code>p6_progress_check</code> lists the links whose successor progressed before its predecessor allowed it (by link type) and the status inconsistencies: in progress without an actual start, completed with remaining work, 100 % but not completed, not started with actual dates. The demo update has no out-of-sequence link and no inconsistency.</p>
+
+      <h2 id="changes">4. Changes since the last submission</h2>
+      <pre class="prompt" data-copy="prompt">Run an integrity review of DEMO-SS225 against the previous submission DEMO-SS225~2 and list the flags.</pre>
+      <p>When the previous submission is loaded too, <code>p6_update_integrity</code> raises what a client's reviewer will ask about: open ends tied to the finish, negative float cleared by a constraint or a moved must finish by date, actual dates rewritten, durations cut, links to critical work removed, link types and lags changed, schedule options and calendars changed, in-progress or critical activities deleted, a data date that did not move. On the demo update it raises ten flags, detailed in the <a href="/guides/compare-p6-updates-ai/">comparison guide</a>. Every flag is a question to answer before submission, not a verdict.</p>
+
+      <h2 id="options">5. Schedule options</h2>
+      <pre class="prompt" data-copy="prompt">Compare the schedule options in the XER with the ones of project DEMO-SS225 in my database.</pre>
+      <p><code>p6_schedule_options(project="DEMO-SS225", xer_path="...")</code> shows the options stored in P6 and the ones in the XER side by side, differences first: retained logic or progress override, the lag calendar, open-ended activities critical, the critical definition. A change of options between submissions moves dates without a single activity changing.</p>
+
+      <h2 id="checklist">Checklist</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Check</th><th scope="col">Tool</th><th scope="col">Ready to submit when</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">File integrity</th><td><code>p6_inspect_xer</code></td><td>No pre-flight error; the data date is the one you reported</td></tr>
+            <tr><th scope="row">Logic</th><td><code>p6_health_check</code>, <code>p6_dangling</code></td><td>No open ends except the start and finish milestones</td></tr>
+            <tr><th scope="row">Leads, lags, constraints</th><td><code>p6_health_check</code></td><td>Every exception has a reason you can state</td></tr>
+            <tr><th scope="row">Progress</th><td><code>p6_progress_check</code></td><td>No status inconsistency; out-of-sequence links explained</td></tr>
+            <tr><th scope="row">Changes since last month</th><td><code>p6_update_integrity</code></td><td>Each flag has an answer and its evidence</td></tr>
+            <tr><th scope="row">Schedule options</th><td><code>p6_schedule_options</code></td><td>Same options as the accepted baseline, or a documented change</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="privacy">Confidential projects</h2>
+      <p>The server reads the XER on your PC and sends nothing anywhere. The results of each tool go to the AI model your MCP client uses: with a cloud model, they reach its provider, like any message you type. If the submission is confidential, run the review with a local model, for example in LM Studio; pick one that handles many tools, since this review uses the Full profile.</p>
+
+      <div class="next-guides">
+        <h2>Next</h2>
+        <ul class="toc">
+          <li><a href="/guides/compare-p6-updates-ai/"><strong>Comparing two P6 updates with AI</strong><span>The integrity flags of the demo update, one by one.</span></a></li>
+          <li><a href="/guides/dcma-14-point-check-ai/"><strong>DCMA 14-point check with AI</strong><span>Read each check and drill into it.</span></a></li>
+        </ul>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download for Windows</a>
+        </div>
+      </div>
+    </article>
+  </div>
+</main>
+
+<footer class="site-foot on-navy">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <p class="foot-title">MCP for Primavera P6</p>
+        <p>Local MCP server for Primavera P6 Professional schedules. Free and open source under the Apache License 2.0.</p>
+      </div>
+      <nav aria-label="Guides">
+        <p class="foot-title">Guides</p>
+        <ul>
+          <li><a href="/guides/dcma-14-point-check-ai/">DCMA 14-point check with AI</a></li>
+          <li><a href="/guides/driving-path-p6-claude/">Driving path in P6 with Claude</a></li>
+          <li><a href="/guides/compare-p6-updates-ai/">Comparing two P6 updates</a></li>
+          <li><a href="/guides/review-xer-before-submission/">Reviewing an XER before submission</a></li>
+        </ul>
+      </nav>
+      <nav aria-label="Project">
+        <p class="foot-title">Project</p>
+        <ul>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6">Source and documentation</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/blob/main/SECURITY.md">Security</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/issues">Report an issue</a></li>
+          <li><a href="/llms.txt">llms.txt</a></li>
+        </ul>
+      </nav>
+    </div>
+    <p class="legal">MCP for Primavera P6 is an independent project, not affiliated with, endorsed or sponsored by Oracle. Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. The demo project shown on this site is synthetic.</p>
+  </div>
+</footer>
+<script src="/assets/site.js" defer></script>
+</body>
+</html>

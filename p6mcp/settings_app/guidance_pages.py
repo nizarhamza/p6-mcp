@@ -563,7 +563,7 @@ class SkillsPage(QWidget):
 
     # -- the core set (p6mcp.core_skills)
     def restore_core(self) -> bool:
-        """Reinstall the core skills (from the shop, else the copy shipped with P6 MCP) on the thread pool; the
+        """Reinstall the core skills (from the shop, else the copy shipped with the app) on the thread pool; the
         result edits win.data like the other actions (Save). Also the Shop page's button."""
         if self.job is not None or not ask(self, tr("skill.restore"), tr("skill.restore.ask"), warning=False):
             return False

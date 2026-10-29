@@ -1,6 +1,6 @@
 # Code of conduct
 
-P6 MCP is used by planners, schedulers and engineers around the world. Everyone who takes part in this
+MCP for Primavera P6 is used by planners, schedulers and engineers around the world. Everyone who takes part in this
 project (issues, pull requests, reviews, discussions and any other space of the project) helps keep it a
 respectful and welcoming place, whatever their experience, background, identity or language.
 

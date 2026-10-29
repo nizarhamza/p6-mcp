@@ -71,7 +71,7 @@ def main(argv=None) -> int:
             ok = False
             print(f"{cid}: FAILED {e}", file=sys.stderr)
     if ok and a.cmd == "register":
-        print("Restart each client so it loads P6 MCP.")
+        print("Restart each client so it loads MCP for Primavera P6.")
     return 0 if ok else 1
 
 

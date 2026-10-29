@@ -3,7 +3,7 @@
     p6mcp-settings              open the Settings window (and the tray icon)
     p6mcp-settings --minimized  tray icon only (Windows startup); the window opens from the icon
 
-A second start of the app only asks the running one to show its window. While P6 MCP setup runs the app
+A second start of the app only asks the running one to show its window. While MCP for Primavera P6 setup runs the app
 exits at once (see runtime.setup_running).
 """
 
@@ -29,7 +29,7 @@ def main(argv=None) -> int:
     # per-monitor DPI aware, so moving the window between monitors rescales it.
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication([a for a in args if a != "--minimized"])
-    app.setApplicationName("P6 MCP Settings")
+    app.setApplicationName("MCP for Primavera P6 Settings")
     app.setOrganizationName("P6MCP")
 
     from p6mcp import config, i18n

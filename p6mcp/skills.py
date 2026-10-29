@@ -11,7 +11,7 @@ in the Basic profile most of them are not.
 
 Since 1.9 no skill is built in: every skill is an entry of the config's custom_skills, the core set installed
 from the skill shop by the Settings app at its first start (p6mcp.core_skills). Until then (config key
-core_skills_installed false, also without a config file) the core set bundled with P6 MCP is offered instead,
+core_skills_installed false, also without a config file) the core set bundled with the app is offered instead,
 so the server's MCP prompts work from the first start. Core texts are ASCII, without double hyphens
 (house_problems).
 """
@@ -60,7 +60,7 @@ next_offset). Only for a skill that writes: writes take two calls; the first one
 only returns the plan and a confirmation_token; repeat it with dry_run=false and that token only after the
 user's explicit yes to that plan. After a write, ask the user to open P6 and press F9."""
 
-# No skill is built into P6 MCP since 1.9: every one comes from the skill shop (p6mcp.shop), the core set
+# No skill is built into MCP for Primavera P6 since 1.9: every one comes from the skill shop (p6mcp.shop), the core set
 # (p6mcp.core_skills) installed at the first start of the Settings app. Kept empty for older callers.
 BUILTIN: tuple[Skill, ...] = ()
 BY_NAME = {s.name: s for s in BUILTIN}
@@ -203,7 +203,7 @@ def check_skill(item, others: tuple[str, ...] = (), strict: bool = False) -> lis
         unknown = [t for t in item_tools(item) if t not in policy.TOOL_KIND]
         if unknown:
             errs.append(f"unknown tools {', '.join(unknown)}: check the spelling (a skill made for a newer "
-                        "P6 MCP needs that version)")
+                        "MCP for Primavera P6 needs that version)")
         if len(json.dumps(shared_item(item), ensure_ascii=False)) > MAX_JSON:
             errs.append(f"the skill and its reference files are longer than {MAX_JSON} characters")
     return errs
@@ -246,7 +246,7 @@ def pending_core(cfg: Optional[dict]) -> bool:
 
 
 def bundled_core(cfg: Optional[dict]) -> list[Skill]:
-    """While pending_core: the core skills bundled with P6 MCP, without the names turned off in skills_disabled
+    """While pending_core: the core skills bundled with the app, without the names turned off in skills_disabled
     (built-in skills of 1.8) and the ones the config already holds (by name or as a shop skill)."""
     from p6mcp import core_skills
     cfg = cfg or {}
@@ -273,7 +273,7 @@ def saved_config() -> dict:
 
 def missing_tools(skill: Skill, profile: str, allow_writes: bool) -> list[str]:
     """Tools the skill names that are not offered under these settings (an unknown name, from a typo or a
-    newer P6 MCP, is never offered)."""
+    newer MCP for Primavera P6, is never offered)."""
     return [t for t in skill.tools() if t not in policy.TOOL_KIND or not policy.listed(t, profile, allow_writes)]
 
 
@@ -287,7 +287,7 @@ def offered(profile: str, allow_writes: bool, cfg: Optional[dict] = None) -> lis
     return [s for s in all_skills(cfg) if available(s, profile, allow_writes)]
 
 
-# -- house rules of the skills P6 MCP installs as its core set (bundle) and the catalog marks core
+# -- house rules of the skills MCP for Primavera P6 installs as its core set (bundle) and the catalog marks core
 OUR_COMMENTS_RE = re.compile(r"<!-- p6mcp [^>]*-->\n?|^---$", re.M)  # MARKER, files list, frontmatter fences
 
 
@@ -315,7 +315,7 @@ def call_params(args: str) -> list[str]:
 
 
 def house_problems(skill: Skill, params=None) -> list[str]:
-    """Problems of a core skill in its SKILL.md (P6 MCP's own comments and the frontmatter fences left out) and
+    """Problems of a core skill in its SKILL.md (the app's own comments and the frontmatter fences left out) and
     in every reference file:
     text not ASCII, a double hyphen, an unknown p6_* tool, a name= inside a p6_x(...) call that is not a
     parameter of that tool. params: tool -> its parameter names (the server's signatures; None skips that
@@ -403,7 +403,7 @@ def skill_files(skill: Skill) -> dict[str, str]:
 
 
 def written_files(skill_md_text: str) -> list[str]:
-    """Files a P6 MCP SKILL.md says it wrote beside it (SKILL.md first); [] when the marker is missing."""
+    """Files a MCP for Primavera P6 SKILL.md says it wrote beside it (SKILL.md first); [] when the marker is missing."""
     if MARKER not in skill_md_text:
         return []
     m = FILES_RE.search(skill_md_text)

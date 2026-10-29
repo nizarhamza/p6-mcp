@@ -72,7 +72,7 @@ def win(qtbot, env):
 
 
 def test_starts_with_no_database_and_says_so(win):
-    assert win.windowTitle() == "P6 MCP Settings"
+    assert win.windowTitle() == "MCP for Primavera P6 Settings"
     assert win.banner.isVisibleTo(win)
     assert "No database" in win.banner.text()
     assert win.page(DatabasePage).table.rowCount() == 0 and not win.page(DatabasePage).detail.isEnabled()
@@ -187,7 +187,7 @@ def test_server_page(win):
 def test_language_switch_and_rtl(win, monkeypatch):
     win.lang.setCurrentIndex(win.lang.findData("fr"))
     assert win.nav.item(0).text() == "Base de données" and win.data["language"] == "fr"
-    assert win.windowTitle() == "Paramètres P6 MCP"
+    assert win.windowTitle() == "Paramètres de MCP for Primavera P6"
     assert win.layoutDirection() == Qt.LayoutDirection.LeftToRight
     monkeypatch.setattr(i18n, "RTL", {"fr"})  # stands for Arabic until its catalog exists
     win.build(0)
@@ -527,7 +527,7 @@ def test_skill_sharing_files_and_shop_page(qtbot, win, env, monkeypatch, tmp_pat
     sp.refresh()
     sp.table.setCurrentCell(1, 0)
     assert sp.table.item(1, 0).text() == "p6-delay-whatif" and sp.job is None  # never read from the catalog
-    assert sp.table.item(1, 4).text() == "Needs a newer P6 MCP" == sp.preview.toPlainText()
+    assert sp.table.item(1, 4).text() == "Needs a newer MCP for Primavera P6" == sp.preview.toPlainText()
     assert not sp.install_btn.isEnabled() and not sp.remove_btn.isEnabled() and not sp.install()
     win.set_data(dict(win.data, shop_enabled=False))
     sp.refresh()
@@ -546,7 +546,7 @@ def test_restore_core_skills_and_edited_shop_skills(qtbot, win, env, monkeypatch
     qtbot.waitUntil(lambda: page.job is None, timeout=15000)
     assert [r["name"] for r in page.rows] == names and page.restore_btn.isEnabled() and win.dirty()
     assert [page.table.item(i, 3).text() for i in range(len(names))] == ["Shop"] * len(names)
-    assert "copy shipped with P6 MCP" in win.statusBar().currentMessage()
+    assert "copy shipped with MCP for Primavera P6" in win.statusBar().currentMessage()
     stored = {c["name"]: c for c in win.data["custom_skills"]}
     assert [stored[r["name"]]["source"]["sha256"] for r in core_skills.bundle()["skills"]] == \
         [r["sha256"] for r in core_skills.bundle()["skills"]]  # the Shop page sees later updates

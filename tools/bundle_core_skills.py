@@ -5,7 +5,7 @@
 
 The core set is the index.json entries flagged "core": true (or --names). Each skills/<name>/p6mcp.json is
 copied byte for byte (the bytes GitHub serves: the checkout must match the index sha256, so a CRLF checkout
-or a file edited after the build is refused) after the checks of this P6 MCP (shop.check_shared). core.json
+or a file edited after the build is refused) after the checks of this app (shop.check_shared). core.json
 records the catalog, its commit and each skill's version and sha256 (Shop page updates). No timestamp: an
 unchanged catalog gives unchanged files. Copies of skills no longer in the set are removed.
 """

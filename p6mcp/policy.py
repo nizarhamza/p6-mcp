@@ -5,7 +5,7 @@ kind:
   file         reads the database and writes a file the caller names (export_xer, export_dashboard): Full profile
   write        changes the database: Full profile + allow_writes + dry run + confirmation token
   destructive  write that deletes or replaces data: also needs the exact confirmation text
-  config       changes P6 MCP's own settings, never the database (p6_shop_install): Full profile + dry run +
+  config       changes the app's own settings, never the database (p6_shop_install): Full profile + dry run +
                confirmation token, not gated by allow_writes
 
 The skill shop tools (SHOP_TOOLS) read github.com: they are listed only when shop_enabled is on.
@@ -46,7 +46,7 @@ TOOL_KIND: dict[str, str] = {
     "p6_set_schedule_options": WRITE, "p6_backup_database": WRITE,
     # destructive
     "p6_delete_activity": DESTRUCTIVE, "p6_delete_project": DESTRUCTIVE, "p6_restore_backup": DESTRUCTIVE,
-    # P6 MCP settings
+    # MCP for Primavera P6 settings
     "p6_shop_install": CONFIG,
 }
 
@@ -60,8 +60,8 @@ BASIC_TOOLS = frozenset({
 NO_DB_TOOLS = frozenset({"p6_diagnose", "p6_inspect_xer", "p6_shop_search", "p6_shop_get", "p6_shop_install"})
 # The skill shop (p6mcp.shop): GitHub reads, offered only while the setting shop_enabled is on
 SHOP_TOOLS = frozenset({"p6_shop_search", "p6_shop_get", "p6_shop_install"})
-SHOP_OFF = ("The skill shop is turned off. Turn on 'Allow the skill shop' in P6 MCP Settings (Tools and safety), "
-            "then restart your MCP client.")
+SHOP_OFF = ("The skill shop is turned off. Turn on 'Allow the skill shop' in MCP for Primavera P6 Settings "
+            "(Tools and safety), then restart your MCP client.")
 
 assert BASIC_TOOLS <= {t for t, k in TOOL_KIND.items() if k == READ}
 assert set(TOOL_KIND.values()) <= set(KINDS)
@@ -90,14 +90,14 @@ def listed(tool: str, profile: str, allow_writes: bool, shop: bool = True) -> bo
     return True
 
 
-WRITES_OFF = ("Write operations are disabled. Turn on 'Allow write operations' in P6 MCP Settings "
+WRITES_OFF = ("Write operations are disabled. Turn on 'Allow write operations' in MCP for Primavera P6 Settings "
               "(Tools and safety) to use this tool.")
 
 
 def write_refusal(profile: str, allow_writes: bool) -> Optional[str]:
     """Why no database write may run under these settings (None = writes allowed)."""
     if profile != "full":
-        return ("Writes need the Full tool profile. Switch the tool profile to Full in P6 MCP Settings, "
+        return ("Writes need the Full tool profile. Switch the tool profile to Full in MCP for Primavera P6 Settings, "
                 "then restart your MCP client.")
     if not allow_writes:
         return WRITES_OFF
@@ -111,7 +111,7 @@ def refusal(tool: str, profile: str, allow_writes: bool, shop: bool = True) -> O
         return SHOP_OFF
     if profile != "full" and tool not in BASIC_TOOLS:
         return (f"{tool} is not available in the Basic tool profile. Switch the tool profile to Full in "
-                "P6 MCP Settings, then restart your MCP client.")
+                "MCP for Primavera P6 Settings, then restart your MCP client.")
     if k in (WRITE, DESTRUCTIVE):
         return write_refusal(profile, allow_writes)
     return None

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://mcp-for-primavera-p6.pages.dev/sitemap.xml

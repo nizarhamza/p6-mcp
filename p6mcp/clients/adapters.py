@@ -128,7 +128,7 @@ class VSCode(Adapter):
         if entry.get("type") == "http" and not has:
             return jsonc.append_item(text, ["inputs"], {
                 "type": "promptString", "id": VSCODE_INPUT, "password": True,
-                "description": "P6 MCP access token (P6 MCP Settings, Server page, Copy)"})
+                "description": "MCP for Primavera P6 access token (MCP for Primavera P6 Settings, Server page, Copy)"})
         if entry.get("type") != "http" and has:
             return self.extra_unregister(text)
         return text

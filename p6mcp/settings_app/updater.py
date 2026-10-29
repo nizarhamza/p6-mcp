@@ -2,7 +2,7 @@
 
 With auto_update on (default), the tray checks the latest release a minute after it starts and then
 every CHECK_EVERY_H hours. A newer installed-version release is downloaded and verified (SHA256SUMS),
-then installed silently as soon as no MCP client uses P6 MCP (no p6mcp-server.exe started by a client:
+then installed silently as soon as no MCP client uses MCP for Primavera P6 (no p6mcp-server.exe started by a client:
 the files of a running server cannot be replaced). The tray app quits for the install and the
 installer starts it again. The Update button of the Settings window does the same at once, and can
 close the clients' servers when the user agrees.
@@ -39,7 +39,7 @@ def auto_enabled() -> bool:
 
 
 class Updater(QObject):
-    """state: idle, checking, latest, downloading, waiting (clients use P6 MCP), installing, error,
+    """state: idle, checking, latest, downloading, waiting (clients use MCP for Primavera P6), installing, error,
     manual (a newer release exists but this copy cannot install it: portable or source run).
     changed is emitted on every state change; info is the last check() result."""
 
@@ -151,11 +151,11 @@ class Updater(QObject):
         (self._manual_install if self._ask is not None else self._try_install)()
 
     def _try_install(self) -> None:
-        """Install now when no MCP client runs a P6 MCP server; else wait and look again."""
+        """Install now when no MCP client runs a MCP for Primavera P6 server; else wait and look again."""
         self.clients = updates.client_servers()
         if self.clients:
             if self.state != WAITING:
-                log.info("update %s waits: P6 MCP in use by %s", self.latest,
+                log.info("update %s waits: MCP for Primavera P6 in use by %s", self.latest,
                          ", ".join(sorted({c["client"] for c in self.clients})))
             self._set(WAITING)
             if not self.wait_timer.isActive():
@@ -170,13 +170,13 @@ class Updater(QObject):
         except Exception as e:
             self._set(ERROR, f"{type(e).__name__}: {e}")
             return
-        log.info("installing P6 MCP %s over %s (setup log %s)", self.latest, __version__, setup_log)
+        log.info("installing MCP for Primavera P6 %s over %s (setup log %s)", self.latest, __version__, setup_log)
         self._set(INSTALLING)
         self.before_install(self.latest)
 
     # -- the Settings window's Update button
     def update_now(self, close_clients: Callable[[list[dict]], Optional[bool]]) -> None:
-        """Download if needed and install. When MCP clients use P6 MCP, close_clients(clients) decides:
+        """Download if needed and install. When MCP clients use MCP for Primavera P6, close_clients(clients) decides:
         True stops their servers and installs, False installs once they close, None cancels."""
         if self.state in (DOWNLOADING, INSTALLING, CHECKING) or not self.can_install:
             return

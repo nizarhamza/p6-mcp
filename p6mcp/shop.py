@@ -1,4 +1,4 @@
-"""Skill shop: P6 skills shared through GitHub, with updates.py the only network calls P6 MCP makes.
+"""Skill shop: P6 skills shared through GitHub, with updates.py the only network calls MCP for Primavera P6 makes.
 
 - The catalog is the public repository nizarhamza/p6-mcp-shop: index.json and one folder per skill
   (skills/<name>/p6mcp.json = the whole skill, plus SKILL.md and its reference files to browse). Reads are
@@ -10,7 +10,7 @@
 - Without a GitHub account: export_zip / import_file (the zip is also Claude Desktop's skill upload file).
 - The core set (index entries flagged core, p6mcp.core_skills) is installed like any other skill.
 - Catalogs written for P6 MCP 1.8.2 also list its built-in skills (flag builtin): since 1.9 there is none, so
-  such an entry reads as needing a newer P6 MCP and is never fetched or installed.
+  such an entry reads as needing a newer MCP for Primavera P6 and is never fetched or installed.
 No Qt here: the Shop and Skills pages and the p6_shop_* tools drive it; the tests fake the network (opener).
 """
 
@@ -42,7 +42,7 @@ MAX_ZIP_ENTRIES = 20
 MAX_ZIP_BYTES = 1024 * 1024
 # shop status of a catalog skill on this PC
 AVAILABLE, INSTALLED, UPDATE, CONFLICT, NEWER_APP = "available", "installed", "update", "conflict", "newer_app"
-BUILTIN = "builtin"  # status of a built-in skill of this P6 MCP listed by the catalog (none since 1.9)
+BUILTIN = "builtin"  # status of a built-in skill of this MCP for Primavera P6 listed by the catalog (none since 1.9)
 
 
 def _version(v: str) -> tuple:
@@ -71,14 +71,14 @@ def meta(item: dict, **extra) -> dict:
 
 def check_shared(item) -> list[str]:
     """Errors of a shared skill (p6mcp.json of the catalog, an issue or a file): the strict rules of
-    skills.check_skill, its kind and schema, and the P6 MCP version it needs. The catalog's workflow calls it."""
+    skills.check_skill, its kind and schema, and the app version it needs. The catalog's workflow calls it."""
     if not isinstance(item, dict):
         return ["a skill must be a JSON object"]
     errs = []
     if item.get("kind", KIND) != KIND or item.get("schema", SCHEMA) != SCHEMA:
-        errs.append(f"not a P6 MCP skill (kind {KIND!r}, schema {SCHEMA})")
+        errs.append(f"not a MCP for Primavera P6 skill (kind {KIND!r}, schema {SCHEMA})")
     if needs_newer_app(item):
-        errs.append(f"this skill needs P6 MCP {item['min_app_version']} or later (this is {__version__})")
+        errs.append(f"this skill needs MCP for Primavera P6 {item['min_app_version']} or later (this is {__version__})")
     return errs + skills.check_skill(skills.shared_item(item), strict=True)
 
 
@@ -143,7 +143,7 @@ def fetch_skill(entry: dict, opener=urllib.request.urlopen) -> dict:
     if not skills.NAME_RE.match(name):
         raise ValueError(f"bad skill name {name!r} in the catalog")
     if entry.get("builtin"):
-        raise ValueError(f"{name} is a built-in skill of P6 MCP: it is never installed from the shop")
+        raise ValueError(f"{name} is a built-in skill of MCP for Primavera P6: it is never installed from the shop")
     path = f"skills/{name}/{META}"
     data = _get(path, opener)
     if hashlib.sha256(data).hexdigest() != entry.get("sha256"):
@@ -179,7 +179,7 @@ def search(rows: list[dict], query: str = "") -> list[dict]:
 def status(data: dict, entry: dict) -> str:
     """available, installed (same version), update (a newer version; also for a skill edited here, which the
     automatic update leaves alone: skills.edited), conflict (the name is one of the user's own skills) or
-    newer_app (needs a newer P6 MCP; also the built-in entries of a 1.8.2 catalog)."""
+    newer_app (needs a newer MCP for Primavera P6; also the built-in entries of a 1.8.2 catalog)."""
     if entry.get("builtin"):
         return BUILTIN if entry["name"] in skills.BY_NAME else NEWER_APP
     mine = installed_as(data, entry["name"])
@@ -231,8 +231,8 @@ def export_bytes(item: dict) -> bytes:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for rel, text in skills.skill_files(skill).items():
             z.writestr(f"{folder}/{rel}", text)
-        z.writestr(f"{folder}/{META}", json.dumps(meta(item, exported_by=f"P6 MCP {__version__}"), indent=2,
-                                                  ensure_ascii=False) + "\n")
+        by = f"MCP for Primavera P6 {__version__}"
+        z.writestr(f"{folder}/{META}", json.dumps(meta(item, exported_by=by), indent=2, ensure_ascii=False) + "\n")
     return buf.getvalue()
 
 
@@ -270,13 +270,13 @@ def _from_plain(md: str, refs: dict[str, str]) -> dict:
     name = str(head.get("name") or "").strip()
     if name.startswith(skills.PREFIX):
         name = name[len(skills.PREFIX):]
-    body = re.sub(r"\A(<!--.*?-->\s*)+", "", body.strip(), flags=re.S)  # P6 MCP's own markers
+    body = re.sub(r"\A(<!--.*?-->\s*)+", "", body.strip(), flags=re.S)  # MCP for Primavera P6's own markers
     return {"name": name, "title": name.replace("-", " ").capitalize(), "description": head.get("description") or "",
             "args": [], "template": body.strip(), "files": [{"path": p, "text": t} for p, t in sorted(refs.items())]}
 
 
 def import_bytes(raw: bytes, file_name: str = "skill.zip") -> dict:
-    """The skill (custom_skills shape, no source) in a skill file: a zip with p6mcp.json (P6 MCP export),
+    """The skill (custom_skills shape, no source) in a skill file: a zip with p6mcp.json (MCP for Primavera P6 export),
     else a zip of any skill folder with SKILL.md and text reference files, or a p6mcp.json alone. Scripts
     and other files are refused. Raises ValueError with every problem."""
     if file_name.lower().endswith(".json"):

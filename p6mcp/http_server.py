@@ -94,7 +94,7 @@ def serve(port: Optional[int] = None) -> int:
         return 2
     from p6mcp import settings_logic
     if not settings_logic.port_free(port):
-        msg = f"Port {port} is already in use: choose another port in P6 MCP Settings (Server)."
+        msg = f"Port {port} is already in use: choose another port in MCP for Primavera P6 Settings (Server)."
         runtime.write_status("error", port, msg)
         log.error(msg)
         return 3

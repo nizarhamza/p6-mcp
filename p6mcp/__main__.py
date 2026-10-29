@@ -18,7 +18,8 @@ def main() -> None:
         sys.exit(setup_main(args[1:]))
     from p6mcp import runtime
     if runtime.setup_running():  # the clients and setup commands above run inside setup itself
-        print("P6 MCP is being updated: restart the MCP client (or the server) in a minute.", file=sys.stderr)
+        print("MCP for Primavera P6 is being updated: restart the MCP client (or the server) in a minute.",
+              file=sys.stderr)
         sys.exit(1)
     if "--http" in args:
         from p6mcp.http_server import main as http_main

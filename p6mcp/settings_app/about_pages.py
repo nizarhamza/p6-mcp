@@ -111,7 +111,7 @@ class LogsPage(QWidget):
             self.updater.update_now(self._ask_clients)
 
     def _ask_clients(self, clients: list[dict]) -> Optional[bool]:
-        """MCP clients run P6 MCP: True = close them and update now, False = update when they close."""
+        """MCP clients run MCP for Primavera P6: True = close them and update now, False = update when they close."""
         names = ", ".join(sorted({os.path.splitext(c["client"])[0] for c in clients}))
         box = QMessageBox(QMessageBox.Icon.Question, tr("upd.box"), tr("upd.in_use", names=names), parent=self)
         now = box.addButton(tr("upd.close_now"), QMessageBox.ButtonRole.AcceptRole)
@@ -186,7 +186,7 @@ class AboutPage(QWidget):
         super().__init__()
         self.win = win
         lay = QVBoxLayout(self)
-        title = QLabel(f"<h2>P6 MCP {__version__}</h2>")
+        title = QLabel(f"<h2>MCP for Primavera P6 {__version__}</h2>")
         lay.addWidget(title)
         lay.addWidget(note(tr("about.tagline")))
         box, bl = group(tr("about.privacy"))

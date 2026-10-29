@@ -56,7 +56,7 @@ def scan(ids: Optional[Iterable[str]] = None, ln: Optional[Launch] = None,
 
 def snippet(kind: str = "stdio", port: int = 39217, token: Optional[str] = None,
             ln: Optional[Launch] = None) -> str:
-    """Config text for a client P6 MCP has no adapter for. kind: stdio, http (mcpServers notation,
+    """Config text for a client MCP for Primavera P6 has no adapter for. kind: stdio, http (mcpServers notation,
     used by most clients) or vscode (VS Code servers notation, stdio)."""
     ln = ln or launch()
     if kind == "stdio":

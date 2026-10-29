@@ -326,7 +326,7 @@ _log_cache: dict[str, tuple] = {}  # edit log file -> ((mtime_ns, size), entries
 _schema_cache: dict[str, dict] = {}  # db path -> schema.detect() (trust applied at read time)
 XER_MANIFEST: Optional[dict] = None  # XER-only mode: files, projects (Project ID renames), warnings
 XER_READ_ONLY = ("XER-only mode is read only: the XER files are analysed, never changed. Select a P6 database in "
-                 "P6 MCP Settings to write.")
+                 "MCP for Primavera P6 Settings to write.")
 TOOL_HINTS: dict[str, dict[str, bool]] = {}
 HINT_KEYS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")  # MCP tool annotations, in order
 REGISTERED: dict[str, Callable] = {}  # tool -> what a client call runs (policy gate + two-step write flow)
@@ -460,7 +460,7 @@ def _gated(fn: Callable) -> Callable:
     sig = inspect.signature(fn)
     has_confirm = "confirm" in sig.parameters
     destructive = kind == _policy.DESTRUCTIVE
-    settings_only = kind == _policy.CONFIG  # changes P6 MCP's settings: the token is bound to the config file
+    settings_only = kind == _policy.CONFIG  # changes MCP for Primavera P6's settings: the token is bound to the config file
 
     def scope() -> str:
         return (SETTINGS.config_path or _config.config_path()) if settings_only else DB_PATH
@@ -611,7 +611,7 @@ def _connect(readonly: bool = True) -> sqlite3.Connection:
     if not DB_PATH:
         raise RuntimeError(SETTINGS.db_problem or _config.NO_DB_MESSAGE)
     if not os.path.isfile(DB_PATH):
-        raise RuntimeError(f"The configured database was not found: {DB_PATH}. Open P6 MCP Settings to select "
+        raise RuntimeError(f"The configured database was not found: {DB_PATH}. Open MCP for Primavera P6 Settings to select "
                            "another one.")
     if readonly:
         con = sqlite3.connect(_ro_uri(DB_PATH), uri=True, timeout=5)
@@ -9879,8 +9879,8 @@ def _openpyxl():
         import openpyxl
     except ImportError:
         if getattr(sys, "frozen", False):
-            raise ValueError("p6_export_dashboard needs the openpyxl package, missing from this P6 MCP build: "
-                             "reinstall P6 MCP") from None
+            raise ValueError("p6_export_dashboard needs the openpyxl package, missing from this MCP for Primavera P6 build: "
+                             "reinstall MCP for Primavera P6") from None
         raise ValueError(f"p6_export_dashboard needs the openpyxl package: run '\"{sys.executable}\" -m pip install "
                          "openpyxl', then restart the server") from None
     return openpyxl
@@ -10190,7 +10190,7 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
     counts: dict[str, int] = {}
     fills: dict[str, Any] = {}
     wb = Workbook()
-    wb.properties.creator = "P6 MCP server"
+    wb.properties.creator = "MCP for Primavera P6 server"
     wb.properties.title = f"{d['project']} project controls dashboard"
     sheets = {DASH_SHEETS[0]: wb.active}
     sheets[DASH_SHEETS[0]].title = DASH_SHEETS[0]
@@ -10787,7 +10787,7 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
     put(ws, 58, col(0), f"Showing {min(len(flagged), DASH_TABLE_ROWS)} of {len(flagged):,} critical or delayed activities.",
         size=8, color=DASH_MUTED, indent=1)
     put(ws, LAST, col(0), f"Source: {d['db']}, project {d['project']}. Values of the last F9"
-        + (f" ({lsd:%d-%b-%Y %H:%M})" if lsd else "") + f". P6 MCP server {SERVER_VERSION}.", size=8, color=DASH_MUTED)
+        + (f" ({lsd:%d-%b-%Y %H:%M})" if lsd else "") + f". MCP for Primavera P6 server {SERVER_VERSION}.", size=8, color=DASH_MUTED)
     rule = Side(style="thin", color=DASH_RULE)
     for r0, r1, c0_, c1 in frames:  # panel and card frames, after the merges (a merge rewrites its edge borders)
         for rr in range(r0, r1 + 1):
@@ -10946,7 +10946,7 @@ def _shop_settings() -> tuple[str, dict]:
     try:
         data = _config.read_file(path)[0]
     except _config.ConfigError as e:
-        raise ValueError(f"The P6 MCP settings cannot be read ({e}): fix them in P6 MCP Settings first.") from e
+        raise ValueError(f"The MCP for Primavera P6 settings cannot be read ({e}): fix them in MCP for Primavera P6 Settings first.") from e
     return path, data if data is not None else _config.validate({})
 
 
@@ -10977,10 +10977,10 @@ def _skill_clients() -> list:
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
 def p6_shop_search(query: str = "", offset: int = 0, limit: int = 50) -> dict:
-    """Search the P6 MCP skill shop: P6 skills (ready-made workflows) shared by users on GitHub and approved
+    """Search the MCP for Primavera P6 skill shop: P6 skills (ready-made workflows) shared by users on GitHub and approved
     by the maintainer. query: words found in the name, title, description or author (empty = all). Rows:
     name, title, description, author, version, tools it calls, writes (it uses write tools), status on this
-    PC (available, installed, update, conflict = the name is taken here, newer_app = needs a newer P6 MCP).
+    PC (available, installed, update, conflict = the name is taken here, newer_app = needs a newer MCP for Primavera P6).
     Read a skill with p6_shop_get before installing it."""
     _check_page(offset, limit)
     idx = _shop.fetch_index()
@@ -11013,28 +11013,28 @@ def p6_shop_get(name: str) -> dict:
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
 def p6_shop_install(name: str, install_as: Optional[str] = None, confirm: bool = False) -> dict:
-    """Install a skill from the shop, or update it to the shop's version: it joins the user's skills (P6 MCP
+    """Install a skill from the shop, or update it to the shop's version: it joins the user's skills (MCP for Primavera P6
     Settings, Skills page), is written to the skills folders of the clients that already have P6 skills, and
     is offered as an MCP prompt once the MCP client restarts. install_as: another name when the skill's name
-    is taken here. Changes P6 MCP's settings only, never the P6 database."""
+    is taken here. Changes MCP for Primavera P6's settings only, never the P6 database."""
     entry = _shop_entry(name)
     if entry.get("builtin"):  # an entry of a catalog older than P6 MCP 1.9 (built-in skills of 1.8)
         raise ValueError(f"{name} is a built-in skill of P6 MCP 1.8 in an older catalog: nothing to install.")
     item = _shop.fetch_skill(entry)
     path, data = _shop_settings()
     if _shop.status(data, entry) == _shop.NEWER_APP:
-        raise ValueError(f"{name} needs P6 MCP {entry.get('min_app_version')} or later: update P6 MCP first.")
+        raise ValueError(f"{name} needs MCP for Primavera P6 {entry.get('min_app_version')} or later: update MCP for Primavera P6 first.")
     old = _shop.installed_as(data, name) if install_as is None else None
     new = _shop.install(data, item, as_name=install_as)  # refuses a name taken by another skill
     target = install_as or (old["name"] if old else name)
     ads = _skill_clients()
     tools = _skills.from_config(_shop.to_stored(item)).tools()
     plan = [f"{'Update' if old else 'Install'} the skill {target} (version {item.get('version') or 1} by "
-            f"{item.get('author') or 'unknown'}) from the P6 MCP skill shop into {path}",
+            f"{item.get('author') or 'unknown'}) from the MCP for Primavera P6 skill shop into {path}",
             "Tools it calls: " + (", ".join(tools) or "none") + (" (write tools included)" if item.get("writes")
                                                                   else ""),
             "Refresh the P6 skills in: " + (", ".join(f"{ad.skills_dir()} ({ad.name})" for ad in ads) or
-                                            "no client yet (Install skills on the Clients page of P6 MCP Settings)")]
+                                            "no client yet (Install skills on the Clients page of MCP for Primavera P6 Settings)")]
     gate = _plan_gate(plan, confirm)
     if gate:
         return {"applied": False, "error": gate.replace("The database changed", "The shop or the settings changed")}

@@ -11,7 +11,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: P6 MCP version
+      label: MCP for Primavera P6 version
       description: Settings > About, or p6_diagnose
     validations:
       required: true

@@ -87,7 +87,7 @@ def test_migration_to_shop_skills(clean_env):
 def test_newer_schema_version_is_reported_not_raised(clean_env):
     write(clean_env, {"schema_version": 99})
     st = config.load()
-    assert st.db_path == "" and "newer P6 MCP" in st.config_error
+    assert st.db_path == "" and "newer MCP for Primavera P6" in st.config_error
 
 
 def test_malformed_file_is_reported(clean_env):

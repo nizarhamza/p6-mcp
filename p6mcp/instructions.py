@@ -1,6 +1,6 @@
 """Server instructions: the text every MCP client receives when it connects (serverInfo instructions).
 
-Built-in lines ship with P6 MCP; the user can turn them off (except the locked write rule) and add their own
+Built-in lines ship with the app; the user can turn them off (except the locked write rule) and add their own
 lines in the Settings app (Instructions page): config keys `instructions_disabled` (built-in ids) and
 `custom_instructions` ([{text, enabled}]). The server builds the text once at startup, so a change takes
 effect when the MCP client restarts the server.

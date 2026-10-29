@@ -1,4 +1,4 @@
-"""P6 MCP Settings: main window (navigation, Save / Revert, language, banners)."""
+"""MCP for Primavera P6 Settings: main window (navigation, Save / Revert, language, banners)."""
 
 from __future__ import annotations
 

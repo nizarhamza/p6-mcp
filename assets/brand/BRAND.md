@@ -1,4 +1,4 @@
-# P6 MCP brand assets
+# MCP for Primavera P6 brand assets
 
 The mark is a plug whose prongs are two Gantt bars and a milestone: a connector for schedules.
 
@@ -22,15 +22,21 @@ The mark is a plug whose prongs are two Gantt bars and a milestone: a connector 
 
 | Name | Hex | Use |
 |---|---|---|
-| Navy | #0A1A33 | Icon tile, body of the mark, "P6" on light |
-| Blue | #1F6FEB | Bars and "MCP" on light backgrounds |
-| Light blue | #58A6FF | Bars and "MCP" on dark backgrounds |
+| Navy | #0A1A33 | Icon tile, body of the mark, "MCP" on light |
+| Blue | #1F6FEB | Bars and "for Primavera P6" on light backgrounds |
+| Light blue | #58A6FF | Bars and "for Primavera P6" on dark backgrounds |
 | Slate | #4A5B73 | Descriptor text on light |
 | Mist | #9FB3D1 | Descriptor text on dark |
 
 ## Type
 
-IBM Plex Sans (open source, SIL OFL). "P6" Bold, "MCP" Medium, tracking -0.03 em. Descriptor in Regular.
+IBM Plex Sans (open source, SIL OFL). "MCP" Bold, tracking -0.03 em; "for Primavera P6" Medium at half its size
+on the same baseline, in the second color (the tag line form of Oracle's trademark guidelines: the Oracle marks
+never form the name on their own and stay smaller than it). Descriptor in Regular.
+
+The lockups and the banner are generated (text outlined, PNG renderings included) by
+`python tools/make_brand.py <Bold.ttf> <Medium.ttf> <Regular.ttf>`. Versions 1.x were called P6 MCP: the file
+names keep the `p6mcp-` prefix.
 
 ## Rules
 
@@ -38,3 +44,4 @@ IBM Plex Sans (open source, SIL OFL). "P6" Bold, "MCP" Medium, tracking -0.03 em
 - Do not recolor the bars, stretch the mark, or add effects (shadows, gradients).
 - Below 32 px use p6mcp-icon-small.svg.
 - "Primavera" and "P6" are trademarks of Oracle. State in the README that the project is not affiliated with or endorsed by Oracle.
+- Never show "for Primavera P6" larger than "MCP" or in Oracle red.

@@ -1,4 +1,4 @@
-; P6 MCP installer (Inno Setup 6). Per-user install, no administrator rights.
+; MCP for Primavera P6 installer (Inno Setup 6). Per-user install, no administrator rights.
 ;   ISCC packaging\installer.iss /DAppVersion=3.0.0
 ; Signing (optional): ISCC ... /DSIGN "/Sp6sign=signtool sign /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /f cert.pfx /p PASSWORD $f"
 ; Expects packaging\dist\P6MCP (PyInstaller) and the brand files in assets\brand.
@@ -7,21 +7,22 @@
   #define AppVersion "0.0.0"
 #endif
 #ifndef RepoUrl
-  #define RepoUrl "https://github.com/nizarhamza/p6-mcp"
+  #define RepoUrl "https://github.com/nizarhamza/mcp-for-primavera-p6"
 #endif
 
 [Setup]
 AppId={{6F3A2D5E-9B1C-4C8E-A7D2-2E5B8F0C4A91}
-AppName=P6 MCP for Primavera P6
+AppName=MCP for Primavera P6
 AppVersion={#AppVersion}
-AppVerName=P6 MCP {#AppVersion}
+AppVerName=MCP for Primavera P6 {#AppVersion}
 AppPublisher=Nizar Hamza
 AppPublisherURL={#RepoUrl}
 AppSupportURL={#RepoUrl}/issues
 AppUpdatesURL={#RepoUrl}/releases
 AppComments=Local MCP server for Primavera P6 Professional databases and XER files. Not affiliated with Oracle.
+; the folder keeps the name of versions 1.x (P6 MCP): client entries and automatic updates point at it
 DefaultDirName={localappdata}\Programs\P6 MCP
-DefaultGroupName=P6 MCP
+DefaultGroupName=MCP for Primavera P6
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
@@ -32,7 +33,7 @@ OutputBaseFilename=P6MCP-Setup-{#AppVersion}
 SetupIconFile=..\assets\brand\ico\p6mcp.ico
 UninstallDisplayIcon={app}\p6mcp.ico
 WizardSmallImageFile=..\assets\brand\png\p6mcp-icon-256.png
-UninstallDisplayName=P6 MCP for Primavera P6
+UninstallDisplayName=MCP for Primavera P6
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -55,14 +56,16 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "fr"; MessagesFile: "compiler:Languages\French.isl"
 
 [CustomMessages]
-en.RegisterWith=Register P6 MCP with %1 (restart it afterwards)
-fr.RegisterWith=Enregistrer P6 MCP dans %1 (relancez-le ensuite)
-en.RunAtStartup=Start P6 MCP when I sign in to Windows (notification area)
-fr.RunAtStartup=Lancer P6 MCP à l'ouverture de ma session Windows (zone de notification)
-en.OpenSettings=Open P6 MCP Settings to choose a database
-fr.OpenSettings=Ouvrir les paramètres P6 MCP pour choisir une base
-en.Privacy=P6 MCP runs only on this PC. The data its tools return goes to the AI model your MCP client uses: for confidential schedules, use a local model.
-fr.Privacy=P6 MCP fonctionne uniquement sur ce PC. Les données renvoyées par ses outils partent vers le modèle d'IA de votre client MCP : pour des plannings confidentiels, utilisez un modèle local.
+en.RegisterWith=Register MCP for Primavera P6 with %1 (restart it afterwards)
+fr.RegisterWith=Enregistrer MCP for Primavera P6 dans %1 (relancez-le ensuite)
+en.RunAtStartup=Start MCP for Primavera P6 when I sign in to Windows (notification area)
+fr.RunAtStartup=Lancer MCP for Primavera P6 à l'ouverture de ma session Windows (zone de notification)
+en.OpenSettings=Open MCP for Primavera P6 Settings to choose a database
+fr.OpenSettings=Ouvrir les paramètres de MCP for Primavera P6 pour choisir une base
+en.SettingsShortcut=MCP for Primavera P6 Settings
+fr.SettingsShortcut=Paramètres de MCP for Primavera P6
+en.Privacy=MCP for Primavera P6 runs only on this PC. The data its tools return goes to the AI model your MCP client uses: for confidential schedules, use a local model.
+fr.Privacy=MCP for Primavera P6 fonctionne uniquement sur ce PC. Les données renvoyées par ses outils partent vers le modèle d'IA de votre client MCP : pour des plannings confidentiels, utilisez un modèle local.
 
 [Tasks]
 Name: "startup"; Description: "{cm:RunAtStartup}"; Flags: unchecked
@@ -73,9 +76,15 @@ Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreve
 Source: "..\NOTICE"; DestDir: "{app}"; DestName: "NOTICE.txt"; Flags: ignoreversion
 Source: "..\assets\brand\ico\p6mcp.ico"; DestDir: "{app}"; Flags: ignoreversion
 
+[InstallDelete]
+; shortcuts of versions 1.x (P6 MCP): an update would leave them beside the new ones
+Type: files; Name: "{group}\P6 MCP Settings.lnk"
+Type: files; Name: "{group}\Uninstall P6 MCP.lnk"
+Type: files; Name: "{group}\Désinstaller P6 MCP.lnk"
+
 [Icons]
-Name: "{group}\P6 MCP Settings"; Filename: "{app}\p6mcp-settings.exe"; IconFilename: "{app}\p6mcp.ico"
-Name: "{group}\{cm:UninstallProgram,P6 MCP}"; Filename: "{uninstallexe}"
+Name: "{group}\{cm:SettingsShortcut}"; Filename: "{app}\p6mcp-settings.exe"; IconFilename: "{app}\p6mcp.ico"
+Name: "{group}\{cm:UninstallProgram,MCP for Primavera P6}"; Filename: "{uninstallexe}"
 
 [Run]
 Filename: "{app}\p6mcp-server.exe"; Parameters: "setup startup on"; Flags: runhidden; Tasks: startup
@@ -91,7 +100,7 @@ Filename: "{app}\p6mcp-settings.exe"; Description: "{cm:OpenSettings}"; Flags: p
 Filename: "{app}\p6mcp-settings.exe"; Parameters: "--minimized"; Flags: nowait; Check: IsAutoUpdate
 
 [UninstallRun]
-; remove only the p6mcp entries, the P6 skills (and command files of 1.7 and earlier) P6 MCP wrote, and the startup entry; settings, backups and logs are kept
+; remove only the p6mcp entries, the P6 skills (and command files of 1.7 and earlier) MCP for Primavera P6 wrote, and the startup entry; settings, backups and logs are kept
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients unregister --detected"; Flags: runhidden; RunOnceId: "UnregisterClients"
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients skills remove --detected"; Flags: runhidden; RunOnceId: "RemoveSkills"
 Filename: "{app}\p6mcp-server.exe"; Parameters: "setup startup off"; Flags: runhidden; RunOnceId: "StartupOff"

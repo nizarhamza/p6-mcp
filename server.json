@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.nizarhamza/mcp-for-primavera-p6",
+  "title": "MCP for Primavera P6",
+  "description": "Primavera P6 MCP server: critical path, DCMA checks, what-if and safe write-back to the P6 database",
+  "version": "2.0.0",
+  "websiteUrl": "https://mcp-for-primavera-p6.pages.dev/",
+  "repository": {
+    "url": "https://github.com/nizarhamza/mcp-for-primavera-p6",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://mcp-for-primavera-p6.pages.dev/icon-256.png",
+      "mimeType": "image/png",
+      "sizes": ["256x256"]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/nizarhamza/mcp-for-primavera-p6/releases/download/v2.0.0/p6mcp-2.0.0.mcpb",
+      "version": "2.0.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

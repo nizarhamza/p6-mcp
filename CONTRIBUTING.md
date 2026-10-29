@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for helping improve P6 MCP. The project has one maintainer and ships as a Windows product with
+Thank you for helping improve MCP for Primavera P6. The project has one maintainer and ships as a Windows product with
 releases, so every change is agreed in an issue before any code is written.
 
 Everyone follows the [code of conduct](CODE_OF_CONDUCT.md).

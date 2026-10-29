@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Find the Driving Path in Primavera P6 with Claude</title>
+<meta name="description" content="Trace the driving path of any Primavera P6 activity with Claude and an MCP server: driving predecessors back to the root cause, where total float comes from, then a what-if.">
+<link rel="canonical" href="https://mcp-for-primavera-p6.pages.dev/guides/driving-path-p6-claude/">
+<meta name="theme-color" content="#0A1A33">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="MCP for Primavera P6">
+<meta property="og:title" content="Find the driving path in Primavera P6 with Claude">
+<meta property="og:description" content="Driving predecessors back to the root cause, where total float comes from, and a what-if on the driver.">
+<meta property="og:url" content="https://mcp-for-primavera-p6.pages.dev/guides/driving-path-p6-claude/">
+<meta property="og:image" content="https://mcp-for-primavera-p6.pages.dev/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Find the driving path in Primavera P6 with Claude",
+      "description": "Trace the driving path of a Primavera P6 activity with Claude and an MCP server: driving predecessors back to the root cause, where total float comes from, then a what-if.",
+      "url": "https://mcp-for-primavera-p6.pages.dev/guides/driving-path-p6-claude/",
+      "datePublished": "2026-10-29",
+      "dateModified": "2026-10-29",
+      "inLanguage": "en",
+      "proficiencyLevel": "Expert",
+      "author": { "@type": "Person", "name": "Nizar Hamza", "url": "https://github.com/nizarhamza" },
+      "about": [ { "@type": "Thing", "name": "Driving path" }, { "@type": "Thing", "name": "Total float" }, { "@type": "SoftwareApplication", "name": "Primavera P6 Professional" } ],
+      "mentions": { "@id": "https://mcp-for-primavera-p6.pages.dev/#app" },
+      "image": "https://mcp-for-primavera-p6.pages.dev/assets/og.png",
+      "isPartOf": { "@id": "https://mcp-for-primavera-p6.pages.dev/#site" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://mcp-for-primavera-p6.pages.dev/" },
+        { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://mcp-for-primavera-p6.pages.dev/guides/" },
+        { "@type": "ListItem", "position": 3, "name": "Driving path in P6 with Claude", "item": "https://mcp-for-primavera-p6.pages.dev/guides/driving-path-p6-claude/" }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="masthead on-navy">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="MCP for Primavera P6, home">
+      <svg viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect x="4" y="56" width="16" height="8" rx="4" fill="#fff"/><path d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z" fill="#fff"/><rect x="58" y="42" width="46" height="12" rx="6" fill="#58A6FF"/><rect x="58" y="66" width="26" height="12" rx="6" fill="#58A6FF"/><path d="M96 64L104 72L96 80L88 72Z" fill="#58A6FF"/></g></svg>
+      <span><span class="brand-name">MCP</span> <span class="brand-tag">for Primavera P6</span></span>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="/guides/" aria-current="page">Guides</a>
+      <a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">Tools</a>
+      <a href="/#faq">FAQ</a>
+      <a href="https://github.com/nizarhamza/mcp-for-primavera-p6">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="doc-head on-navy" aria-labelledby="page-title">
+    <div class="wrap">
+      <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">Guides</a></li><li aria-current="page">Driving path</li></ol></nav>
+      <h1 id="page-title">Find the driving path in Primavera P6 with Claude</h1>
+      <p class="lede">Ask Claude what drives an activity and get the chain of driving predecessors back to its root cause, computed from P6's own dates, then see where the total float comes from and test a change.</p>
+      <p class="doc-meta">Tools: <code>p6_driving_path</code>, <code>p6_float_origin</code>, <code>p6_float_paths</code>, <code>p6_schedule_whatif</code> &middot; Profile: Full</p>
+      <div class="timescale" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <div class="wrap doc">
+    <nav class="doc-nav" aria-labelledby="toc-title">
+      <h2 id="toc-title">On this page</h2>
+      <ol>
+        <li><a href="#why">Why it is slow in P6</a></li>
+        <li><a href="#how">What the server computes</a></li>
+        <li><a href="#ask">Ask for the driving path</a></li>
+        <li><a href="#float">Where the float comes from</a></li>
+        <li><a href="#next">Test a change on the driver</a></li>
+        <li><a href="#setup">Setup in Claude</a></li>
+      </ol>
+    </nav>
+
+    <article class="article">
+      <h2 id="why">Why it is slow in P6</h2>
+      <p>P6 flags driving relationships and can show the longest path, but answering "why is this milestone on that date?" still means tracing predecessors level by level with Trace Logic, checking each link's lag on the right calendar, and noticing when an SS or FF link, a constraint or an actual date takes over. On a path of twenty activities that is half an hour of clicking, and easy to get wrong.</p>
+
+      <h2 id="how">What the server computes</h2>
+      <p><code>p6_driving_path</code> works backward from the target on the early dates of the last F9. A link drives when its gap is zero (within 5 minutes): the predecessor's date plus the lag, counted on the calendar your project's lag option names, reaches the successor's date. It follows every driving predecessor, level by level, and stops at the root of each chain, with its type:</p>
+      <ul>
+        <li><strong>data date</strong>: an in-progress or open activity whose remaining work starts at the data date;</li>
+        <li><strong>constraint</strong>: an early constraint (start on or after, and the like) sets the date;</li>
+        <li><strong>actual date</strong> or <strong>completed predecessor</strong>: progress already recorded;</li>
+        <li><strong>open start</strong>: no predecessor drives it, the logic is missing;</li>
+        <li><strong>unexplained</strong>: nothing in the network explains the date; worth a look in P6.</li>
+      </ul>
+
+      <h2 id="ask">Ask for the driving path</h2>
+      <pre class="prompt" data-copy="prompt">What drives MS-1100 - Project completion in DEMO-SS225? Show the driving path root first, with dates and total float.</pre>
+      <p>The assistant calls <code>p6_driving_path(project="DEMO-SS225", target="MS-1100")</code>. On the demo project the path has 24 activities over 17 levels. An excerpt, root first:</p>
+      <div class="table-wrap">
+        <table>
+          <caption>DEMO-SS225, synthetic data, data date 26 Oct 2026. Every row has a total float of -36 days.</caption>
+          <thead><tr><th scope="col">Activity</th><th scope="col">Early start</th><th scope="col">Early finish</th><th scope="col">Drives through</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">PRC-TR-1040 - Power transformers 225/63 kV - manufacturing</th><td>26 Oct 2026</td><td>2 Apr 2027</td><td>FS (root: data date)</td></tr>
+            <tr><th scope="row">PRC-TR-1050 - Power transformers 225/63 kV - factory acceptance test</th><td>5 Apr 2027</td><td>9 Apr 2027</td><td>FS</td></tr>
+            <tr><th scope="row">PRC-TR-1060 - Power transformers 225/63 kV - shipping and delivery to site</th><td>12 Apr 2027</td><td>1 Jun 2027</td><td>FS</td></tr>
+            <tr><th scope="row">MS-1040 - Power transformers delivered to site</th><td>1 Jun 2027</td><td>1 Jun 2027</td><td>FS</td></tr>
+            <tr><th scope="row">CON-HV-1040 - Power transformer TR1 installation and oil filling</th><td>2 Jun 2027</td><td>29 Jun 2027</td><td>SS 10 d</td></tr>
+            <tr><th scope="row">CON-HV-1050 - Power transformer TR2 installation and oil filling</th><td>16 Jun 2027</td><td>13 Jul 2027</td><td>FS</td></tr>
+            <tr><th scope="row">COM-ENR-1050 - Trial operation</th><td>1 Sep 2027</td><td>28 Sep 2027</td><td>FS</td></tr>
+            <tr><th scope="row">MS-1100 - Project completion</th><td>5 Oct 2027</td><td>5 Oct 2027</td><td>target</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The answer to "why 5 October 2027?" is therefore the transformer manufacturing still in progress: its remaining work starts at the data date and nothing earlier in the network can pull the chain forward. Note the SS 10 d link between the two transformer installations: a lag that a manual trace can easily read on the wrong calendar.</p>
+      <p>Useful variations:</p>
+      <ul>
+        <li>"Trace only 5 levels" sets <code>max_depth=5</code>.</li>
+        <li>"Include completed activities" adds the completed part of the path, which P6 also places under retained logic.</li>
+        <li>"Is the driving path the same as P6's float path 1?" compares with <code>p6_float_paths</code>, when the project was scheduled with multiple float paths.</li>
+      </ul>
+
+      <h2 id="float">Where the float comes from</h2>
+      <p>The driving path explains the early dates. The total float comes from the late dates, which are set by the successors and finally by a constraint or the project's must finish by date.</p>
+      <pre class="prompt" data-copy="prompt">Why does MS-1100 - Project completion have -36 days of total float?</pre>
+      <p><code>p6_float_origin(project="DEMO-SS225", task_code="MS-1100")</code> answers that the float comes from the project must finish by date, 16 August 2027: the late finish is pinned there while the early finish is 5 October 2027, 36 working days later. For an activity in the middle of the network, it walks forward along the successor links that set its late dates and names the source: a constraint, the must finish by date, or an open end.</p>
+      <div class="note"><strong>Negative float with no constraint in sight</strong><p>When the source is the must finish by date, removing a constraint on an activity will not help: only a shorter driving path, or a later must finish by date agreed with the client, changes it. That distinction matters in a delay discussion.</p></div>
+
+      <h2 id="next">Test a change on the driver</h2>
+      <pre class="prompt" data-copy="prompt">What if PRC-TR-1040 - Power transformers manufacturing finishes 15 working days earlier? Show the new project finish and the milestones that move.</pre>
+      <p><code>p6_schedule_whatif</code> applies the change in memory, runs the server's CPM engine and compares the result with P6's last F9: project finish before and after, milestones, and the activities that become or stop being critical. Nothing is written to the database. Before relying on it, <code>p6_cpm_validate</code> shows how closely the engine reproduces P6's dates on your project.</p>
+
+      <h2 id="setup">Setup in Claude</h2>
+      <ol>
+        <li>Install the server: the installer registers it with Claude Desktop and Claude Code (<a href="/#install">install steps</a>).</li>
+        <li>In the Settings window, choose the <strong>Full</strong> tool profile: the driving path and float origin tools are not in the Basic set.</li>
+        <li>Press F9 in P6, then restart Claude and ask the questions above with your own Project ID and Activity IDs.</li>
+      </ol>
+      <p>The same prompts work in Cursor, VS Code and any MCP client: the server does the tracing, the model writes the explanation.</p>
+
+      <div class="next-guides">
+        <h2>Next</h2>
+        <ul class="toc">
+          <li><a href="/guides/compare-p6-updates-ai/"><strong>Comparing two P6 updates with AI</strong><span>Find out why the finish moved between two updates.</span></a></li>
+          <li><a href="/guides/dcma-14-point-check-ai/"><strong>DCMA 14-point check with AI</strong><span>Screen the whole schedule before trusting a path.</span></a></li>
+        </ul>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download for Windows</a>
+        </div>
+      </div>
+    </article>
+  </div>
+</main>
+
+<footer class="site-foot on-navy">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <p class="foot-title">MCP for Primavera P6</p>
+        <p>Local MCP server for Primavera P6 Professional schedules. Free and open source under the Apache License 2.0.</p>
+      </div>
+      <nav aria-label="Guides">
+        <p class="foot-title">Guides</p>
+        <ul>
+          <li><a href="/guides/dcma-14-point-check-ai/">DCMA 14-point check with AI</a></li>
+          <li><a href="/guides/driving-path-p6-claude/">Driving path in P6 with Claude</a></li>
+          <li><a href="/guides/compare-p6-updates-ai/">Comparing two P6 updates</a></li>
+          <li><a href="/guides/review-xer-before-submission/">Reviewing an XER before submission</a></li>
+        </ul>
+      </nav>
+      <nav aria-label="Project">
+        <p class="foot-title">Project</p>
+        <ul>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6">Source and documentation</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/blob/main/SECURITY.md">Security</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/issues">Report an issue</a></li>
+          <li><a href="/llms.txt">llms.txt</a></li>
+        </ul>
+      </nav>
+    </div>
+    <p class="legal">MCP for Primavera P6 is an independent project, not affiliated with, endorsed or sponsored by Oracle. Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. The demo project shown on this site is synthetic.</p>
+  </div>
+</footer>
+<script src="/assets/site.js" defer></script>
+</body>
+</html>

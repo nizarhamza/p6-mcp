@@ -1,4 +1,4 @@
-"""Core P6 skills: the set P6 MCP installs from the skill shop (p6mcp.shop) instead of built-in skills.
+"""Core P6 skills: the set MCP for Primavera P6 installs from the skill shop (p6mcp.shop) instead of built-in skills.
 
 - p6mcp/data/core_skills holds a copy of the catalog's p6mcp.json of every core skill (<name>.json, the bytes
   GitHub serves) and core.json {schema, catalog, commit, skills [{name, version, sha256}]}, written by
@@ -107,7 +107,7 @@ def _index(data: dict, opener) -> dict:
 
 def install(data: dict, opener=urllib.request.urlopen, index: Optional[dict] = None) -> tuple[dict, dict]:
     """data with the core set installed: the names of the bundle and of the live index entries flagged core,
-    each one from the live shop, else (offline, catalog error, a skill needing a newer P6 MCP) from the
+    each one from the live shop, else (offline, catalog error, a skill needing a newer MCP for Primavera P6) from the
     bundled copy. A core skill installed from the shop already is updated in place (its on/off state kept) or
     kept when it is current and not edited; a skill of the user's holding a core name is left alone. After the
     first shop error the rest comes from the copy (no wait per skill); with the shop turned off, only the copy.

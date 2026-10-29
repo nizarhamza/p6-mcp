@@ -87,11 +87,11 @@ def pid_alive(pid: Optional[int]) -> bool:
 
 # ----------------------------------------------------------------- setup in progress
 
-SETUP_MUTEX = "P6MCP-Setup"  # the installer's SetupMutex, held while P6 MCP setup runs
+SETUP_MUTEX = "P6MCP-Setup"  # the installer's SetupMutex, held while MCP for Primavera P6 setup runs
 
 
 def setup_running(name: str = SETUP_MUTEX) -> bool:
-    """True while P6 MCP setup runs: a program started now would lock files it is replacing, and a
+    """True while MCP for Primavera P6 setup runs: a program started now would lock files it is replacing, and a
     silent setup then aborts half way (its rollback does not restore the files already replaced)."""
     if sys.platform != "win32":
         return False

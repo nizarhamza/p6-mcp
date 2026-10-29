@@ -1,10 +1,10 @@
-# Building and releasing P6 MCP
+# Building and releasing MCP for Primavera P6
 
 ## Artifacts
 
 | File | What it is |
 |---|---|
-| `P6MCP-Setup-<version>.exe` | Per-user installer (Inno Setup 6), no administrator rights. Installs to `%LOCALAPPDATA%\Programs\P6 MCP`, offers to register P6 MCP with every MCP client it detects (each one can be unticked), optional start with Windows. The uninstaller removes the `p6mcp` client entries and the startup entry; settings, backups and logs are kept. |
+| `P6MCP-Setup-<version>.exe` | Per-user installer (Inno Setup 6), no administrator rights. Installs to `%LOCALAPPDATA%\Programs\P6 MCP`, offers to register MCP for Primavera P6 with every MCP client it detects (each one can be unticked), optional start with Windows. The uninstaller removes the `p6mcp` client entries and the startup entry; settings, backups and logs are kept. |
 | `P6MCP-<version>-portable.zip` | The same two programs without installation. |
 | `p6mcp-<version>.mcpb` | MCP bundle for Claude Desktop (server only, Windows). The database, the tool profile and the write permission are chosen in Claude's extension settings. |
 | `SHA256SUMS.txt` | SHA-256 of every file above. |
@@ -44,14 +44,38 @@ signed build with `signtool verify /pa /v`.
 
 ## Release
 
-1. Update the version in `p6mcp/__init__.py` and `CHANGELOG.md`, commit.
+1. Update the version in `p6mcp/__init__.py`, `server.json` (`version` and the bundle URL; `tests/test_registry.py`
+   checks both) and `CHANGELOG.md`, commit.
 2. Tag and push: `git tag v3.0.0 && git push origin v3.0.0`.
 3. The **Release** workflow checks that the tag matches the version, runs the tests, builds, signs
    (if configured), and creates a **draft** GitHub release with the artifacts and checksums.
 4. Run the manual checklist below on the draft artifacts, then publish the release.
+5. Publishing it runs the **MCP Registry** workflow (`.github/workflows/registry.yml`): it downloads the
+   release's `.mcpb`, checks it against `SHA256SUMS.txt`, writes `server.json` with that file's URL and SHA-256
+   (`packaging/server_json.py`), validates it and publishes it to the official MCP Registry with GitHub OIDC (no
+   secret). Pre-releases are skipped. Check the entry with
+   `curl "https://registry.modelcontextprotocol.io/v0/servers?search=mcp-for-primavera-p6"`. A manual run
+   (Actions, MCP Registry, Run workflow, tag) publishes an existing release again.
 
-A manual run of the workflow (Actions, Release, Run workflow) builds without publishing and keeps the
+A manual run of the Release workflow (Actions, Release, Run workflow) builds without publishing and keeps the
 artifacts for 90 days.
+
+### Repository name (2.0.0 only)
+
+Versions 1.x download updates only from `https://github.com/nizarhamza/p6-mcp/releases/download/`. After the
+repository is renamed, GitHub serves the asset URLs under the new name, so 1.x copies would refuse them. Order:
+
+1. Release 2.0.0 while the repository is still `nizarhamza/p6-mcp`: 1.x copies update themselves to 2.0.0.
+2. Once they had the time to update (the tray checks at its start and then on its schedule), rename the
+   repository to `mcp-for-primavera-p6` (Settings > General > Repository name; GitHub redirects the old URLs),
+   then `git remote set-url origin https://github.com/nizarhamza/mcp-for-primavera-p6.git`.
+3. 2.0.0 looks for releases under the new name first and falls back to the old one on a 404, and accepts
+   downloads from both names, so it updates before and after the rename. Never create a new repository named
+   `p6-mcp`: it would break the redirect.
+
+Until the rename, the README badges and links that use the new name do not resolve; keep that window short.
+The skill shop catalog (nizarhamza/p6-mcp-shop) checks skills against a tag of this repository: pin its
+workflows to the new release (`P6MCP_REF`) once the tag exists.
 
 ## Manual test checklist (before publishing)
 
@@ -60,7 +84,7 @@ On a clean Windows 10 or 11 user account, with no Python installed:
 - [ ] The installer runs without administrator rights; SmartScreen shows the publisher (signed builds).
 - [ ] The Finished page lists only the clients installed on the PC; unticking one leaves its config alone.
 - [ ] The Settings window opens; with no database selected, a client's tool call answers
-      "No database configured. Open P6 MCP Settings to select one."
+      "No database configured. Open MCP for Primavera P6 Settings to select one."
 - [ ] Database: the suggestions list P6's connections; Test connection shows the P6 version and the
       project count; Use this database, Save.
 - [ ] **Claude Desktop**: restart it, list the projects, run a health check, run a write dry run, confirm it

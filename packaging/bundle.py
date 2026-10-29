@@ -23,7 +23,8 @@ DIST = os.path.join(HERE, "dist")
 BUILD = os.path.join(HERE, "build")
 ROOT = os.path.dirname(HERE)
 LEGAL = ("LICENSE", "NOTICE")
-REPO = os.environ.get("P6MCP_REPO_URL", "https://github.com/nizarhamza/p6-mcp")
+REPO = os.environ.get("P6MCP_REPO_URL", "https://github.com/nizarhamza/mcp-for-primavera-p6")
+SITE = "https://mcp-for-primavera-p6.pages.dev/"
 
 
 def semver(v: str) -> str:
@@ -47,15 +48,18 @@ def manifest(version: str) -> dict:
     return {
         "manifest_version": "0.3",
         "name": "p6mcp",
-        "display_name": "P6 MCP for Primavera P6",
+        "display_name": "MCP for Primavera P6",
         "version": semver(version),
-        "description": "Analyse Primavera P6 Professional schedules (SQLite database) on this PC: critical path, "
-                       "float, DCMA health check, look-ahead, comparisons, CPM what-if. Not affiliated with Oracle.",
-        "long_description": "Runs locally. The data the tools return goes to the model Claude uses. For the full "
-                            "product (Settings window, XER-only mode, other MCP clients) use the installer.",
+        "description": "Analyse and edit Primavera P6 Professional schedules (SQLite database) on this PC: critical "
+                       "path, driving path, float, DCMA 14-point check, look-ahead, comparisons, CPM what-if. Not "
+                       "affiliated with Oracle.",
+        "long_description": "Runs locally. Writes are off by default; when you allow them (full profile), each one "
+                            "is previewed, applied after your confirmation, backed up first and logged. The data the "
+                            "tools return goes to the model Claude uses. For the full product (Settings window, "
+                            "XER-only mode, other MCP clients) use the installer.",
         "author": {"name": "Nizar Hamza", "url": REPO},
         "repository": {"type": "git", "url": REPO},
-        "homepage": REPO,
+        "homepage": SITE,
         "license": "Apache-2.0",
         "icon": "icon.png",
         "server": {
@@ -82,7 +86,8 @@ def manifest(version: str) -> dict:
                              "required": False},
         },
         "compatibility": {"platforms": ["win32"]},
-        "keywords": ["primavera", "p6", "schedule", "planning", "critical path", "xer"],
+        "keywords": ["primavera", "primavera p6", "p6", "schedule", "planning", "critical path", "dcma", "xer",
+                     "construction"],
     }
 
 

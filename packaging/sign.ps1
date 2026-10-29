@@ -12,7 +12,7 @@ $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\si
     Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
 if (-not $signtool) { throw "signtool.exe not found (install the Windows SDK)" }
 foreach ($f in $Files) {
-    & $signtool sign /fd SHA256 /td SHA256 /tr $ts /f $env:P6MCP_PFX_PATH /p $env:P6MCP_PFX_PASSWORD /d "P6 MCP" $f
+    & $signtool sign /fd SHA256 /td SHA256 /tr $ts /f $env:P6MCP_PFX_PATH /p $env:P6MCP_PFX_PASSWORD /d "MCP for Primavera P6" $f
     if ($LASTEXITCODE -ne 0) { throw "signing $f failed" }
     & $signtool verify /pa /q $f
     if ($LASTEXITCODE -ne 0) { throw "signature of $f does not verify" }

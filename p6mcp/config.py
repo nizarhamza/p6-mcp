@@ -137,8 +137,8 @@ def migrate(d: dict) -> tuple[dict, list[str]]:
     if not isinstance(v, int) or v < 0:
         raise ConfigError(f"schema_version must be a whole number, got {v!r}")
     if v > CONFIG_VERSION:
-        raise ConfigError(f"config.json was written by a newer P6 MCP (schema_version {v}, this version reads "
-                          f"{CONFIG_VERSION}). Update P6 MCP.")
+        raise ConfigError(f"config.json was written by a newer MCP for Primavera P6 (schema_version {v}, this "
+                          f"version reads {CONFIG_VERSION}). Update MCP for Primavera P6.")
     steps = []
     while v < CONFIG_VERSION:
         d = MIGRATIONS[v](d)
@@ -300,7 +300,7 @@ def save(data: dict, path: Optional[str] = None) -> str:
 
 # ----------------------------------------------------------------- effective settings
 
-NO_DB_MESSAGE = "No database configured. Open P6 MCP Settings to select one."
+NO_DB_MESSAGE = "No database configured. Open MCP for Primavera P6 Settings to select one."
 
 
 @dataclass(frozen=True)
@@ -355,20 +355,20 @@ def load() -> Settings:
 
     db_path, db_name, problem = "", None, None
     if err:
-        problem = f"{err} Open P6 MCP Settings to fix it."
+        problem = f"{err} Open MCP for Primavera P6 Settings to fix it."
     xer_files: tuple[str, ...] = ()
     if env_db:
         db_path, db_name, problem = os.path.abspath(env_db), "P6_DB_PATH", None
     elif not err and cfg.get("data_source") == "xer":
         files = [os.path.abspath(f) for f in cfg.get("xer_files", [])]
         if not files:
-            problem = "XER-only mode: no XER file selected. Open P6 MCP Settings (Database) to add one."
+            problem = "XER-only mode: no XER file selected. Open MCP for Primavera P6 Settings (Database) to add one."
         elif not cfg.get("xer_confirmed"):
-            problem = ("XER-only mode: the XER files were selected but not loaded and checked. Open P6 MCP "
-                       "Settings (Database) and click Load.")
+            problem = ("XER-only mode: the XER files were selected but not loaded and checked. Open MCP for "
+                       "Primavera P6 Settings (Database) and click Load.")
         elif any(not os.path.isfile(f) for f in files):
-            problem = (f"XER file not found: {next(f for f in files if not os.path.isfile(f))}. Open P6 MCP "
-                       "Settings to fix the list.")
+            problem = (f"XER file not found: {next(f for f in files if not os.path.isfile(f))}. Open MCP for "
+                       "Primavera P6 Settings to fix the list.")
         else:
             xer_files, db_name = tuple(files), "XER files"
     elif not err:
@@ -377,12 +377,13 @@ def load() -> Settings:
         if entry is None:
             problem = NO_DB_MESSAGE
         elif not entry.get("confirmed"):
-            problem = (f"Database {active!r} was selected but not tested and confirmed. Open P6 MCP Settings, "
-                       "click Test connection, then confirm it.")
+            problem = (f"Database {active!r} was selected but not tested and confirmed. Open MCP for Primavera P6 "
+                       "Settings, click Test connection, then confirm it.")
         else:
             db_path, db_name = os.path.abspath(entry["path"]), active
     if db_path and not os.path.isfile(db_path):
-        problem = f"The configured database was not found: {db_path}. Open P6 MCP Settings to select another one."
+        problem = (f"The configured database was not found: {db_path}. Open MCP for Primavera P6 Settings to "
+                   "select another one.")
         db_path = ""
 
     legacy = source == "env"  # v2 layout: files beside the database, one backup per process

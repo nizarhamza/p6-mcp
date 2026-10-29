@@ -18,7 +18,7 @@ from p6mcp import jsonc
 from p6mcp.clients import files
 
 SERVER_KEY = "p6mcp"
-# Entries of other P6 MCP installs (v2 single-file server, a second copy of this one)
+# Entries of other MCP for Primavera P6 installs (v2 single-file server, a second copy of this one)
 P6_MARKERS = ("p6_mcp_server", "p6mcp-server", "p6mcp.server")
 
 NOT_INSTALLED, NOT_REGISTERED, REGISTERED, OUTDATED, ERROR = (
@@ -59,7 +59,7 @@ class Status:
     state: str
     path: Optional[str] = None
     entry: Any = None                                    # our current entry, if any
-    others: list[str] = field(default_factory=list)      # other P6 MCP entries (legacy installs)
+    others: list[str] = field(default_factory=list)      # other MCP for Primavera P6 entries (legacy installs)
     running: bool = False
     message: Optional[str] = None
     transport: str = "stdio"          # of the entry this installation expects for this client
@@ -195,11 +195,11 @@ class Adapter:
             jsonc.set_member(t, list(self.container), SERVER_KEY, entry), entry))
 
     def unregister(self, key: str = SERVER_KEY) -> dict:
-        """Remove the p6mcp entry (or, with key, another P6 MCP entry such as a v2 install)."""
+        """Remove the p6mcp entry (or, with key, another MCP for Primavera P6 entry such as a v2 install)."""
         if key != SERVER_KEY:
             _t, _b, data = self._load()
             if key not in self.servers(data) or not _is_p6(self.servers(data)[key]):
-                raise ValueError(f"{key} is not a P6 MCP entry of {self.name}: left unchanged")
+                raise ValueError(f"{key} is not a MCP for Primavera P6 entry of {self.name}: left unchanged")
         if key != SERVER_KEY:
             return self._edit(lambda t: jsonc.delete_member(t, list(self.container), key) if t.strip() else t)
         return self._edit(lambda t: self.extra_unregister(jsonc.delete_member(t, list(self.container), key))
@@ -215,8 +215,8 @@ class Adapter:
                 for s in skills.offered(profile, allow_writes, skills.saved_config())}
 
     def _ours(self) -> dict[str, dict[str, str]]:
-        """Skill folders P6 MCP wrote (their SKILL.md carries the marker): name -> {relative path: content}
-        of the files it wrote there."""
+        """Skill folders this app wrote (their SKILL.md carries the marker): name -> {relative path: content} of
+        the files it wrote there."""
         from p6mcp import skills
         root = self.skills_dir()
         out: dict[str, dict[str, str]] = {}
@@ -228,7 +228,7 @@ class Adapter:
                 continue
             try:
                 listed = skills.written_files(files.read(md)[0] or "")
-            except files.ClientFileError:  # not UTF-8: not a file P6 MCP wrote
+            except files.ClientFileError:  # not UTF-8: not a file MCP for Primavera P6 wrote
                 continue
             content = {}
             for rel in listed:
@@ -256,7 +256,7 @@ class Adapter:
 
     @staticmethod
     def _remove_folder(root: str, name: str, content: dict[str, str]) -> None:
-        """Delete the files P6 MCP wrote in a skill folder, then the folders left empty (a file of the user's
+        """Delete the files this app wrote in a skill folder, then the folders left empty (a file of the user's
         keeps its folder)."""
         folder = os.path.join(root, name)
         for rel in content:
@@ -271,7 +271,7 @@ class Adapter:
 
     def install_skills(self, profile: str, allow_writes: bool) -> dict:
         """Write the skills offered under these settings into the client's skills folder, remove the ones
-        P6 MCP wrote earlier that are no longer offered and the P6 command files of older versions. A folder
+        this app wrote earlier that are no longer offered and the P6 command files of older versions. A folder
         without the marker (the user's own skill) is never touched. Returns {changed, folder, written, removed,
         skipped, legacy_removed}."""
         root = self.skills_dir()
@@ -301,7 +301,7 @@ class Adapter:
                 "removed": removed, "skipped": skipped, "legacy_removed": legacy}
 
     def remove_skills(self) -> dict:
-        """Delete the skill folders P6 MCP wrote (marker) and the command files of older versions; the user's
+        """Delete the skill folders this app wrote (marker) and the command files of older versions; the user's
         own skills are kept."""
         root = self.skills_dir()
         removed = []

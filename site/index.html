@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Primavera P6 MCP Server: connect Claude, ChatGPT and Cursor to P6</title>
+<meta name="description" content="Local MCP server for Primavera P6 Professional and XER files: critical path, driving path, DCMA 14-point check, update comparison, what-if, and safe write-back.">
+<link rel="canonical" href="https://mcp-for-primavera-p6.pages.dev/">
+<meta name="theme-color" content="#0A1A33">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/plex-sans-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="MCP for Primavera P6">
+<meta property="og:title" content="Primavera P6 MCP Server: connect Claude, ChatGPT and Cursor to P6">
+<meta property="og:description" content="Ask your P6 schedule in plain language. Driving path, total float, DCMA 14-point check, update comparison and what-if, computed from the schedule. Edits only with your confirmation.">
+<meta property="og:url" content="https://mcp-for-primavera-p6.pages.dev/">
+<meta property="og:image" content="https://mcp-for-primavera-p6.pages.dev/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="MCP for Primavera P6: local MCP server for P6 schedules">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://mcp-for-primavera-p6.pages.dev/#app",
+      "name": "MCP for Primavera P6",
+      "alternateName": ["P6 MCP", "Primavera P6 MCP server"],
+      "description": "Local Model Context Protocol (MCP) server that connects Claude, ChatGPT, Cursor, VS Code and other MCP clients to Primavera P6 Professional schedules (standalone SQLite database or XER files): critical path, driving path, total float, DCMA 14-point check, update comparison, CPM what-if, Monte Carlo risk, and edits written back to the P6 database after a dry run, a confirmation and a backup.",
+      "applicationCategory": "BusinessApplication",
+      "applicationSubCategory": "Project scheduling",
+      "operatingSystem": "Windows 10, Windows 11",
+      "softwareVersion": "2.0.0",
+      "url": "https://mcp-for-primavera-p6.pages.dev/",
+      "downloadUrl": "https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest",
+      "installUrl": "https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest",
+      "softwareHelp": "https://mcp-for-primavera-p6.pages.dev/guides/",
+      "license": "https://www.apache.org/licenses/LICENSE-2.0",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "image": "https://mcp-for-primavera-p6.pages.dev/assets/og.png",
+      "author": { "@type": "Person", "name": "Nizar Hamza", "url": "https://github.com/nizarhamza" },
+      "featureList": [
+        "Critical path, driving path and float paths of the last P6 schedule run",
+        "DCMA 14-point check with the project's own P6 thresholds",
+        "Comparison of two P6 updates or a baseline, with an update integrity review",
+        "CPM what-if and Monte Carlo schedule risk in memory",
+        "XER inspection, import and export, and an XER-only mode",
+        "Edits written to the P6 Professional database after a dry run, a confirmation token and a backup, with an edit log",
+        "Excel project controls dashboard"
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://mcp-for-primavera-p6.pages.dev/#site",
+      "name": "MCP for Primavera P6",
+      "url": "https://mcp-for-primavera-p6.pages.dev/"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "What is an MCP server for Primavera P6?", "acceptedAnswer": { "@type": "Answer", "text": "MCP (Model Context Protocol) is the open standard AI assistants use to call tools. MCP for Primavera P6 gives an assistant 58 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model." } },
+        { "@type": "Question", "name": "Can the AI change my P6 schedule?", "acceptedAnswer": { "@type": "Answer", "text": "Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9." } },
+        { "@type": "Question", "name": "Does my schedule leave my PC?", "acceptedAnswer": { "@type": "Answer", "text": "The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio." } },
+        { "@type": "Question", "name": "Which P6 versions and databases are supported?", "acceptedAnswer": { "@type": "Answer", "text": "P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM and P6 Professional on SQL Server or Oracle are not supported." } },
+        { "@type": "Question", "name": "Does it work with ChatGPT?", "acceptedAnswer": { "@type": "Answer", "text": "Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer." } },
+        { "@type": "Question", "name": "Does it run on macOS or Linux?", "acceptedAnswer": { "@type": "Answer", "text": "No. P6 Professional is a Windows program and the server is built for Windows 10 and 11." } }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="masthead on-navy">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="MCP for Primavera P6, home">
+      <svg viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect x="4" y="56" width="16" height="8" rx="4" fill="#fff"/><path d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z" fill="#fff"/><rect x="58" y="42" width="46" height="12" rx="6" fill="#58A6FF"/><rect x="58" y="66" width="26" height="12" rx="6" fill="#58A6FF"/><path d="M96 64L104 72L96 80L88 72Z" fill="#58A6FF"/></g></svg>
+      <span><span class="brand-name">MCP</span> <span class="brand-tag">for Primavera P6</span></span>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="/guides/">Guides</a>
+      <a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">Tools</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/nizarhamza/mcp-for-primavera-p6">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero on-navy" aria-labelledby="hero-title">
+    <div class="wrap hero-grid">
+      <div>
+        <h1 id="hero-title">Ask your Primavera&nbsp;P6 schedule, in plain language</h1>
+        <p class="lede">A local <strong>Primavera P6 MCP server</strong> for Claude, ChatGPT, Cursor and VS Code. It reads the P6 Professional database or XER files and computes the answer from the schedule: driving path, total float, the DCMA 14-point check, what changed since the last update, what-if. When you allow it, it <strong>edits the schedule too</strong>: previewed, confirmed by you, backed up and logged.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+            Download for Windows
+          </a>
+          <a class="btn btn-ghost" href="/guides/">Read the guides</a>
+        </div>
+        <p class="cta-note">Version 2.0.0 &middot; Windows 10 and 11 &middot; free, Apache 2.0 &middot; not affiliated with Oracle</p>
+      </div>
+
+      <figure class="transcript" aria-labelledby="demo-caption">
+        <div class="turn turn-q"><span class="who">You</span><p>What drives MS-1100 - Project completion?</p></div>
+        <div class="turn"><span class="who">Tool</span><p class="call">p6_driving_path(project="DEMO-SS225", target="MS-1100")</p></div>
+        <div class="gantt" style="--dd:25;--mf:319" role="img" aria-labelledby="gantt-desc">
+          <div class="gantt-scale" aria-hidden="true">
+            <span>Driving chain, root first</span>
+            <div class="gantt-months"><span>Oct 2026</span><span></span><span></span><span>Jan 2027</span><span></span><span></span><span>Apr</span><span></span><span></span><span>Jul</span><span></span><span></span><span>Oct</span></div>
+          </div>
+          <ol aria-hidden="true">
+            <li class="gantt-row"><span class="label"><b>PRC-TR-1040</b>Transformers, manufacturing</span><span class="track"><span class="bar" style="--s:25;--d:159;--i:0"></span></span></li>
+            <li class="gantt-row"><span class="label"><b>PRC-TR-1050</b>Factory acceptance test</span><span class="track"><span class="bar" style="--s:186;--d:5;--i:1"></span></span></li>
+            <li class="gantt-row"><span class="label"><b>PRC-TR-1060</b>Shipping and delivery</span><span class="track"><span class="bar" style="--s:193;--d:51;--i:2"></span></span></li>
+            <li class="gantt-row"><span class="label"><b>MS-1040</b>Transformers on site</span><span class="track"><span class="diamond" style="--s:243;--i:3"></span></span></li>
+            <li class="gantt-row"><span class="label"><b>CON-HV-1040</b>TR1 installation, oil filling</span><span class="track"><span class="bar" style="--s:244;--d:28;--i:4"></span></span></li>
+            <li class="gantt-row"><span class="label"><b>CON-HV-1050</b>TR2 installation, oil filling</span><span class="track"><span class="bar" style="--s:258;--d:28;--i:5"></span></span></li>
+            <li class="gantt-row"><span class="label"><b>CON-SEC-1050</b>Transformer firefighting</span><span class="track"><span class="bar" style="--s:287;--d:21;--i:6"></span></span></li>
+            <li class="gantt-row"><span class="label"><b>COM-PRE-1020</b>TR1 tests</span><span class="track"><span class="bar" style="--s:308;--d:7;--i:7"></span></span></li>
+            <li class="gantt-row"><span class="label"><b>MS-1070</b>Ready for energization</span><span class="track"><span class="diamond" style="--s:321;--i:8"></span></span></li>
+            <li class="gantt-row"><span class="label"><b>COM-ENR-1050</b>Trial operation</span><span class="track"><span class="bar" style="--s:335;--d:28;--i:9"></span></span></li>
+            <li class="gantt-row"><span class="label"><b>MS-1100</b>Project completion</span><span class="track"><span class="diamond" style="--s:369;--i:10"></span></span></li>
+          </ol>
+          <ul class="gantt-legend" aria-hidden="true">
+            <li><span class="key-line"></span>Data date 26 Oct 2026</li>
+            <li><span class="key-must"></span>Must finish by 16 Aug 2027</li>
+            <li><span class="key-bar"></span>Total float -36 d on every bar</li>
+          </ul>
+          <p id="gantt-desc" class="visually-hidden">Driving path of MS-1100 - Project completion, root first: PRC-TR-1040 - Power transformers 225/63 kV - manufacturing, in progress from the data date 26 Oct 2026 to 2 Apr 2027; factory acceptance test; shipping and delivery to site until 1 Jun 2027; transformer installation and oil filling in June and July; firefighting system; transformer tests; MS-1070 - Ready for energization on 18 Aug 2027; trial operation in September; MS-1100 - Project completion on 5 Oct 2027, after the must finish by date of 16 Aug 2027. Every activity shown has a total float of minus 36 days.</p>
+        </div>
+        <div class="turn"><span class="who">Answer</span><p class="answer">The finish is driven by PRC-TR-1040 - Power transformers 225/63 kV - manufacturing, still in progress: its remaining work starts at the data date. The chain then runs through delivery, installation, tests and trial operation. Total float is -36 days because the must finish by date (16 Aug 2027) is 36 working days before the forecast finish (5 Oct 2027).</p></div>
+        <figcaption id="demo-caption">Real output of <code>p6_driving_path</code> and <code>p6_float_origin</code> on the public demo project (synthetic data): 11 of the 24 activities on the path shown.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="ask-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="ask-title">Questions a scheduler asks, answered from the schedule</h2>
+        <p>The server does the scheduling arithmetic on P6's own data; the model only explains the result. Dates and float come from the last schedule run (F9).</p>
+      </div>
+      <dl class="qa">
+        <div><dt>What drives the finish date?</dt><dd><code>p6_driving_path</code> follows the driving predecessors back to the root cause (a constraint, the data date, an actual date); <code>p6_float_origin</code> says where the total float comes from.</dd></div>
+        <div><dt>Does this schedule pass the DCMA 14-point check?</dt><dd><code>p6_health_check</code> runs the 14 checks with the thresholds set in P6 for the project, the critical path test, CPLI and BEI, and lists the activities behind every failed check. <a href="/guides/dcma-14-point-check-ai/">DCMA guide</a></dd></div>
+        <div><dt>What changed since last month's update?</dt><dd><code>p6_compare_projects</code> compares activity by activity and link by link, with slip causes and float erosion; <code>p6_update_integrity</code> lists the changes a reviewer should question. <a href="/guides/compare-p6-updates-ai/">Comparison guide</a></dd></div>
+        <div><dt>What if procurement takes four more weeks?</dt><dd><code>p6_schedule_whatif</code> applies the change in memory and runs a CPM engine checked against P6's own dates (<code>p6_cpm_validate</code>); nothing is written.</dd></div>
+        <div><dt>How likely is the contract finish?</dt><dd><code>p6_schedule_risk</code> runs a Monte Carlo simulation on the remaining durations: P50 and P80 finish, on-time probability, criticality index.</dd></div>
+        <div><dt>What is coming up in the next two weeks?</dt><dd><code>p6_lookahead</code> lists what starts, finishes or runs in the window, critical work first; <code>p6_milestones</code> sets each milestone against its baseline date.</dd></div>
+        <div><dt>Is this XER ready to submit?</dt><dd><code>p6_inspect_xer</code> runs the import pre-flight checks without importing; XER-only mode then runs every analysis on the file alone. <a href="/guides/review-xer-before-submission/">XER review guide</a></dd></div>
+      </dl>
+      <p class="more"><a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">All 58 tools, with what each one reads or writes</a></p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="writes-title">
+    <div class="wrap split">
+      <div>
+        <h2 id="writes-title">Edits go through the steps you would take yourself</h2>
+        <p class="prose">XER-only MCP servers stop at reading a file, or rewrite an XER you import again. This one writes to the P6 Professional database: durations, logic, constraints, actual dates, units, UDFs. The server enforces this sequence on every call.</p>
+        <ol class="write-path">
+          <li><div><h3>Off until you turn it on</h3><p>Writes need the Full tool profile and "Allow write operations" in the Settings window.</p></div></li>
+          <li><div><h3>Dry run first</h3><p>The tool returns the plan of every change and a single-use confirmation token. Deletes and restores also need a typed confirmation.</p></div></li>
+          <li><div><h3>Your explicit yes, with P6 closed</h3><p>The write is refused while PM.exe runs, on an untested P6 schema, or if the database changed since the dry run.</p></div></li>
+          <li><div><h3>Backup, then one transaction</h3><p>A copy of the database is taken before the change; a batch of edits succeeds or fails as a whole.</p></div></li>
+          <li><div><h3>Edit log</h3><p>Every confirmed write is recorded with its before and after values. Any backup can be restored.</p></div></li>
+          <li><div><h3>F9 in P6</h3><p>Planned, early and late dates and float are never written: open P6 and schedule.</p></div></li>
+        </ol>
+      </div>
+      <aside class="aside-note" aria-labelledby="scope-title">
+        <h3 id="scope-title">What it does not do</h3>
+        <ul>
+          <li>No P6 EPPM, no P6 on SQL Server or Oracle: P6 Professional standalone (SQLite) and XER files only.</li>
+          <li>Windows only, like P6 Professional.</li>
+          <li>No new activities except through an XER import.</li>
+          <li>No cloud service and no telemetry. What the tools return goes to the model your MCP client uses: pick a local model for confidential schedules.</li>
+        </ul>
+      </aside>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="compare-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="compare-title">Compared with XER-only MCP servers</h2>
+        <p>Several MCP servers parse P6 XER files. This one works on the P6 database itself and reads XER files too.</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <caption>"Varies": some XER servers do it, others do not.</caption>
+          <thead><tr><th scope="col">Capability</th><th scope="col">MCP for Primavera P6</th><th scope="col">Typical XER-file MCP server</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Reads the P6 Professional database directly</th><td class="yes">Yes, every project, baseline, code, UDF and schedule option</td><td>No: export an XER first</td></tr>
+            <tr><th scope="row">Writes changes back to P6</th><td class="yes">Yes, into the database; then F9 in P6</td><td>No, or edits an XER you import again</td></tr>
+            <tr><th scope="row">Dry run, confirmation token, backup, edit log, restore</th><td class="yes">Yes, enforced by the server</td><td>Not applicable, or varies</td></tr>
+            <tr><th scope="row">Reads, imports and exports XER files</th><td class="yes">Yes, plus an XER-only mode</td><td>Reads them</td></tr>
+            <tr><th scope="row">CPM engine checked against P6's F9 dates</th><td class="yes">Yes, for what-if and Monte Carlo risk</td><td>Varies</td></tr>
+            <tr><th scope="row">DCMA thresholds taken from the P6 project</th><td class="yes">Yes, DCMA defaults when none are set</td><td>Varies</td></tr>
+            <tr><th scope="row">Installation</th><td>Windows installer and Settings window; registers your MCP clients</td><td>Usually a Python package</td></tr>
+            <tr><th scope="row">Runs on macOS or Linux</th><td>No</td><td>Usually yes</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="install" aria-labelledby="install-title">
+    <div class="wrap split">
+      <div>
+        <h2 id="install-title">Install in five minutes</h2>
+        <ol class="steps">
+          <li>Download <code>P6MCP-Setup-2.0.0.exe</code> from the latest release and check it against <code>SHA256SUMS.txt</code>.</li>
+          <li>Run it: per-user install, no administrator rights. On its last page it offers to register the server with the MCP clients it finds.</li>
+          <li>In the Settings window, pick your P6 database, click <strong>Test connection</strong> (read only), then <strong>Use this database</strong> and <strong>Save</strong>.</li>
+          <li>Restart your MCP client and ask: "List my P6 projects".</li>
+        </ol>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download for Windows</a>
+          <a class="btn btn-light" href="https://github.com/nizarhamza/mcp-for-primavera-p6#connect-your-mcp-client">Manual setup per client</a>
+        </div>
+      </div>
+      <div>
+        <h3>MCP clients</h3>
+        <ul class="clients">
+          <li>Claude Desktop <span>installer or .mcpb bundle</span></li>
+          <li>Claude Code <span>installer</span></li>
+          <li>Cursor <span>installer</span></li>
+          <li>VS Code (Copilot agent mode) <span>installer</span></li>
+          <li>LM Studio <span>installer</span></li>
+          <li>Cline <span>installer</span></li>
+          <li>ChatGPT <span>Codex or Secure MCP Tunnel, not tested yet</span></li>
+          <li>Any other MCP client <span>stdio or local HTTP</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="guides-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="guides-title">Guides</h2>
+        <p>Step by step, with the prompts to type and real results from the public demo project.</p>
+      </div>
+      <ul class="toc">
+        <li><a href="/guides/dcma-14-point-check-ai/"><strong>DCMA 14-point check with AI</strong><span>Run the check with your P6 thresholds, read each failed check and drill into the activities behind it.</span></a></li>
+        <li><a href="/guides/driving-path-p6-claude/"><strong>Driving path in P6 with Claude</strong><span>Trace what drives an activity back to its root cause and where its total float comes from.</span></a></li>
+        <li><a href="/guides/compare-p6-updates-ai/"><strong>Comparing two P6 updates with AI</strong><span>Slips, slip causes, float erosion and logic changes, then the questions to ask about the update.</span></a></li>
+        <li><a href="/guides/review-xer-before-submission/"><strong>AI review of an XER before submission</strong><span>File checks, logic, progress and integrity of an update XER before it goes to the client.</span></a></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section faq" id="faq" aria-labelledby="faq-title">
+    <div class="wrap">
+      <div class="section-head"><h2 id="faq-title">FAQ</h2></div>
+      <details><summary>What is an MCP server for Primavera P6?</summary><div><p>MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant 58 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model.</p></div></details>
+      <details><summary>Can the AI change my P6 schedule?</summary><div><p>Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9.</p></div></details>
+      <details><summary>Does my schedule leave my PC?</summary><div><p>The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio.</p></div></details>
+      <details><summary>Which P6 versions and databases are supported?</summary><div><p>P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM and P6 Professional on SQL Server or Oracle are not supported.</p></div></details>
+      <details><summary>Does it work with ChatGPT?</summary><div><p>Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented in the <a href="https://github.com/nizarhamza/mcp-for-primavera-p6#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer.</p></div></details>
+      <details><summary>Does it run on macOS or Linux?</summary><div><p>No. P6 Professional is a Windows program and the server is built for Windows 10 and 11.</p></div></details>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot on-navy">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <p class="foot-title">MCP for Primavera P6</p>
+        <p>Local MCP server for Primavera P6 Professional schedules. Free and open source under the Apache License 2.0.</p>
+      </div>
+      <nav aria-label="Guides">
+        <p class="foot-title">Guides</p>
+        <ul>
+          <li><a href="/guides/dcma-14-point-check-ai/">DCMA 14-point check with AI</a></li>
+          <li><a href="/guides/driving-path-p6-claude/">Driving path in P6 with Claude</a></li>
+          <li><a href="/guides/compare-p6-updates-ai/">Comparing two P6 updates</a></li>
+          <li><a href="/guides/review-xer-before-submission/">Reviewing an XER before submission</a></li>
+        </ul>
+      </nav>
+      <nav aria-label="Project">
+        <p class="foot-title">Project</p>
+        <ul>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6">Source and documentation</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/blob/main/SECURITY.md">Security</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/issues">Report an issue</a></li>
+          <li><a href="/llms.txt">llms.txt</a></li>
+        </ul>
+      </nav>
+    </div>
+    <p class="legal">MCP for Primavera P6 is an independent project, not affiliated with, endorsed or sponsored by Oracle. Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. The demo project shown on this site is synthetic.</p>
+  </div>
+</footer>
+<script src="/assets/site.js" defer></script>
+</body>
+</html>

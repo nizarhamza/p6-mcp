@@ -124,7 +124,7 @@ jobs:
           pre=""
           case "${GITHUB_REF_NAME}" in *dev*|*rc*|*a*|*b*) pre="--prerelease";; esac
           notes="Unsigned build." ; [ "$SIGNING" != "none" ] && notes="Signed with ${SIGNING}."
-          gh release create "${GITHUB_REF_NAME}" --draft $pre --title "P6 MCP ${GITHUB_REF_NAME}" \
+          gh release create "${GITHUB_REF_NAME}" --draft $pre --title "MCP for Primavera P6 ${GITHUB_REF_NAME}" \
             --notes "$notes See CHANGELOG.md. Verify downloads with SHA256SUMS.txt." \
             packaging/dist/*.exe packaging/dist/*.zip packaging/dist/*.mcpb packaging/dist/SHA256SUMS.txt
       - name: Keep the artifacts (manual runs)

@@ -1,11 +1,11 @@
 # Accessibility
 
-P6 MCP should be usable by everyone who plans and schedules with P6. This page says what is supported
+MCP for Primavera P6 should be usable by everyone who plans and schedules with P6. This page says what is supported
 today, what is not, and how to report a barrier.
 
 ## Scope
 
-- **Settings and tray app** (P6 MCP Settings): the only window of P6 MCP.
+- **Settings and tray app** (MCP for Primavera P6 Settings): the only window of MCP for Primavera P6.
 - **Installer**: a standard Windows setup wizard (Inno Setup).
 - **Excel dashboard** written by `p6_export_dashboard`.
 

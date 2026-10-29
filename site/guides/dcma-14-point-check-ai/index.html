@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DCMA 14-Point Check with AI in Primavera P6, step by step</title>
+<meta name="description" content="Run the DCMA 14-point schedule assessment on a Primavera P6 project with Claude or another AI assistant: thresholds from P6, failed checks, the activities behind them, trend between updates.">
+<link rel="canonical" href="https://mcp-for-primavera-p6.pages.dev/guides/dcma-14-point-check-ai/">
+<meta name="theme-color" content="#0A1A33">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/assets/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="MCP for Primavera P6">
+<meta property="og:title" content="DCMA 14-point check with AI in Primavera P6">
+<meta property="og:description" content="Run the DCMA 14-point check on a P6 project from an AI assistant, with the thresholds set in P6 and the activities behind every failed check.">
+<meta property="og:url" content="https://mcp-for-primavera-p6.pages.dev/guides/dcma-14-point-check-ai/">
+<meta property="og:image" content="https://mcp-for-primavera-p6.pages.dev/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "DCMA 14-point check with AI in Primavera P6",
+      "description": "Run the DCMA 14-point schedule assessment on a Primavera P6 project with an AI assistant and an MCP server: thresholds from P6, failed checks, the activities behind them, trend between updates.",
+      "url": "https://mcp-for-primavera-p6.pages.dev/guides/dcma-14-point-check-ai/",
+      "datePublished": "2026-10-29",
+      "dateModified": "2026-10-29",
+      "inLanguage": "en",
+      "proficiencyLevel": "Expert",
+      "author": { "@type": "Person", "name": "Nizar Hamza", "url": "https://github.com/nizarhamza" },
+      "about": [ { "@type": "Thing", "name": "DCMA 14-point assessment" }, { "@type": "SoftwareApplication", "name": "Primavera P6 Professional" } ],
+      "mentions": { "@id": "https://mcp-for-primavera-p6.pages.dev/#app" },
+      "image": "https://mcp-for-primavera-p6.pages.dev/assets/og.png",
+      "isPartOf": { "@id": "https://mcp-for-primavera-p6.pages.dev/#site" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://mcp-for-primavera-p6.pages.dev/" },
+        { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://mcp-for-primavera-p6.pages.dev/guides/" },
+        { "@type": "ListItem", "position": 3, "name": "DCMA 14-point check with AI", "item": "https://mcp-for-primavera-p6.pages.dev/guides/dcma-14-point-check-ai/" }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="masthead on-navy">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="MCP for Primavera P6, home">
+      <svg viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect x="4" y="56" width="16" height="8" rx="4" fill="#fff"/><path d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z" fill="#fff"/><rect x="58" y="42" width="46" height="12" rx="6" fill="#58A6FF"/><rect x="58" y="66" width="26" height="12" rx="6" fill="#58A6FF"/><path d="M96 64L104 72L96 80L88 72Z" fill="#58A6FF"/></g></svg>
+      <span><span class="brand-name">MCP</span> <span class="brand-tag">for Primavera P6</span></span>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="/guides/" aria-current="page">Guides</a>
+      <a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">Tools</a>
+      <a href="/#faq">FAQ</a>
+      <a href="https://github.com/nizarhamza/mcp-for-primavera-p6">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="doc-head on-navy" aria-labelledby="page-title">
+    <div class="wrap">
+      <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">Guides</a></li><li aria-current="page">DCMA 14-point check</li></ol></nav>
+      <h1 id="page-title">DCMA 14-point check with AI in Primavera P6</h1>
+      <p class="lede">Run the DCMA 14-point assessment on a P6 project from Claude, Cursor, VS Code or any MCP client, with the thresholds your project already has in P6, then drill into the activities behind each failed check.</p>
+      <p class="doc-meta">Tools: <code>p6_health_check</code>, <code>p6_health_check_compare</code>, <code>p6_cpm_validate</code> &middot; Profile: Basic is enough for the check, Full for the comparison</p>
+      <div class="timescale" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <div class="wrap doc">
+    <nav class="doc-nav" aria-labelledby="toc-title">
+      <h2 id="toc-title">On this page</h2>
+      <ol>
+        <li><a href="#checks">The 14 checks</a></li>
+        <li><a href="#before">Before you start</a></li>
+        <li><a href="#run">Run the check</a></li>
+        <li><a href="#drill">Drill into a failed check</a></li>
+        <li><a href="#thresholds">Use your own thresholds</a></li>
+        <li><a href="#trend">Follow the trend</a></li>
+        <li><a href="#limits">What the check does not tell you</a></li>
+      </ol>
+    </nav>
+
+    <article class="article">
+      <h2 id="checks">The 14 checks</h2>
+      <p>The DCMA 14-point assessment screens a schedule for the defects that make its dates unreliable: missing logic, leads and lags, constraints, float and duration outliers, dates that make no sense, progress against the baseline. The server computes every check on the open activities of the last P6 schedule run (F9), with level of effort and WBS summary activities left out, as the DCMA guidance intends.</p>
+      <div class="table-wrap">
+        <table>
+          <caption>DCMA default thresholds. High float and high duration use 44 working days of each activity's calendar.</caption>
+          <thead><tr><th scope="col">Check</th><th scope="col">What it counts</th><th scope="col">Default threshold</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">1. Logic</th><td>Open activities without a predecessor or a successor</td><td>at most 5 %</td></tr>
+            <tr><th scope="row">2. Leads</th><td>Links with a negative lag</td><td>0 %</td></tr>
+            <tr><th scope="row">3. Lags</th><td>Links with a positive lag</td><td>at most 5 %</td></tr>
+            <tr><th scope="row">4. Relationship types</th><td>Finish-to-start share of the links</td><td>at least 90 %</td></tr>
+            <tr><th scope="row">5. Hard constraints</th><td>Mandatory and other hard constraints</td><td>at most 5 %</td></tr>
+            <tr><th scope="row">6. High float</th><td>Total float over 44 working days</td><td>at most 5 %</td></tr>
+            <tr><th scope="row">7. Negative float</th><td>Total float below zero</td><td>0 %</td></tr>
+            <tr><th scope="row">8. High duration</th><td>Remaining duration over 44 working days</td><td>at most 5 %</td></tr>
+            <tr><th scope="row">9. Invalid dates</th><td>Forecast dates before, or actual dates after, the data date</td><td>0 %</td></tr>
+            <tr><th scope="row">10. Resources</th><td>Activities with duration and no resource</td><td>report only</td></tr>
+            <tr><th scope="row">11. Missed tasks</th><td>Baseline activities due by the data date and not finished on time</td><td>at most 5 %</td></tr>
+            <tr><th scope="row">12. Critical path test</th><td>Does a delay on the critical path move the finish as much?</td><td>pass</td></tr>
+            <tr><th scope="row">13. CPLI</th><td>Critical path length index</td><td>at least 0.95</td></tr>
+            <tr><th scope="row">14. BEI</th><td>Baseline execution index</td><td>at least 0.95</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="before">Before you start</h2>
+      <ul>
+        <li>Install the server and select your P6 database in its Settings window (<a href="/#install">install steps</a>), or load XER files in XER-only mode.</li>
+        <li>Press <strong>F9</strong> in P6 first: the check reads the dates and float of the last schedule run. Reading does not need P6 to be closed.</li>
+        <li>Missed tasks and BEI need a baseline. The server takes the project baseline set in P6, or the one you name.</li>
+      </ul>
+
+      <h2 id="run">Run the check</h2>
+      <pre class="prompt" data-copy="prompt">Run a DCMA 14-point health check on DEMO-SS225 and explain each failed check in one line.</pre>
+      <p>The assistant calls <code>p6_health_check(project="DEMO-SS225")</code>. The server returns, per check, the count, the denominator, the percentage, the threshold, pass or fail and a sample of 15 activities or links, plus a score and a weighted grade. On the demo project at its data date of 26 October 2026:</p>
+      <div class="table-wrap">
+        <table>
+          <caption>DEMO-SS225, synthetic data, DCMA default thresholds (the project has none set in P6).</caption>
+          <thead><tr><th scope="col">Check</th><th scope="col" class="num">Result</th><th scope="col">Threshold</th><th scope="col">Status</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Logic</th><td class="num">0 of 75 (0 %)</td><td>at most 5 %</td><td><span class="pass">Pass</span></td></tr>
+            <tr><th scope="row">Leads</th><td class="num">0 of 145</td><td>0 %</td><td><span class="pass">Pass</span></td></tr>
+            <tr><th scope="row">Lags</th><td class="num">15 of 145 (10.3 %)</td><td>at most 5 %</td><td><span class="fail">Fail</span></td></tr>
+            <tr><th scope="row">Relationship types (FS)</th><td class="num">130 of 145 (89.7 %)</td><td>at least 90 %</td><td><span class="fail">Fail</span></td></tr>
+            <tr><th scope="row">Hard constraints</th><td class="num">0 of 75</td><td>at most 5 %</td><td><span class="pass">Pass</span></td></tr>
+            <tr><th scope="row">High float</th><td class="num">28 of 75 (37.3 %)</td><td>at most 5 %</td><td><span class="fail">Fail</span></td></tr>
+            <tr><th scope="row">Negative float</th><td class="num">37 of 75 (49.3 %)</td><td>0 %</td><td><span class="fail">Fail</span></td></tr>
+            <tr><th scope="row">High duration</th><td class="num">2 of 67 (3.0 %)</td><td>at most 5 %</td><td><span class="pass">Pass</span></td></tr>
+            <tr><th scope="row">Invalid dates</th><td class="num">0 of 214</td><td>0 %</td><td><span class="pass">Pass</span></td></tr>
+            <tr><th scope="row">Resources</th><td class="num">13 of 67 (19.4 %)</td><td>report only</td><td><span class="info">Info</span></td></tr>
+            <tr><th scope="row">Missed tasks</th><td class="num">134 of 149 (89.9 %)</td><td>at most 5 %</td><td><span class="fail">Fail</span></td></tr>
+            <tr><th scope="row">Critical path test</th><td class="num">finish moves</td><td>pass</td><td><span class="pass">Pass</span></td></tr>
+            <tr><th scope="row">CPLI</th><td class="num">0.85</td><td>at least 0.95</td><td><span class="fail">Fail</span></td></tr>
+            <tr><th scope="row">BEI</th><td class="num">0.93</td><td>at least 0.95</td><td><span class="fail">Fail</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Score: 6 checks passed and 7 failed of the 13 evaluated (46.2 %); weighted score 70.5 points, grade C. The weighted score also counts <strong>logic density</strong> (links per open activity, here 1.93 against a minimum of 1.5), which is outside the DCMA 14 and outside the score.</p>
+      <p>A useful reading of this result: negative float on half of the open work and a CPLI of 0.85 say the same thing, the forecast finish is beyond the must finish by date; the many missed tasks say it did not happen suddenly. The lags and the non-FS links are the first logic questions to ask the scheduler.</p>
+
+      <h2 id="drill">Drill into a failed check</h2>
+      <p>Each check can be paged in full, in the same snapshot, with the activities or links behind it.</p>
+      <pre class="prompt" data-copy="prompt">Which open activities fail the high float check on DEMO-SS225? List them as Activity ID - name with their total float, largest first.</pre>
+      <p>The assistant calls <code>p6_health_check(project="DEMO-SS225", check="high_float")</code> and pages the 28 activities. The same works for <code>lags</code>, <code>fs_links</code>, <code>negative_float</code>, <code>missed_tasks</code> and the other checks. For the logic check, ask for the dangling ends too: <code>p6_dangling</code> lists open starts and open finishes and suggests the link that would close each one.</p>
+      <div class="note"><strong>Why the critical path test can say "not evaluated"</strong><p>The test delays the most critical open activity by 100 working days in the server's CPM engine and checks that the finish moves as much. It runs only when that engine reproduces P6's own dates on the project. Ask "validate the CPM engine on DEMO-SS225" to see the match rate from <code>p6_cpm_validate</code>.</p></div>
+
+      <h2 id="thresholds">Use your own thresholds</h2>
+      <p>P6 Professional stores schedule check settings per project. When they exist, the server uses them instead of the DCMA defaults, including the checks you turned off, and says so in <code>threshold_source</code>. You can also override a threshold for one run:</p>
+      <pre class="prompt" data-copy="prompt">Run the health check on DEMO-SS225 with a lags threshold of 10 % and high float above 30 days.</pre>
+      <p>That becomes <code>thresholds={"lags": 10}</code> and <code>high_float_days=30</code>. Nothing is stored: the next run is back to the project's settings.</p>
+
+      <h2 id="trend">Follow the trend</h2>
+      <p>Every full run saves a snapshot next to the server's logs. After the next update, ask:</p>
+      <pre class="prompt" data-copy="prompt">Compare today's DCMA check of DEMO-SS225 with the previous one. Which checks got worse, and which activities are new in them?</pre>
+      <p><code>p6_health_check_compare</code> compares the totals, every check value and the activities or links that entered or left each check. When the CPM engine version changed between two runs, it says so.</p>
+
+      <h2 id="limits">What the check does not tell you</h2>
+      <ul>
+        <li>A schedule can pass all 14 checks and still be wrong: durations, sequence and resource assumptions need a planner's review.</li>
+        <li>Thresholds are screening values, not contract requirements, unless your contract says so.</li>
+        <li>The check reads the last F9. If someone edited the project since, the result says the schedule is stale.</li>
+      </ul>
+
+      <div class="next-guides">
+        <h2>Next</h2>
+        <ul class="toc">
+          <li><a href="/guides/driving-path-p6-claude/"><strong>Driving path in P6 with Claude</strong><span>Find what drives the negative float back to its root cause.</span></a></li>
+          <li><a href="/guides/compare-p6-updates-ai/"><strong>Comparing two P6 updates with AI</strong><span>See what changed between two updates and why.</span></a></li>
+        </ul>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download for Windows</a>
+        </div>
+      </div>
+    </article>
+  </div>
+</main>
+
+<footer class="site-foot on-navy">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <p class="foot-title">MCP for Primavera P6</p>
+        <p>Local MCP server for Primavera P6 Professional schedules. Free and open source under the Apache License 2.0.</p>
+      </div>
+      <nav aria-label="Guides">
+        <p class="foot-title">Guides</p>
+        <ul>
+          <li><a href="/guides/dcma-14-point-check-ai/">DCMA 14-point check with AI</a></li>
+          <li><a href="/guides/driving-path-p6-claude/">Driving path in P6 with Claude</a></li>
+          <li><a href="/guides/compare-p6-updates-ai/">Comparing two P6 updates</a></li>
+          <li><a href="/guides/review-xer-before-submission/">Reviewing an XER before submission</a></li>
+        </ul>
+      </nav>
+      <nav aria-label="Project">
+        <p class="foot-title">Project</p>
+        <ul>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6">Source and documentation</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/blob/main/SECURITY.md">Security</a></li>
+          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/issues">Report an issue</a></li>
+          <li><a href="/llms.txt">llms.txt</a></li>
+        </ul>
+      </nav>
+    </div>
+    <p class="legal">MCP for Primavera P6 is an independent project, not affiliated with, endorsed or sponsored by Oracle. Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. The demo project shown on this site is synthetic.</p>
+  </div>
+</footer>
+<script src="/assets/site.js" defer></script>
+</body>
+</html>

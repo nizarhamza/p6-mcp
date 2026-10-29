@@ -4,7 +4,7 @@ The catalog is read only when the page is first shown or on Refresh (nothing whe
 the Tools and safety page), and each skill only when it is selected; reads run on the thread pool. Install,
 Update and Remove edit win.data like the Skills page: they take effect after Save (and Install skills on the
 Clients page for the clients' skills folders). Restore core skills is the Skills page's action. Built-in
-entries of a 1.8.2 catalog show as needing a newer P6 MCP and are never read.
+entries of a 1.8.2 catalog show as needing a newer MCP for Primavera P6 and are never read.
 """
 
 from __future__ import annotations
