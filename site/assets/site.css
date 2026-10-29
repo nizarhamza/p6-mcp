@@ -133,7 +133,7 @@ a.btn-primary, .on-navy a.btn-primary, .site-nav a.btn-primary, .site-nav a.btn-
 .gantt-scale, .gantt-row { display: grid; grid-template-columns: minmax(8.5rem, 0.95fr) 1.6fr; gap: 0.6rem; align-items: center; }
 .gantt-scale { color: var(--mist); font-size: 0.72rem; margin-bottom: 0.35rem; }
 .gantt-months { position: relative; display: grid; grid-template-columns: repeat(13, 1fr); border-bottom: 1px solid var(--navy-line); }
-.gantt-months span { padding: 0 0 0.3rem 0.2rem; border-left: 1px solid var(--navy-line); white-space: nowrap; overflow: visible; min-height: 1.3rem; }
+.gantt-months span { padding: 0 0 0.5rem 0.2rem; border-left: 1px solid var(--navy-line); white-space: nowrap; overflow: visible; min-height: 1.3rem; }
 .gantt ol { list-style: none; margin: 0; padding: 0; }
 .gantt-row { min-height: 2.3rem; }
 .gantt-row .label { color: var(--mist); line-height: 1.2; font-size: 0.74rem; min-width: 0; }
@@ -178,7 +178,7 @@ a.btn-primary, .on-navy a.btn-primary, .site-nav a.btn-primary, .site-nav a.btn-
 .write-path { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; counter-reset: step; }
 .write-path li { position: relative; display: grid; grid-template-columns: 2.5rem 1fr; gap: 1rem; padding: 0 0 1.6rem; }
 .write-path li::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 50%; background: var(--navy); color: #fff; font-weight: 600; font-size: 0.95rem; position: relative; z-index: 1; }
-.write-path li:not(:last-child)::after { content: ""; position: absolute; left: calc(1.25rem - 1px); top: 2.5rem; bottom: 0; border-left: 2px solid var(--line); }
+.write-path li:not(:last-child)::after { content: ""; position: absolute; left: calc(1.25rem - 1px); top: 2.5rem; bottom: 0; width: 2px; background: var(--line); }
 .write-path h3 { margin: 0.3rem 0 0.25rem; font-size: var(--step-1); }
 .write-path p { margin: 0; color: var(--text); max-width: 60ch; }
 .split { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(2rem, 5vw, 4rem); }
