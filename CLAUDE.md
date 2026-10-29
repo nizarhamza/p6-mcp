@@ -48,6 +48,22 @@ stay outside this repository.
   token in the Credential Manager), `ToolsPage` (profile, writes with confirmation dialogs, backups, tool list).
   Dialogs go through `common.ask` and `SettingsWindow.ask_close` so tests can answer them. HiDPI: PassThrough
   rounding, layouts only (no fixed pixel sizes except font-metric based ones).
+- Skills and Skill shop pages as cards (2.0): `settings_app/cards.py` `CardView` (a `QScrollArea` of `Card`
+  widgets the page rebuilds on every refresh: grid columns = width // `CARD_MIN_CHARS` average characters,
+  the scroll bar's width always kept free, no horizontal scroll; list rows whose `cells` widths come from
+  `fit_columns` (natural, then narrowed toward a minimum, then the last columns hidden) and a header `Card`
+  built by the same class with `retain_hidden` placeholders; one tab stop `set_current`, arrows mirrored in
+  RTL, Space / Enter / Delete / Menu key mapped to `space_fn` / `open_fn` / `delete_fn` / `menu()`), `Flow`
+  (wrapping toolbar layout, mirrors itself in RTL), `Elided` / `Badge` (painted, full text = text and tooltip),
+  `ViewToggle` (drawn icons), `icon_button` (Qt theme icons = Segoe Fluent Icons, text when absent), `primary`
+  (accent fill: windows11 only outlines a default button). Card actions run through `later()` (after the event:
+  they rebuild the cards or open modal dialogs) and `page.run(name, fn)` (sets the current skill, then the
+  page's existing action, which acts on `current()`). Never `setVisible(True)` a widget before it has a parent
+  (it opens as a window): `hide()` only. `settings_app/skill_details.py` `SkillDetails` (fill(info, actions),
+  `Action(close=True)` closes then runs; size in the window state file). The Grid / List view per page and the
+  dialog size are window state: `settings_logic.load_ui_state` / `save_ui_state` / `ui_view`
+  (`%LOCALAPPDATA%\P6MCP\settings_ui.json`, written at once, outside config.json and Save / Revert); search and
+  Source filter are `settings_logic.filter_skills` / `skill_source`. Pages have a `show_dialog` seam (tests).
 
 - `p6mcp/jsonc.py`: parser with spans (comments, trailing commas, BOM-free text) and minimal edits
   `set_member(text, path, key, value)` / `delete_member`: only our member's text changes (indentation, line
@@ -168,8 +184,8 @@ stay outside this repository.
   with a newer installable shop version. `run_first_start` / `run_updates` read and save config.json (a fresh
   install gets its file there) and `refresh_clients` (folders that already hold P6 skills, one per folder).
   Settings: "Restore core skills..." (`SkillsPage.restore_core`, a `Job`, edits win.data; the Shop page's button
-  calls it); Skills page source column Shop / Shop, edited here / Yours; the Shop page status adds ", edited
-  here" and Update asks first (`shop.update.edited`).
+  calls it); Skills page Source badge and filter Shop / Shop, edited here / Yours; the Shop page state adds
+  ", edited here" and Update asks first (`shop.update.edited`).
 - `p6mcp/shop.py` (stdlib only: the catalog repo's GitHub Action imports `check_shared` from a pinned tag):
   public catalog nizarhamza/p6-mcp-shop (`index.json`, `skills/<name>/p6mcp.json` = the whole skill +
   version, author, license, issue; SKILL.md and reference files beside it to browse). Reads only under
@@ -187,8 +203,10 @@ stay outside this repository.
   `p6_shop_get` (READ) and `p6_shop_install` (policy kind CONFIG: Full profile, dry run + token bound to the
   config file, not gated by allow_writes; saves config.json and refreshes the skills folders that already
   hold P6 skills); `SHOP_TOOLS` listed only while `shop_enabled`; `"openWorldHint": True` in their `_tool` annotations sets
-  openWorldHint. Settings: `shop_page.ShopPage` (index read on first show or Refresh, each skill when
-  selected, all through `Job`), Skills page Share / Export / Import (`open_url`, `save_path`, `open_path`
+  openWorldHint. Settings: `shop_page.ShopPage` (index read on first show or Refresh, each skill when its
+  details open or its card's Install needs it: `read(entry, then, failed)`, one `Job` at a time through
+  `waiting`, `reading` = Install waiting for its read, then the unchanged `install()`), Skills page Share /
+  Export / Import (`open_url`, `save_path`, `open_path`
   are the seams tests replace), Tools page "Allow the skill shop", and `SettingsWindow.save` asks
   overwrite / reload (`ask_changed`) when config.json changed on disk since it was read (`file_stamp`).
 - `p6mcp/updates.py`: with the skill shop the only network calls. `check()` reads the latest published release of

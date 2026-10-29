@@ -5,7 +5,10 @@ that can be turned off and the user's own lines. Skills: the P6 skills (p6mcp.sk
 the skill shop (the core set included, Restore core skills reinstalls it: p6mcp.core_skills) and the user's own
 ones (with reference files; shared on GitHub through p6mcp.shop, or as a zip file). Both edit win.data through
 win.set_data(); the server reads them when it starts, so a change takes effect after Save and a restart of the
-MCP client (skills folders: Install skills on the Clients page).
+MCP client (skills folders: Install skills on the Clients page). The Skills page shows the skills as cards or
+list rows (settings_app.cards; the view is window state, not a setting) with a search box and a Source filter;
+a card's checkbox, Remove button and "..." menu call the page's actions on that skill (current()), and View
+details opens settings_app.skill_details.
 """
 
 from __future__ import annotations
@@ -14,14 +17,19 @@ import os
 from typing import Optional
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication
-from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
-                               QHeaderView, QInputDialog, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
-                               QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication, QIcon
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+                               QFormLayout, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLineEdit,
+                               QListWidget, QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
+                               QSizePolicy, QSpacerItem, QTableWidget, QTableWidgetItem, QVBoxLayout,
+                               QWidget)
 
 from p6mcp import core_skills, instructions, settings_logic, shop, skills
 from p6mcp.i18n import tr
-from p6mcp.settings_app.common import Job, ask, group, note, start
+from p6mcp.settings_app.cards import (GRID, LIST, Badge, Card, CardView, Elided, Flow, ViewToggle, bold,
+                                      card_button, icon_button, later, mono_font, more_button, retain_hidden)
+from p6mcp.settings_app.common import Job, ask, group, muted, note, start
+from p6mcp.settings_app.skill_details import Action, SkillDetails
 
 CHECKED = {True: Qt.CheckState.Checked, False: Qt.CheckState.Unchecked}
 
@@ -365,141 +373,271 @@ class SkillDialog(QDialog):
         super().accept()
 
 
-class SkillsPage(QWidget):
-    COLS = ("skill.col.on", "skill.col.skill", "skill.col.title", "skill.col.kind", "skill.col.offered")
+SOURCE_LEVEL = {"shop": "info", "shop_edited": "warn", "custom": "idle"}  # badge colours of the Source values
+LIST_COLUMNS = (("id", 10), ("offered", 10), ("source", 6))  # list cells (minimum characters), hidden last first
 
+
+def offered(r: dict) -> tuple[str, str]:
+    """(badge level, text) of whether clients get a skill row: the values of the former Offered column."""
+    if r["offered"]:
+        return "ok", tr("common.yes")
+    if not r["enabled"]:
+        return "idle", tr("skill.off")
+    return "warn", tr("skill.needs", tools=", ".join(r["missing_tools"]))
+
+
+class SkillCard(Card):
+    """A skill of the config: a card (grid) or a row (list); without a row, the list's column titles."""
+
+    def __init__(self, page: "SkillsPage", r: Optional[dict] = None):
+        super().__init__(page.view, r["name"] if r else "", header=r is None)
+        self.page, self.r = page, r
+        key, u = self.key, self.unit
+        grid = page.view.mode == GRID
+        self.check = QCheckBox()
+        self.check.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.ident = Elided(skills.PREFIX + key if r else tr("skill.col.skill"))
+        self.title = bold(Elided(r["title"] if r else tr("skill.col.title")))
+
+        def remove():
+            page.run(key, page.remove)
+        self.remove_btn = card_button(tr("skill.remove"), remove) if grid else \
+            icon_button(QIcon.ThemeIcon.EditDelete, tr("skill.remove"), remove)
+        if r:
+            ident, src = skills.PREFIX + key, settings_logic.skill_source(r)
+            level, value = offered(r)
+            on, why = page.allowed(r)["remove"]
+            self.ident.setFont(mono_font(self.font()))
+            self.desc = muted(Elided(r["description"], lines=2))
+            self.source = Badge(SOURCE_LEVEL[src], tr("skill.kind." + src))
+            self.offered = Badge(level, tr("skill.offered.badge", value=value) if grid else value)
+            self.check.setChecked(r["enabled"])
+            self.check.setToolTip(tr("skill.on.tip", name=ident))
+            self.check.setAccessibleName(tr("skill.on.tip", name=ident))
+            self.check.toggled.connect(lambda checked: later(lambda: page.set_enabled(key, checked)))
+            self.remove_btn.setEnabled(on)
+            if why:  # the reason it is off (an icon button keeps its name otherwise)
+                self.remove_btn.setToolTip(why)
+            self.remove_btn.setAccessibleName(tr("cards.action", action=tr("skill.remove"), name=ident))
+            self.open_fn = lambda: page.run(key, page.details)
+            self.space_fn = lambda: page.set_enabled(key, not page.row(key)["enabled"])
+            self.delete_fn = lambda: page.run(key, page.remove) if page.allowed(page.row(key))["remove"][0] else None
+            self.setAccessibleName(tr("cards.name", id=ident, title=r["title"]) if r["title"] else ident)
+            self.setAccessibleDescription(" ".join(x for x in (
+                r["description"], tr("cards.field", label=tr("skill.col.kind"), value=tr("skill.kind." + src)),
+                tr("cards.field", label=tr("skill.col.offered"), value=value), tr("cards.keys.skill")) if x))
+        else:  # column titles over the cells of the rows
+            self.source = Elided(tr("skill.col.kind"))
+            self.offered = Elided(tr("skill.col.offered"))
+            for w in (self.ident, self.title, self.source, self.offered):
+                muted(bold(w))
+            for w in (self.source, self.offered):  # in line with the text of the badges below
+                w.setContentsMargins(u, 0, u, 0)
+        self.more = more_button(self)
+        if not grid:
+            lay = QHBoxLayout(self)
+            lay.setContentsMargins(u, u // 2, u, u // 2)
+            lay.setSpacing(u)
+            lay.addWidget(self.check)
+            lay.addWidget(self.cell("id", self.ident))
+            lay.addWidget(self.title, 1)
+            lay.addWidget(self.cell("source", self.source))
+            lay.addWidget(self.cell("offered", self.offered))
+            lay.addWidget(self.remove_btn)
+            lay.addWidget(self.more)
+            self.fixed = [self.check, self.remove_btn, self.more]
+            if r is None:
+                retain_hidden(self.check, self.remove_btn, self.more)
+            return
+        g = QGridLayout(self)
+        g.setContentsMargins(u * 2, u * 2, u * 2, u * 2)
+        g.setHorizontalSpacing(u)
+        g.setVerticalSpacing(u // 2)
+        g.addWidget(self.check, 0, 0)
+        g.addWidget(self.ident, 0, 1)
+        g.addWidget(self.more, 0, 2, Qt.AlignmentFlag.AlignRight)
+        g.addWidget(self.title, 1, 1, 1, 2)
+        g.addWidget(self.desc, 2, 1, 1, 2)
+        g.addItem(QSpacerItem(0, u, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding), 3, 1)
+        badges = Flow()  # the Offered value can be long: the badges wrap instead of being cut
+        badges.setSpacing(u)
+        badges.addWidget(self.source)
+        badges.addWidget(self.offered)
+        g.addLayout(badges, 4, 1, 1, 2)
+        g.addWidget(self.remove_btn, 5, 1, 1, 2, Qt.AlignmentFlag.AlignRight)
+        g.setColumnStretch(1, 1)
+
+    def menu(self) -> Optional[QMenu]:
+        return self.page.menu_for(self.key, self) if self.r else None
+
+class SkillsPage(QWidget):
     def __init__(self, win):
         super().__init__()
         self.win = win
-        self.rows: list[dict] = []
-        self._loading = False
+        self.rows: list[dict] = []  # the skills shown (search and Source filter applied), in config order
         self.job: Optional[Job] = None  # Restore core skills (reads the shop)
         lay = QVBoxLayout(self)
         lay.addWidget(note(tr("skill.intro")))
 
-        box, tl = group(tr("skill.list"))
-        self.table = QTableWidget(0, len(self.COLS))
-        self.table.setHorizontalHeaderLabels([tr(k) for k in self.COLS])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        hh = self.table.horizontalHeader()
-        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        for c in (0, 1, 3, 4):
-            hh.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setMinimumHeight(self.fontMetrics().height() * 14)  # the core skills and a few more
-        self.table.itemChanged.connect(self._toggled)
-        self.table.currentCellChanged.connect(lambda *_a: self._selected())
-        self.table.cellDoubleClicked.connect(lambda *_a: self.edit())
-        tl.addWidget(self.table)
-        row = QHBoxLayout()
+        bar = QHBoxLayout()
+        flow = Flow()
+        flow.setSpacing(self.fontMetrics().averageCharWidth())
+        self.search = QLineEdit()
+        self.search.setPlaceholderText(tr("skill.search"))
+        self.search.setAccessibleName(tr("skill.search"))
+        self.search.setClearButtonEnabled(True)
+        self.search.setMinimumWidth(self.fontMetrics().averageCharWidth() * 30)
+        self.search.setMaximumWidth(self.fontMetrics().averageCharWidth() * 60)
+        self.search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.search.textChanged.connect(lambda *_a: self.refresh())
+        self.source = QComboBox()
+        self.source.addItem(tr("skill.source.all"), "all")
+        for s in settings_logic.SKILL_SOURCES:
+            self.source.addItem(tr("skill.kind." + s), s)
+        self.source.setAccessibleName(tr("skill.col.kind"))
+        self.source.setToolTip(tr("skill.col.kind"))
+        self.source.currentIndexChanged.connect(lambda *_a: self.refresh())
         self.add_btn = QPushButton(tr("skill.add"))
         self.add_btn.clicked.connect(self.add)
-        self.copy_btn = QPushButton(tr("skill.copy"))
-        self.copy_btn.clicked.connect(self.copy)
-        self.edit_btn = QPushButton(tr("skill.edit"))
-        self.edit_btn.clicked.connect(self.edit)
-        self.remove_btn = QPushButton(tr("skill.remove"))
-        self.remove_btn.clicked.connect(self.remove)
-        for b in (self.add_btn, self.copy_btn, self.edit_btn, self.remove_btn):
-            row.addWidget(b)
-        row.addStretch(1)
-        tl.addLayout(row)
-        row = QHBoxLayout()
-        self.share_btn = QPushButton(tr("skill.share"))
-        self.share_btn.clicked.connect(self.share)
-        self.export_btn = QPushButton(tr("skill.export"))
-        self.export_btn.clicked.connect(self.export)
         self.import_btn = QPushButton(tr("skill.import"))
         self.import_btn.clicked.connect(self.import_skill)
-        for b in (self.share_btn, self.export_btn, self.import_btn):
-            row.addWidget(b)
-        row.addStretch(1)
         self.restore_btn = QPushButton(tr("skill.restore"))
         self.restore_btn.clicked.connect(self.restore_core)
-        row.addWidget(self.restore_btn)
-        tl.addLayout(row)
-        tl.addWidget(note(tr("skill.share.note")))
-        lay.addWidget(box)
+        for w in (self.search, self.source, self.add_btn, self.import_btn, self.restore_btn):
+            flow.addWidget(w)
+        bar.addLayout(flow, 1)
+        view = settings_logic.ui_view(settings_logic.load_ui_state(), "skills")
+        self.toggle = ViewToggle(view, {GRID: tr("view.grid"), LIST: tr("view.list")})
+        self.toggle.changed.connect(self.set_view)
+        bar.addWidget(self.toggle, 0, Qt.AlignmentFlag.AlignTop)
+        lay.addLayout(bar)
 
-        box, pl = group(tr("skill.preview"))
-        self.desc = note()
-        pl.addWidget(self.desc)
-        self.preview = _preview_box(12)
-        pl.addWidget(self.preview)
-        pl.addWidget(note(tr("skill.restart")))
-        lay.addWidget(box, 1)
+        self.view = CardView(view)
+        lay.addWidget(self.view, 1)
+        lay.addWidget(note(tr("skill.restart")))
         self.refresh()
 
     def refresh(self, select: Optional[str] = None) -> None:
-        cur = self.current()
-        select = select or (cur["name"] if cur else None)
-        self.rows = settings_logic.skill_rows(self.win.data)
-        self._loading = True
-        self.table.setRowCount(len(self.rows))
-        for i, r in enumerate(self.rows):
-            on = QTableWidgetItem()
-            on.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
-            on.setCheckState(CHECKED[r["enabled"]])
-            self.table.setItem(i, 0, on)
-            self.table.setItem(i, 1, QTableWidgetItem(skills.PREFIX + r["name"]))
-            self.table.setItem(i, 2, QTableWidgetItem(r["title"]))
-            kind = ("skill.kind.shop_edited" if r["edited"] else "skill.kind.shop") if r["source"] else \
-                "skill.kind.custom"
-            self.table.setItem(i, 3, QTableWidgetItem(tr(kind)))
-            if r["offered"]:
-                offered = tr("common.yes")
-            elif not r["enabled"]:
-                offered = tr("skill.off")
-            else:
-                offered = tr("skill.needs", tools=", ".join(r["missing_tools"]))
-            cell = QTableWidgetItem(offered)
-            cell.setToolTip(offered)
-            self.table.setItem(i, 4, cell)
-        self._loading = False
-        idx = next((i for i, r in enumerate(self.rows) if r["name"] == select), 0 if self.rows else -1)
-        if idx >= 0:
-            self.table.setCurrentCell(idx, 1)
-        self.add_btn.setEnabled(len(self.win.data.get("custom_skills") or []) < skills.MAX_CUSTOM)
-        self.import_btn.setEnabled(len(self.win.data.get("custom_skills") or []) < skills.MAX_CUSTOM)
-        self._selected()
+        if select is not None:
+            self.view.current = select
+        every = settings_logic.skill_rows(self.win.data)
+        self.rows = settings_logic.filter_skills(every, self.search.text(), self.source.currentData())
+        if select is not None and self.row(select) is None and any(r["name"] == select for r in every):
+            for w in (self.search, self.source):  # the skill just added or changed shows, as before the filters
+                w.blockSignals(True)
+            self.search.clear()
+            self.source.setCurrentIndex(0)
+            for w in (self.search, self.source):
+                w.blockSignals(False)
+            self.rows = every
+        self.view.set_empty(tr("cards.no_match") if every else tr("skill.empty"))
+        header = SkillCard(self) if self.view.mode == LIST else None
+        self.view.set_items([SkillCard(self, r) for r in self.rows], header, LIST_COLUMNS)
+        full = len(self.win.data.get("custom_skills") or []) >= skills.MAX_CUSTOM
+        for b in (self.add_btn, self.import_btn):
+            b.setEnabled(not full)
+            b.setToolTip(tr("skill.full", n=skills.MAX_CUSTOM) if full else "")
+
+    def set_view(self, view: str) -> None:
+        """Grid or List: kept in the window state file (not a setting: no Save needed)."""
+        settings_logic.save_ui_state(skills_view=view)
+        self.view.mode = view
+        self.refresh()
 
     def current(self) -> Optional[dict]:
-        r = self.table.currentRow() if hasattr(self, "table") else -1
-        return self.rows[r] if 0 <= r < len(self.rows) else None
+        key = self.view.current if hasattr(self, "view") else None
+        return self.row(key)
 
-    def _selected(self) -> None:
-        r = self.current()
-        custom = bool(r and r["custom"])
-        self.edit_btn.setEnabled(custom)
-        self.remove_btn.setEnabled(custom)
-        self.share_btn.setEnabled(custom and not (r or {}).get("source"))  # a shop skill is already shared
-        self.copy_btn.setEnabled(r is not None)
-        self.export_btn.setEnabled(r is not None)
-        if r is None:
-            self.desc.setText("")
-            self.preview.setPlainText("")
-            return
-        skill = r["skill"]
-        self.desc.setText(skill.description)
-        self.preview.setPlainText(skills.skill_md(skill))
+    def row(self, name: Optional[str]) -> Optional[dict]:
+        return next((r for r in self.rows if r["name"] == name), None)
 
-    def _apply(self, data: dict, select: Optional[str] = None) -> None:
-        self.win.set_data(data)
-        self.refresh(select)
+    def run(self, name: str, fn) -> object:
+        """fn (an action of the page, on the current skill) for the skill name."""
+        if self.row(name) is None:
+            return None
+        self.view.set_current(name)
+        return fn()
 
-    def _toggled(self, it: QTableWidgetItem) -> None:
-        if self._loading or it.column() != 0:
-            return
-        name = self.rows[it.row()]["name"]
+    def allowed(self, r: dict) -> dict[str, tuple[bool, str]]:
+        """{action: (enabled, tooltip)} for a skill row, the rules of the former buttons: a skill of the config can
+        be edited and removed, a shop skill is already shared; the tooltip says why an action is off (the Share
+        help when it is on)."""
+        custom, shared = bool(r["custom"]), bool(r.get("source"))
+        locked = "" if custom else tr("skill.locked")
+        share = tr("skill.share.note") if custom and not shared else (tr("skill.share.shop") if shared else locked)
+        return {"details": (True, ""), "edit": (custom, locked), "copy": (True, ""), "export": (True, ""),
+                "share": (custom and not shared, share), "remove": (custom, locked)}
+
+    def menu_for(self, name: str, parent: QWidget) -> QMenu:
+        """The "..." menu of a card (also the Menu key and a right click)."""
+        menu = QMenu(parent)
+        menu.setLayoutDirection(parent.layoutDirection())
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # built for each opening
+        menu.setToolTipsVisible(True)
+        allowed = self.allowed(self.row(name))
+        for key, label, fn in (("details", "skill.details", self.details), ("edit", "skill.edit", self.edit),
+                               ("copy", "skill.copy", self.copy), ("export", "skill.export", self.export),
+                               ("share", "skill.share", self.share)):
+            act = menu.addAction(tr(label))
+            act.setObjectName(key)
+            act.setEnabled(allowed[key][0])
+            act.setToolTip(allowed[key][1])
+            act.triggered.connect(lambda _c=False, f=fn: later(lambda: self.run(name, f)))
+            if key == "details":
+                menu.addSeparator()
+        return menu
+
+    def set_enabled(self, name: str, on: bool) -> None:
+        """The card's checkbox (and Space): the skill on or off, applied on Save like every change of this page."""
         try:
-            data = settings_logic.set_skill_enabled(self.win.data, name, it.checkState() == Qt.CheckState.Checked)
+            data = settings_logic.set_skill_enabled(self.win.data, name, on)
         except ValueError as e:
             self.win.error(str(e))
             self.refresh()
             return
         self._apply(data, name)
+
+    # -- details
+    def show_dialog(self, dlg: QDialog) -> None:
+        """Show a modal dialog, then free it (the tests replace it)."""
+        dlg.exec()
+        dlg.deleteLater()
+
+    def info(self, r: dict) -> dict:
+        """What the details dialog shows of a skill row (author and discussion when the Skill shop page has read
+        the catalog)."""
+        skill, src = r["skill"], r.get("source") or {}
+        entry = self._catalog(src.get("shop"))
+        kind, tools = settings_logic.skill_source(r), skill.tools()
+        return {"title": r["title"] or skills.PREFIX + r["name"], "name": skills.PREFIX + r["name"],
+                "author": entry.get("author"), "version": src.get("version"),
+                "issue_url": f"{shop.REPO_URL}/issues/{entry['issue']}" if entry.get("issue") else None,
+                "source": (SOURCE_LEVEL[kind], tr("skill.kind." + kind)), "offered": offered(r),
+                "description": r["description"], "tools": tools, "writes": shop._writes(tools),
+                "md": skills.skill_md(skill), "note": tr("skill.restart")}
+
+    def _catalog(self, shop_name: Optional[str]) -> dict:
+        if not shop_name:
+            return {}
+        from p6mcp.settings_app.shop_page import ShopPage  # imports this module: loaded on use
+        index = self.win.page(ShopPage).index or {}
+        return next((e for e in index.get("skills") or [] if e.get("name") == shop_name), {})
+
+    def details(self) -> Optional[SkillDetails]:
+        """The details dialog of the current skill; Edit... closes it and opens the editor."""
+        r = self.current()
+        if r is None:
+            return None
+        on, tip = self.allowed(r)["edit"]
+        dlg = SkillDetails(self, self.info(r), [Action("edit", tr("skill.edit"), self.edit, on, tip, close=True)])
+        self.show_dialog(dlg)
+        if dlg.after is not None:
+            dlg.after()
+        return dlg
+
+    def _apply(self, data: dict, select: Optional[str] = None) -> None:
+        self.win.set_data(data)
+        self.refresh(select)
 
     def edit_skill(self, item: Optional[dict], old_name: Optional[str]) -> Optional[dict]:
         """Open the editor; the new config dict, or None on Cancel (the tests replace it)."""

@@ -1,5 +1,6 @@
 """Settings window, driven offscreen with pytest-qt (dialogs replaced, Credential Manager faked)."""
 
+import copy
 import json
 import os
 import shutil
@@ -448,7 +449,7 @@ def test_instructions_and_skills_pages(qtbot, win, env, monkeypatch):
     assert "your instructions" in win.banner.text()  # restart the client to read them
 
     cmds = win.page(SkillsPage)
-    assert cmds.table.rowCount() == 0 and cmds.preview.toPlainText() == ""  # no built-in rows: the config's only
+    assert cmds.view.items == [] and cmds.view.empty_text.text().startswith("No skill yet")  # the config's only
     dlg = SkillDialog(cmds, win.data)
     qtbot.addWidget(dlg)
     dlg.name.setText("my-check")
@@ -463,15 +464,19 @@ def test_instructions_and_skills_pages(qtbot, win, env, monkeypatch):
                                                               "default": None}]
     assert dlg.result_data["custom_skills"][0]["files"] == [{"path": "ref/limits.md", "text": "Float under 5 days."}]
     monkeypatch.setattr(cmds, "edit_skill", lambda item, old: dlg.result_data)
-    assert cmds.add() and cmds.table.rowCount() == 1 and cmds.current()["name"] == "my-check"
-    assert cmds.table.item(0, 4).text() == "No: needs p6_update_activity"  # Basic profile
-    assert cmds.table.item(0, 3).text() == "Yours"
-    assert "Check <project> with" in cmds.preview.toPlainText() and "- ref/limits.md" in cmds.preview.toPlainText()
-    cmds.table.item(0, 0).setCheckState(Qt.CheckState.Unchecked)
-    assert win.data["custom_skills"][0]["enabled"] is False and win.data["skills_disabled"] == []
-    assert cmds.table.item(0, 4).text() == "No (turned off)"
-    cmds.table.setCurrentCell(0, 1)
-    assert cmds.remove() and cmds.table.rowCount() == 0
+    assert cmds.add() and len(cmds.view.items) == 1 and cmds.current()["name"] == "my-check"
+    card = cmds.view.item("my-check")
+    assert card.offered.text() == "Offered: No: needs p6_update_activity"  # Basic profile
+    assert card.source.text() == "Yours" and card.ident.text() == "p6-my-check"
+    shown = []
+    monkeypatch.setattr(cmds, "show_dialog", shown.append)
+    md = cmds.details().md.toPlainText()  # the SKILL.md written for the clients, now in the details
+    assert "Check <project> with" in md and "- ref/limits.md" in md
+    card.check.setChecked(False)  # the On checkbox: applied once the click is handled
+    qtbot.waitUntil(lambda: win.data["custom_skills"][0]["enabled"] is False, timeout=5000)
+    assert win.data["skills_disabled"] == [] and win.dirty()
+    assert cmds.view.item("my-check").offered.text() == "Offered: No (turned off)"
+    assert cmds.remove() and cmds.view.items == []
 
 
 def test_skill_sharing_files_and_shop_page(qtbot, win, env, monkeypatch, tmp_path):
@@ -488,7 +493,7 @@ def test_skill_sharing_files_and_shop_page(qtbot, win, env, monkeypatch, tmp_pat
     page.refresh("float-watch")
     opened = []
     monkeypatch.setattr(page, "open_url", opened.append)
-    assert page.share_btn.isEnabled() and page.share()
+    assert page.allowed(page.current())["share"][0] and page.share()
     assert opened[0] == shop.REPO_URL + "/issues/new?template=share-skill.yml&title=Share%3A+float-watch"
     assert json.loads(QGuiApplication.clipboard().text())["name"] == "float-watch"  # pasted in the form
     path = str(tmp_path / "p6-float-watch.zip")
@@ -500,24 +505,36 @@ def test_skill_sharing_files_and_shop_page(qtbot, win, env, monkeypatch, tmp_pat
     assert win.data["custom_skills"][1]["files"] == mine["files"]
 
     sp = win.page(ShopPage)
-    assert "read when you open this page" in sp.state.text() and sp.table.rowCount() == 0  # no network yet
+    assert "read when you open this page" in sp.state.text() and sp.view.items == []  # no network yet
     shared = shop.meta(dict(mine, name="lookahead-plus", title="Look-ahead plus", template="Use p6_lookahead."),
                        version=1, author="planner1", issue=3)
     entry = {k: v for k, v in shared.items() if k not in ("args", "template", "files")} | {"sha256": "ab"}
     monkeypatch.setattr(shop, "fetch_index", lambda *a, **k: {"skills": [entry], "error": None, "url": ""})
     monkeypatch.setattr(shop, "fetch_skill", lambda e, *a, **k: dict(shared, sha256=e["sha256"]))
     sp.load()
-    qtbot.waitUntil(lambda: sp.job is None, timeout=15000)  # the index, then the selected skill
-    qtbot.waitUntil(lambda: "name: p6-lookahead-plus" in sp.preview.toPlainText(), timeout=15000)
-    assert sp.table.rowCount() == 1 and sp.table.item(0, 4).text() == "Not installed"
-    assert "planner1" in sp.links.text() and "/issues/3" in sp.links.text()
-    assert sp.install() and sp.table.item(0, 4).text() == "Installed" and sp.remove_btn.isEnabled()
+    qtbot.waitUntil(lambda: sp.job is None, timeout=15000)  # the index; a skill is read when it is needed
+    card = sp.view.item("lookahead-plus")
+    assert len(sp.view.items) == 1 and card.badge.text() == "Not installed" and not sp.items
+    assert card.install_btn.text() == "Install" and card.remove_btn.isHidden()
+    shown = []
+    monkeypatch.setattr(sp, "show_dialog", shown.append)
+    sp.view.set_current("lookahead-plus")
+    dlg = sp.details()  # the details read the skill (sha256 checked by fetch_skill)
+    qtbot.waitUntil(lambda: "name: p6-lookahead-plus" in dlg.md.toPlainText(), timeout=15000)
+    assert "planner1" in dlg.author.text() and "/issues/3" in dlg.issue.text()
+    assert "p6_lookahead" in dlg.tools.text() and dlg.buttons["install"].isEnabled()
+    assert sp.install() and sp.view.item("lookahead-plus").badge.text() == "Installed"
+    assert not sp.view.item("lookahead-plus").remove_btn.isHidden()
+    assert "remove" in dlg.buttons and "install" not in dlg.buttons  # the open dialog follows the install
     stored = next(c for c in win.data["custom_skills"] if c["name"] == "lookahead-plus")
     from p6mcp import skills
     assert stored["source"] == {"shop": "lookahead-plus", "version": 1, "sha256": "ab",
                                 "content_sha": skills.content_sha(stored)}
-    assert win.page(SkillsPage).table.rowCount() == 3 and win.save()
+    assert len(win.page(SkillsPage).rows) == 3 and win.save()  # the Skills page updated at once
     assert sp.remove() and shop.installed_as(win.data, "lookahead-plus") is None
+    assert "install" in dlg.buttons and len(win.page(SkillsPage).rows) == 2
+    dlg.done(0)
+    assert sp.dialog is None
 
     old = {"schema": 1, "kind": shop.KIND, "builtin": True, "name": "delay-whatif", "title": "Delay what-if",
            "description": "Delay. Use when asked.", "tools": [], "writes": False, "min_app_version": "1.8.2",
@@ -525,13 +542,17 @@ def test_skill_sharing_files_and_shop_page(qtbot, win, env, monkeypatch, tmp_pat
     sp.index = {"skills": [entry, old], "error": None}
     assert shop_page.FILTERS == ("all", "read", "writes", "installed", "updates")  # no Built-in filter
     sp.refresh()
-    sp.table.setCurrentCell(1, 0)
-    assert sp.table.item(1, 0).text() == "p6-delay-whatif" and sp.job is None  # never read from the catalog
-    assert sp.table.item(1, 4).text() == "Needs a newer MCP for Primavera P6" == sp.preview.toPlainText()
-    assert not sp.install_btn.isEnabled() and not sp.remove_btn.isEnabled() and not sp.install()
+    sp.view.set_current("delay-whatif")
+    card = sp.view.item("delay-whatif")
+    dlg = sp.details()
+    assert card.ident.text() == "p6-delay-whatif" and sp.job is None  # never read from the catalog
+    assert card.badge.text() == "Needs a newer MCP for Primavera P6" == dlg.md.toPlainText()
+    assert not card.install_btn.isEnabled() and card.remove_btn.isHidden() and not sp.install()
+    assert not dlg.buttons["install"].isEnabled() and "remove" not in dlg.buttons
+    dlg.done(0)
     win.set_data(dict(win.data, shop_enabled=False))
     sp.refresh()
-    assert "turned off" in sp.state.text() and sp.table.rowCount() == 0
+    assert "turned off" in sp.state.text() and sp.view.items == []
 
 
 def test_restore_core_skills_and_edited_shop_skills(qtbot, win, env, monkeypatch):
@@ -545,7 +566,7 @@ def test_restore_core_skills_and_edited_shop_skills(qtbot, win, env, monkeypatch
     assert page.restore_core() and not page.restore_btn.isEnabled()  # the shop is offline in these tests (env)
     qtbot.waitUntil(lambda: page.job is None, timeout=15000)
     assert [r["name"] for r in page.rows] == names and page.restore_btn.isEnabled() and win.dirty()
-    assert [page.table.item(i, 3).text() for i in range(len(names))] == ["Shop"] * len(names)
+    assert [page.view.item(n).source.text() for n in names] == ["Shop"] * len(names)
     assert "copy shipped with MCP for Primavera P6" in win.statusBar().currentMessage()
     stored = {c["name"]: c for c in win.data["custom_skills"]}
     assert [stored[r["name"]]["source"]["sha256"] for r in core_skills.bundle()["skills"]] == \
@@ -554,17 +575,20 @@ def test_restore_core_skills_and_edited_shop_skills(qtbot, win, env, monkeypatch
     first = names[0]  # edited here: it keeps its source, the automatic update leaves it alone
     win.set_data(settings_logic.put_skill(win.data, dict(stored[first], template="Mine p6_lookahead."), first))
     page.refresh(first)
-    assert page.table.item(0, 3).text() == "Shop, edited here"
+    assert page.view.item(first).source.text() == "Shop, edited here"
     later = shop.meta(dict(core_skills.bundled(first), version=99), version=99, author="nizarhamza")
     entry = {k: v for k, v in later.items() if k not in ("args", "template", "files")} | {"sha256": "v99"}
     monkeypatch.setattr(shop, "fetch_index", lambda *a, **k: {"skills": [entry], "error": None, "url": ""})
     monkeypatch.setattr(shop, "fetch_skill", lambda e, *a, **k: dict(later, sha256=e["sha256"]))
     sp.load()
-    qtbot.waitUntil(lambda: sp.job is None and bool(sp.items), timeout=15000)
-    assert sp.table.item(0, 4).text() == "Update available, edited here" and sp.install_btn.text() == "Update"
+    qtbot.waitUntil(lambda: sp.job is None, timeout=15000)
+    card = sp.view.item(first)
+    assert card.badge.text() == "Update available, edited here" and card.install_btn.text() == "Update"
     asked = []
     monkeypatch.setattr(shop_page, "ask", lambda *a, **k: asked.append(a[2]) or False)
-    assert not sp.install() and asked[0].startswith(f"You edited the skill {first} here")
+    card.install_btn.click()  # Update on the card: the skill is read first, then install() asks
+    qtbot.waitUntil(lambda: bool(asked) and not sp.reading, timeout=15000)
+    assert asked[0].startswith(f"You edited the skill {first} here") and bool(sp.items)
     assert next(c for c in win.data["custom_skills"] if c["name"] == first)["template"] == "Mine p6_lookahead."
 
     sp.restore_btn.click()  # online now: the edited one gets the shop's version back, the others are current
@@ -572,7 +596,7 @@ def test_restore_core_skills_and_edited_shop_skills(qtbot, win, env, monkeypatch
     restored = next(c for c in win.data["custom_skills"] if c["name"] == first)
     assert restored["source"]["version"] == 99 and restored["template"] == core_skills.bundled(first)["template"]
     assert win.statusBar().currentMessage().startswith("Core skills restored from the shop: 1 installed")
-    assert sp.table.item(0, 4).text() == "Installed"  # the Shop page was refreshed
+    assert sp.view.item(first).badge.text() == "Installed"  # the Shop page was refreshed
 
     data = settings_logic.remove_skill(win.data, names[-1])  # one of the user's own takes a core name
     win.set_data(settings_logic.put_skill(data, {"name": names[-1], "title": "Mine", "description": "Mine. Use "
@@ -581,3 +605,369 @@ def test_restore_core_skills_and_edited_shop_skills(qtbot, win, env, monkeypatch
     qtbot.waitUntil(lambda: page.job is None, timeout=15000)
     assert f"Not restored: {names[-1]}" in env["warnings"][-1]
     assert next(c for c in win.data["custom_skills"] if c["name"] == names[-1])["title"] == "Mine"
+
+
+# ----------------------------------------------------------------- Skills and Skill shop cards (2.0)
+
+def three_skills(win) -> None:
+    """One of the user's own skills, one shop skill and one shop skill edited here."""
+    from p6mcp import settings_logic, skills
+    brief = settings_logic.clean_skill({"name": "lookahead-brief", "title": "Look-ahead brief", "args": [],
+                                        "description": "Short look-ahead. Use when asked.",
+                                        "template": "Run p6_lookahead."})
+    tracker = settings_logic.clean_skill({"name": "milestones", "title": "Milestone tracker", "args": [],
+                                          "description": "Milestones against the baseline. Use when asked.",
+                                          "template": "Run p6_milestones."})
+    data = settings_logic.put_skill(win.data, {"name": "float-watch", "title": "Float watch", "args": [],
+                                               "description": "Low float. Use when asked.",
+                                               "template": "Run p6_float_analysis."})
+    data = settings_logic.put_skill(data, dict(brief, source={"shop": "lookahead-brief", "version": 2, "sha256": "aa",
+                                                              "content_sha": skills.content_sha(brief)}))
+    data = settings_logic.put_skill(data, dict(tracker, source={"shop": "milestones", "version": 1, "sha256": "bb",
+                                                                "content_sha": "changed here"}))
+    win.set_data(data)
+
+
+def test_list_columns_fit_the_width():
+    from p6mcp.settings_app.cards import fit_columns
+    cols = [("id", 100, 60), ("offered", 80, 40), ("source", 50, 30)]  # most useful first
+    assert fit_columns(cols, 300) == {"id": 100, "offered": 80, "source": 50}
+    narrowed = fit_columns(cols, 180)  # every column toward its minimum, in proportion
+    assert sum(narrowed.values()) <= 180 and all(m <= narrowed[k] < n for k, n, m in cols)
+    assert fit_columns(cols, 120) == {"id": 70, "offered": 50, "source": 0}  # the least useful hidden first
+    assert fit_columns(cols, 50) == {"id": 0, "offered": 0, "source": 0}
+    assert fit_columns(cols, 255, gap=10) == {"id": 98, "offered": 78, "source": 49}  # each shown column + its gap
+    assert fit_columns(cols, 150, gap=10) == {"id": 75, "offered": 55, "source": 0}
+
+
+def test_skills_page_search_source_filter_and_saved_view(qtbot, win, env):
+    from p6mcp import settings_logic
+    from p6mcp.settings_app import guidance_pages
+    from p6mcp.settings_app.cards import GRID, LIST
+    from p6mcp.settings_app.guidance_pages import SkillsPage
+    from p6mcp.settings_app.shop_page import ShopPage
+    three_skills(win)
+    page = win.page(SkillsPage)
+    page.refresh()
+    before = copy.deepcopy(win.data)
+
+    def shown():
+        return [it.key for it in page.view.items]
+    assert shown() == ["float-watch", "lookahead-brief", "milestones"]
+    for text, want in (("LOOK ahead", ["lookahead-brief"]), ("p6-mile", ["milestones"]),  # every word, case ignored
+                       ("baseline use", ["milestones"]), ("low", ["float-watch"]), ("", shown())):
+        page.search.setText(text)
+        assert shown() == want, text
+    assert [page.source.itemData(i) for i in range(page.source.count())] == ["all", "shop", "shop_edited", "custom"]
+    assert [page.source.itemText(i) for i in range(page.source.count())] == \
+        ["All sources", "Shop", "Shop, edited here", "Yours"]  # the values of the former Source column
+    for src, want in (("shop", ["lookahead-brief"]), ("shop_edited", ["milestones"]), ("custom", ["float-watch"])):
+        page.source.setCurrentIndex(page.source.findData(src))
+        assert shown() == want and page.view.item(want[0]).source.text() == page.source.currentText()
+    page.search.setText("brief")  # a shop skill, the filter is on Yours
+    assert shown() == [] and page.view.empty_text.text() == "No skill matches the search or the filter."
+    page.search.setText("")
+    page.source.setCurrentIndex(0)
+    assert win.data == before  # searching and filtering change no setting
+
+    # Grid or List: window state kept for the next launch, never a setting (no Save, no Revert)
+    assert page.view.mode == GRID and page.toggle.buttons[GRID].isChecked()
+    page.toggle.buttons[LIST].click()
+    assert page.view.mode == LIST and page.view.header is not None and win.data == before
+    assert settings_logic.load_ui_state() == {"skills_view": "list"}
+    row = page.view.item("milestones")
+    assert row.source.text() == "Shop, edited here" and row.ident.text() == "p6-milestones"
+    assert row.offered.text() == guidance_pages.offered(page.row("milestones"))[1]  # the value alone in a row
+    w2 = make(qtbot)  # the next launch
+    assert w2.page(SkillsPage).view.mode == LIST and w2.page(SkillsPage).toggle.buttons[LIST].isChecked()
+    assert w2.page(ShopPage).view.mode == GRID  # one setting per page
+    w2.page(ShopPage).toggle.buttons[LIST].click()
+    assert settings_logic.load_ui_state() == {"skills_view": "list", "shop_view": "list"}
+
+
+def test_skill_cards_keyboard_menu_and_names(qtbot, win, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from p6mcp import settings_logic
+    from p6mcp.settings_app import guidance_pages
+    from p6mcp.settings_app.cards import GRID, LIST
+    from p6mcp.settings_app.guidance_pages import SkillsPage
+    three_skills(win)
+    assert win.save()  # Revert, at the end, goes back to these three
+    page = win.page(SkillsPage)
+    win.nav.setCurrentRow(win.pages.index(page))
+    win.resize(1400, 900)
+    win.show()
+    qtbot.waitExposed(win)
+    win.activateWindow()
+    page.refresh()
+    qtbot.waitUntil(lambda: page.view.column_count() >= 2)
+    cards = page.view.items
+    assert [c.focusPolicy() for c in cards] == [Qt.FocusPolicy.StrongFocus] + [Qt.FocusPolicy.ClickFocus] * 2
+    cards[0].setFocus()
+    qtbot.waitUntil(cards[0].hasFocus)
+    for key, target in ((Qt.Key.Key_Right, 1), (Qt.Key.Key_Left, 0), (Qt.Key.Key_End, 2), (Qt.Key.Key_Home, 0)):
+        qtbot.keyClick(QApplication.focusWidget(), key)
+        assert cards[target].hasFocus(), key
+    assert page.view.current == cards[0].key and cards[0].focusPolicy() == Qt.FocusPolicy.StrongFocus  # one tab stop
+    qtbot.keyClick(cards[0], Qt.Key.Key_Down)
+    assert cards[page.view.column_count()].hasFocus() if page.view.column_count() < 3 else cards[0].hasFocus()
+
+    name = "milestones"
+    page.view.item(name).setFocus()
+    qtbot.waitUntil(page.view.item(name).hasFocus)
+    qtbot.keyClick(page.view.item(name), Qt.Key.Key_Space)  # On / off, applied after the key, kept until Save
+    qtbot.waitUntil(lambda: page.row(name)["enabled"] is False)
+    assert win.dirty() and page.view.item(name).hasFocus()  # the rebuilt card keeps the keyboard
+    shown = []
+    monkeypatch.setattr(page, "show_dialog", shown.append)
+    qtbot.keyClick(page.view.item(name), Qt.Key.Key_Return)  # Enter: details
+    qtbot.waitUntil(lambda: bool(shown))
+    assert shown[0].ident.text() == "p6-milestones" and shown[0].offered.text() == "No (turned off)"
+    asked = []
+    monkeypatch.setattr(guidance_pages, "ask", lambda *a, **k: asked.append(a[2]) or True)
+    qtbot.keyClick(page.view.item(name), Qt.Key.Key_Delete)  # Delete: Remove, with the question naming it
+    qtbot.waitUntil(lambda: page.row(name) is None)
+    assert asked == ["Remove the skill milestones?"]
+
+    mine, theirs = page.view.item("float-watch"), page.view.item("lookahead-brief")
+    acts = {a.objectName(): a for a in mine.menu().actions() if a.objectName()}
+    assert list(acts) == ["details", "edit", "copy", "export", "share"] and all(a.isEnabled() for a in acts.values())
+    assert "GitHub form" in acts["share"].toolTip() and "Export" in acts["share"].toolTip()  # the Share help
+    acts = {a.objectName(): a for a in theirs.menu().actions() if a.objectName()}
+    assert not acts["share"].isEnabled() and "already shared" in acts["share"].toolTip()
+    copied = []
+    monkeypatch.setattr(page, "edit_skill", lambda item, old: copied.append(item) or None)
+    acts["copy"].trigger()  # a menu action runs on its own card
+    qtbot.waitUntil(lambda: bool(copied))
+    assert copied[0]["name"] == "my-lookahead-brief" and "source" not in copied[0]
+    assert mine.accessibleName() == "p6-float-watch, Float watch" and "Space" in mine.accessibleDescription()
+    assert mine.more.accessibleName() == mine.more.toolTip() == "More actions"
+    assert mine.check.accessibleName() == "Offer p6-float-watch to the MCP clients (applied on Save)"
+    assert page.toggle.buttons[GRID].accessibleName() == "Grid view" == page.toggle.buttons[GRID].toolTip()
+    assert page.toggle.buttons[LIST].accessibleName() == "List view"
+    mine.remove_btn.click()  # the card's Remove asks first (answered yes here)
+    qtbot.waitUntil(lambda: page.row("float-watch") is None)
+    assert asked[-1] == "Remove the skill float-watch?"
+    win.revert()  # Revert undoes the removals and the on / off change made on this page
+    assert [r["name"] for r in page.rows] == ["float-watch", "lookahead-brief", "milestones"]
+    assert page.row("milestones")["enabled"] is True and not win.dirty()
+    assert "Source: Shop." in page.view.item("lookahead-brief").accessibleDescription()  # through the catalog
+
+    page.search.setText("look")  # the rebuilt cards keep the view's place in the tab order
+    page.search.setText("")
+    page.toggle.buttons[LIST].setFocus()
+    qtbot.waitUntil(page.toggle.buttons[LIST].hasFocus)
+    qtbot.keyClick(page.toggle.buttons[LIST], Qt.Key.Key_Tab)
+    assert page.view.item(page.view.current).hasFocus()  # not the language box, Revert or Save
+    page.search.setText("no such skill")  # the empty state spans the whole width, not the first column
+    qtbot.waitUntil(lambda: page.view.empty.width() > page.view.avail() * 0.9)
+    page.search.setText("")
+    page.source.setCurrentIndex(page.source.findData("shop"))  # a new skill of yours under the Shop filter
+    new = {"name": "my-new", "title": "Mine", "description": "Mine. Use when asked.", "args": [],
+           "template": "Run p6_lookahead."}
+    monkeypatch.setattr(page, "edit_skill", lambda item, old: settings_logic.put_skill(win.data, new))
+    assert page.add() and page.current()["name"] == "my-new" and page.source.currentData() == "all"
+
+
+def test_list_rows_line_up_and_fit_the_window(qtbot, win):
+    from p6mcp.settings_app.cards import LIST
+    from p6mcp.settings_app.guidance_pages import SkillsPage
+    three_skills(win)
+    page = win.page(SkillsPage)
+    win.nav.setCurrentRow(win.pages.index(page))
+    win.resize(1400, 900)
+    win.show()
+    qtbot.waitExposed(win)
+    page.toggle.buttons[LIST].click()
+    head, rows = page.view.header, page.view.items
+
+    def lined_up():  # once the rows are laid out: each cell at the same x in every row and the header
+        return all(len({r.cells[k].x() for r in rows + [head]}) == 1 for k in ("id", "source", "offered"))
+    qtbot.waitUntil(lambda: rows[0].cells["source"].isVisible() and lined_up())
+    assert head.title.x() == rows[0].title.x() and head.cells["id"].x() < head.title.x() < head.cells["source"].x()
+    win.resize(win.minimumSizeHint())  # the narrowest window: cells narrowed, then hidden, never cut
+    qtbot.waitUntil(lambda: page.view.inner.width() <= page.view.viewport().width())
+    assert rows[0].remove_btn.isVisible() and rows[0].more.isVisible()
+    assert rows[0].geometry().right() <= page.view.viewport().width()
+    assert page.view.column_count() == 1
+
+
+def test_details_dialog_keeps_its_size_and_edit_opens_the_editor(qtbot, win, monkeypatch):
+    from PySide6.QtCore import QSize
+    from p6mcp import settings_logic
+    from p6mcp.settings_app.guidance_pages import SkillsPage
+    three_skills(win)
+    page = win.page(SkillsPage)
+    page.refresh("float-watch")
+    shown = []
+    monkeypatch.setattr(page, "show_dialog", shown.append)
+    dlg = page.details()
+    assert dlg.isSizeGripEnabled() and dlg.head.text() == "Float watch" and dlg.ident.text() == "p6-float-watch"
+    assert not dlg.form.isRowVisible(dlg.author) and not dlg.form.isRowVisible(dlg.version)  # the user's own
+    assert dlg.source.text() == "Yours" and "p6_float_analysis" in dlg.tools.text()
+    assert "uses write tools" not in dlg.tools.text() and dlg.buttons["edit"].isEnabled()
+    size = dlg.minimumSizeHint() + QSize(30, 20)
+    dlg.resize(size)
+    closed = []
+    dlg.finished.connect(closed.append)
+    dlg.buttons["close"].click()  # Close (the button box's reject role)
+    assert closed == [0] and dlg.result() == 0
+    assert settings_logic.load_ui_state()["details_size"] == [size.width(), size.height()]
+    assert page.details().size() == size  # kept for the next opening (window state, not a setting)
+    page.refresh("lookahead-brief")
+    dlg = page.details()
+    assert dlg.version.text() == "2" and dlg.source.text() == "Shop" and dlg.form.isRowVisible(dlg.version)
+    edited = []
+    monkeypatch.setattr(page, "edit_skill", lambda item, old: edited.append(old) or None)
+    monkeypatch.setattr(page, "show_dialog", lambda d: d.buttons["edit"].click())  # Edit... closes, then edits
+    dlg = page.details()
+    assert dlg.result() == 1 and edited == ["lookahead-brief"]
+
+
+def test_shop_cards_busy_retry_install_and_remove(qtbot, win, monkeypatch):
+    import threading
+    from p6mcp import shop
+    from p6mcp.settings_app import shop_page
+    from p6mcp.settings_app.cards import LIST
+    from p6mcp.settings_app.guidance_pages import SkillsPage
+    from p6mcp.settings_app.shop_page import ShopPage
+    sp = win.page(ShopPage)
+    sp.load()  # the shop is offline in these tests (env)
+    assert sp.busy.isVisibleTo(sp) and not sp.reload_btn.isEnabled() and "Reading the shop" in sp.state.text()
+    qtbot.waitUntil(lambda: sp.job is None, timeout=15000)
+    assert not sp.busy.isVisibleTo(sp) and "cannot be read" in sp.state.text() and sp.view.items == []
+    assert sp.view.empty_text.text().startswith("The skill shop could not be reached")
+    assert sp.view.empty_btn.text() == "Retry" and not sp.view.empty_btn.isHidden()
+
+    def meta(name, title, template, author):
+        m = shop.meta({"name": name, "title": title, "description": title + ". Use when asked.", "args": [],
+                       "template": template, "files": []}, version=1, author=author)
+        return m, {k: v for k, v in m.items() if k not in ("args", "template", "files")} | {"sha256": "s-" + name}
+    plus, plus_entry = meta("lookahead-plus", "Look-ahead plus", "Use p6_lookahead.", "planner1")
+    relink, relink_entry = meta("relink-dangling", "Fix dangling ends", "Use p6_add_relationships.", "scheduler-x")
+    items, reads, gate = {"lookahead-plus": plus, "relink-dangling": relink}, [], threading.Event()
+
+    def fetch(e, *a, **k):
+        gate.wait(10)
+        reads.append(e["name"])
+        return dict(items[e["name"]], sha256=e["sha256"])
+    monkeypatch.setattr(shop, "fetch_index", lambda *a, **k: {"skills": [plus_entry, relink_entry], "error": None,
+                                                               "url": ""})
+    monkeypatch.setattr(shop, "fetch_skill", fetch)
+    sp.view.empty_btn.click()  # Retry = Refresh
+    assert sp.view.empty_btn.isHidden() and sp.view.empty_text.text() == "" and sp.busy.isVisibleTo(sp)
+    qtbot.waitUntil(lambda: sp.job is None and len(sp.view.items) == 2, timeout=15000)
+    assert sp.state.text() == "2 skills in the shop."
+    for text, f, want in (("planner1", "all", ["lookahead-plus"]), ("", "writes", ["relink-dangling"]),
+                          ("", "read", ["lookahead-plus"]), ("", "installed", [])):
+        sp.search.setText(text)
+        sp.filter.setCurrentIndex(sp.filter.findData(f))
+        assert [c.key for c in sp.view.items] == want, (text, f)
+    assert sp.view.empty_text.text() == "No skill matches the search or the filter."
+    sp.filter.setCurrentIndex(0)
+
+    asked = []
+    monkeypatch.setattr(shop_page, "ask", lambda *a, **k: asked.append(a[2]) or True)
+    sp.view.item("relink-dangling").install_btn.click()  # Install on a card: read first, then install()
+    qtbot.waitUntil(lambda: "relink-dangling" in sp.reading)
+    card = sp.view.item("relink-dangling")
+    assert card.install_btn.text() == "Reading..." and not card.install_btn.isEnabled()
+    sp.search.setText("planner1")  # the card is hidden while its skill is read: the Install still runs
+    assert sp.view.item("relink-dangling") is None
+    gate.set()
+    qtbot.waitUntil(lambda: shop.installed_as(win.data, "relink-dangling") is not None, timeout=15000)
+    sp.search.setText("")
+    assert reads == ["relink-dangling"] and asked[0].startswith("The skill relink-dangling uses write tools")
+    assert sp.view.item("relink-dangling").badge.text() == "Installed" and win.dirty()
+    assert "relink-dangling" in [r["name"] for r in win.page(SkillsPage).rows]  # the Skills page at once
+    acts = {a.objectName(): a for a in sp.view.item("lookahead-plus").menu().actions() if a.objectName()}
+    assert acts["install"].isEnabled() and not acts["remove"].isEnabled() and acts["details"].isEnabled()
+
+    sp.toggle.buttons[LIST].click()  # a row has one action: Install or Update, else Remove
+    row = sp.view.item("relink-dangling")
+    assert row.install_btn.isHidden() and not row.remove_btn.isHidden()
+    assert row.details_btn.toolTip() == row.details_btn.accessibleName().split(" p6-")[0] == "View details"
+    qtbot.keyClick(row, Qt.Key.Key_Delete)  # Delete: Remove, after the question
+    qtbot.waitUntil(lambda: shop.installed_as(win.data, "relink-dangling") is None, timeout=5000)
+    assert asked[-1] == "Remove the skill relink-dangling?"
+    assert "relink-dangling" not in [r["name"] for r in win.page(SkillsPage).rows]
+
+
+def test_skill_cards_mirror_right_to_left(qtbot, win, monkeypatch):
+    from p6mcp.settings_app.cards import LIST
+    from p6mcp.settings_app.guidance_pages import SkillsPage
+    monkeypatch.setattr(i18n, "RTL", {"en"})  # stands for Arabic until its catalog exists
+    three_skills(win)
+    win.build(win.pages.index(win.page(SkillsPage)))
+    page = win.page(SkillsPage)
+    win.resize(1400, 900)
+    win.show()
+    qtbot.waitExposed(win)
+    win.activateWindow()
+    qtbot.waitUntil(lambda: page.view.column_count() >= 2 and page.view.items[1].isVisible())
+    first, second = page.view.items[:2]
+    assert first.layoutDirection() == Qt.LayoutDirection.RightToLeft
+    assert first.x() > second.x() and first.check.x() > first.ident.x()  # the first card on the right
+    first.setFocus()
+    qtbot.waitUntil(first.hasFocus)
+    qtbot.keyClick(first, Qt.Key.Key_Left)  # Left goes to the next card in a right-to-left layout
+    assert second.hasFocus()
+    page.toggle.buttons[LIST].click()
+    head, row = page.view.header, page.view.items[0]
+    qtbot.waitUntil(lambda: row.cells["source"].isVisible() and head.cells["id"].x() == row.cells["id"].x())
+    assert row.cells["id"].x() > row.cells["source"].x()  # the ID on the right, the Source to its left
+    assert row.check.x() > row.remove_btn.x()
+    assert row.menu().layoutDirection() == Qt.LayoutDirection.RightToLeft  # a menu is a window: set, not inherited
+    shown = []
+    monkeypatch.setattr(page, "show_dialog", shown.append)
+    page.details()
+    assert shown[0].layoutDirection() == Qt.LayoutDirection.RightToLeft
+
+
+def test_shop_details_dialog_acts_on_its_skill_and_reads_once(qtbot, win, monkeypatch):
+    from p6mcp import shop
+    from p6mcp.settings_app import shop_page
+    from p6mcp.settings_app.shop_page import ShopPage
+    monkeypatch.setattr(shop_page, "ask", lambda *a, **k: True)
+    sp = win.page(ShopPage)
+    shown, reads, errors = [], [], []
+    monkeypatch.setattr(sp, "show_dialog", shown.append)
+    monkeypatch.setattr(win, "error", errors.append)
+    m = shop.meta({"name": "lookahead-plus", "title": "Look-ahead plus", "description": "Plus. Use when asked.",
+                   "args": [], "template": "Use p6_lookahead.", "files": []}, version=1, author="planner1")
+    entry = {k: v for k, v in m.items() if k not in ("args", "template", "files")} | {"sha256": "v1"}
+    index = {"skills": [entry], "error": None, "url": ""}
+    monkeypatch.setattr(shop, "fetch_index", lambda *a, **k: dict(index, skills=[dict(e) for e in index["skills"]]))
+
+    def offline(e, *a, **k):
+        reads.append(e["name"])
+        raise OSError("offline (test)")
+    monkeypatch.setattr(shop, "fetch_skill", offline)
+    sp.load()
+    qtbot.waitUntil(lambda: sp.job is None and len(sp.view.items) == 1, timeout=15000)
+    sp.view.set_current("lookahead-plus")
+    dlg = sp.details()
+    qtbot.waitUntil(lambda: "offline" in dlg.md.toPlainText(), timeout=15000)
+    dlg.buttons["install"].click()  # one more read for the Install: refreshing the dialog never reads again
+    qtbot.waitUntil(lambda: bool(errors) and not sp.reading, timeout=15000)
+    assert reads == ["lookahead-plus"] * 2 and len(errors) == 1 and "offline" in dlg.md.toPlainText()
+
+    # the catalog changed since its index was read: the newer, checked version installs, the index is read again
+    newer = dict(m, version=2, sha256="v2")
+    monkeypatch.setattr(shop, "fetch_skill", lambda e, *a, **k: reads.append(e["name"]) or dict(newer))
+    index["skills"] = [dict(entry, version=2, sha256="v2")]
+    dlg.buttons["install"].click()
+    qtbot.waitUntil(lambda: shop.installed_as(win.data, "lookahead-plus") is not None and sp.job is None,
+                    timeout=15000)
+    assert shop.installed_as(win.data, "lookahead-plus")["source"]["version"] == 2
+    assert sp.view.item("lookahead-plus").badge.text() == "Installed"  # after the new read of the index
+    assert "remove" in dlg.buttons and "install" not in dlg.buttons
+
+    # the dialog acts on its own skill even when the filter no longer lists it
+    sp.filter.setCurrentIndex(sp.filter.findData("installed"))
+    dlg.buttons["remove"].click()
+    qtbot.waitUntil(lambda: shop.installed_as(win.data, "lookahead-plus") is None, timeout=5000)
+    assert sp.view.items == [] and dlg.buttons["install"].isEnabled()
+    dlg.buttons["install"].click()
+    qtbot.waitUntil(lambda: shop.installed_as(win.data, "lookahead-plus") is not None, timeout=5000)
+    dlg.done(0)

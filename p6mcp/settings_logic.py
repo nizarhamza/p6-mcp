@@ -6,6 +6,7 @@ Every function takes the config dict and returns a new one; config.save() valida
 from __future__ import annotations
 
 import copy
+import json
 import os
 import socket
 from typing import Optional
@@ -271,6 +272,70 @@ def skill_rows(data: dict) -> list[dict]:
                      "custom": skill.custom, "enabled": on, "offered": on and not missing, "missing_tools": missing,
                      "skill": skill, "source": it.get("source"), "edited": skills.edited(it)})
     return rows
+
+
+SKILL_SOURCES = ("shop", "shop_edited", "custom")  # skill.kind.<source>: Shop, Shop, edited here, Yours
+
+
+def skill_source(row: dict) -> str:
+    """Source of a skill_rows() row: shop, shop_edited (a shop skill changed here) or custom (the user's own)."""
+    if row.get("source"):
+        return "shop_edited" if row.get("edited") else "shop"
+    return "custom"
+
+
+def filter_skills(rows: list[dict], query: str = "", source: str = "all") -> list[dict]:
+    """The skill_rows() rows whose ID (p6-name), title or description contain every word of query (case
+    ignored) and whose skill_source() is source ('all': any), in their order."""
+    words = (query or "").lower().split()
+
+    def text(r: dict) -> str:
+        return " ".join((skills.PREFIX + r["name"], r.get("title") or "", r.get("description") or "")).lower()
+    return [r for r in rows if (source == "all" or skill_source(r) == source) and all(w in text(r) for w in words)]
+
+
+# ----------------------------------------------------------------- window state (not settings)
+
+VIEWS = ("grid", "list")  # the Skills and Skill shop pages show cards or rows
+UI_STATE_FILE = "settings_ui.json"
+
+
+def ui_state_path() -> str:
+    """State of the Settings window (views, dialog size) in %LOCALAPPDATA%\\P6MCP: outside config.json, so it is
+    written at once and never takes part in Save / Revert (nor in the server's or the shop tool's writes)."""
+    return os.path.join(config.localdata_dir(), UI_STATE_FILE)
+
+
+def load_ui_state() -> dict:
+    """The saved window state, {} when there is none or it cannot be read."""
+    try:
+        with open(ui_state_path(), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_ui_state(**changes) -> bool:
+    """Merge changes into the window state file (temp file + os.replace); False when it cannot be written: the
+    window keeps working with what it shows."""
+    path = ui_state_path()
+    data = dict(load_ui_state(), **changes)
+    tmp = path + ".tmp"
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        os.replace(tmp, path)
+    except OSError:
+        return False
+    return True
+
+
+def ui_view(state: dict, page: str) -> str:
+    """The saved view of a page ('skills' or 'shop'): grid unless list was chosen."""
+    view = state.get(f"{page}_view")
+    return view if view in VIEWS else VIEWS[0]
 
 
 def tool_rows(profile: str, allow_writes: bool, shop: bool = True) -> list[dict]:

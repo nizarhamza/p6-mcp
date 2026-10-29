@@ -64,6 +64,19 @@ Version 1.10.0 was never released: its changes ship in 2.0.0.
   schedule-quality-audit v3 (engine check, weighted grade, where the worst float comes from),
   weekly-update-review v3 (optional previous update), milestone-tracker v2 (optional contract milestones) and
   update-import-safely v3 (suggests logic-date-integrity before F9) are updated. The bundled copy follows.
+- Settings, **Skills** and **Skill shop** pages: the skills are cards (as many columns as the width allows) or
+  list rows aligned in columns, chosen with the Grid and List buttons and kept per page for the next launch (in
+  `%LOCALAPPDATA%\P6MCP\settings_ui.json`, not a setting: no Save needed). The Skills page searches the ID,
+  title and description and filters by source; a card holds the on / off checkbox (applied on Save, as before),
+  the Source and Offered badges, Remove and a menu (View details, Edit, Copy to my skills, Export, Share; the
+  Share help is its tooltip). Shop cards show the author, version and state with Install or Update, Remove and
+  View details; Install reads the skill first when needed. Both pages share a details dialog (resizable, size
+  kept) with the tools the skill calls, the write tools warning and the whole SKILL.md, which replaces the
+  SKILL.md panel of the Skills page and the Skill panel of the shop page. Empty states, Retry when the shop
+  cannot be reached and a busy bar while it is read. Keyboard: Tab reaches the current card, the arrow keys
+  move between cards, Space turns a skill on or off, Enter opens the details, Delete removes (after the
+  question), the Menu key opens the menu. Restore core skills is on both toolbars. The actions themselves do
+  not change.
 
 ## [1.9.0] - 2026-10-28
 

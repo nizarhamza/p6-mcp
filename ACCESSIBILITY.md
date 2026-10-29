@@ -17,6 +17,11 @@ accessibility is that client's.
 - The Settings window uses standard Qt widgets, which Windows assistive technologies (Narrator, NVDA)
   reach through UI Automation. The window works with the keyboard: Tab moves between controls and the
   arrow keys move through the page list.
+- Skills and Skill shop pages: the cards (or list rows) are one Tab stop, the arrow keys move between them
+  (Home and End go to the first and the last), Space turns a skill on or off, Enter opens its details, Delete
+  removes it after a question and the Menu key (or Shift+F10) opens its other actions. Each card gives
+  screen readers its ID, title, description, states and these keys; the icon buttons have a name and a
+  tooltip, and the states are written on the badges, not given by their color alone.
 - High DPI displays: the window follows the Windows display scale, including fractional scales such as
   125 % and 150 %, and its layouts are sized from the font, not in fixed pixels.
 - The window uses the Windows palette that Qt provides; on a dark palette the logo switches to its light

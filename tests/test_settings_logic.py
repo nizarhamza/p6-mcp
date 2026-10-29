@@ -104,3 +104,45 @@ def test_load_for_edit_and_broken_file(tmp_path, monkeypatch):
     assert moved.endswith(".broken") and not path.exists() and os.path.exists(moved)
     path.write_text("{again", encoding="utf-8")
     assert sl.set_aside_broken_file().endswith(".broken-2")
+
+
+def test_skill_source_and_filter():
+    rows = [{"name": "float-watch", "title": "Float watch", "description": "Low float.", "source": None,
+             "edited": False},
+            {"name": "lookahead-brief", "title": "Look-ahead brief", "description": "Short look-ahead.",
+             "source": {"shop": "lookahead-brief"}, "edited": False},
+            {"name": "milestones", "title": "Milestone tracker", "description": "Against the baseline.",
+             "source": {"shop": "milestones"}, "edited": True}]
+    assert [sl.skill_source(r) for r in rows] == ["custom", "shop", "shop_edited"]
+    assert sl.SKILL_SOURCES == ("shop", "shop_edited", "custom")
+
+    def names(query="", source="all"):
+        return [r["name"] for r in sl.filter_skills(rows, query, source)]
+    assert names() == ["float-watch", "lookahead-brief", "milestones"]
+    assert names("LOOK-AHEAD") == ["lookahead-brief"]  # case ignored
+    assert names("p6-mile") == ["milestones"]  # the ID as the pages show it
+    assert names("  float   low ") == ["float-watch"]  # every word, in the title or the description
+    assert names("float baseline") == []
+    assert names(source="shop") == ["lookahead-brief"] and names(source="shop_edited") == ["milestones"]
+    assert names(source="custom") == ["float-watch"] and names("brief", "custom") == []
+
+
+def test_ui_state_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    path = sl.ui_state_path()
+    assert path == str(tmp_path / "P6MCP" / "settings_ui.json") and path != config.config_path()
+    assert sl.load_ui_state() == {} and sl.ui_view({}, "skills") == "grid"
+    assert sl.save_ui_state(skills_view="list") and sl.save_ui_state(details_size=[640, 480])
+    state = sl.load_ui_state()
+    assert state == {"skills_view": "list", "details_size": [640, 480]} and not os.path.exists(path + ".tmp")
+    assert sl.ui_view(state, "skills") == "list" and sl.ui_view(state, "shop") == "grid"  # one view per page
+    assert sl.ui_view({"shop_view": "cards"}, "shop") == "grid"  # an unknown value
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("{broken")
+    assert sl.load_ui_state() == {}
+    assert sl.save_ui_state(shop_view="list") and sl.load_ui_state() == {"shop_view": "list"}  # replaced
+
+    def fail(*_a):
+        raise OSError("locked")
+    monkeypatch.setattr(sl.os, "replace", fail)
+    assert sl.save_ui_state(shop_view="grid") is False and sl.load_ui_state() == {"shop_view": "list"}
