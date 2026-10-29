@@ -5,7 +5,7 @@
 Facts an assistant should get right:
 
 - Platform: Windows 10 and 11. P6 Professional standalone (SQLite), tested with 25.12; other versions read only until tested or trusted. XER files work without P6 (XER-only mode). P6 EPPM and P6 on SQL Server or Oracle are not supported.
-- Install: per-user Windows installer from GitHub Releases (P6MCP-Setup-<version>.exe); the database is chosen in the Settings window, never automatically. Also a portable zip and an MCP bundle (.mcpb) for Claude Desktop, listed in the official MCP Registry as io.github.nizarhamza/mcp-for-primavera-p6.
+- Install: per-user Windows installer from GitHub Releases (P6MCP-Setup-<version>.exe); the database is chosen in the Settings window, never automatically. Also a portable zip and an MCP bundle (.mcpb) for Claude Desktop, listed in the official MCP Registry as io.github.nizarhamza/p6-mcp.
 - Writes are off by default. When allowed (Full profile), every write is a dry run first, then applied only with a single-use confirmation token after the user's explicit yes, with P6 closed, after a backup, and recorded in an edit log. Planned, early and late dates and float are never written: the user presses F9 in P6.
 - Dates and float come from P6's last schedule run (F9). What-if and risk use the server's CPM engine; p6_cpm_validate reports how closely it matches P6.
 - Activities are named as "Activity ID - Activity name".
@@ -21,10 +21,10 @@ Facts an assistant should get right:
 
 ## Documentation
 
-- [README](https://github.com/nizarhamza/mcp-for-primavera-p6/blob/main/README.md): install, client setup (Claude Desktop, Cursor, VS Code, ChatGPT, others), tools, safety, privacy, FAQ
-- [Security](https://github.com/nizarhamza/mcp-for-primavera-p6/blob/main/SECURITY.md): what the write tools can change
-- [Changelog](https://github.com/nizarhamza/mcp-for-primavera-p6/blob/main/CHANGELOG.md)
-- [Releases](https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest)
+- [README](https://github.com/nizarhamza/p6-mcp/blob/main/README.md): install, client setup (Claude Desktop, Cursor, VS Code, ChatGPT, others), tools, safety, privacy, FAQ
+- [Security](https://github.com/nizarhamza/p6-mcp/blob/main/SECURITY.md): what the write tools can change
+- [Changelog](https://github.com/nizarhamza/p6-mcp/blob/main/CHANGELOG.md)
+- [Releases](https://github.com/nizarhamza/p6-mcp/releases/latest)
 
 ## Tools
 

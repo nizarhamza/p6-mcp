@@ -54,26 +54,18 @@ signed build with `signtool verify /pa /v`.
    release's `.mcpb`, checks it against `SHA256SUMS.txt`, writes `server.json` with that file's URL and SHA-256
    (`packaging/server_json.py`), validates it and publishes it to the official MCP Registry with GitHub OIDC (no
    secret). Pre-releases are skipped. Check the entry with
-   `curl "https://registry.modelcontextprotocol.io/v0/servers?search=mcp-for-primavera-p6"`. A manual run
+   `curl "https://registry.modelcontextprotocol.io/v0/servers?search=nizarhamza/p6-mcp"`. A manual run
    (Actions, MCP Registry, Run workflow, tag) publishes an existing release again.
 
 A manual run of the Release workflow (Actions, Release, Run workflow) builds without publishing and keeps the
 artifacts for 90 days.
 
-### Repository name (2.0.0 only)
+### Repository name
 
-Versions 1.x download updates only from `https://github.com/nizarhamza/p6-mcp/releases/download/`. After the
-repository is renamed, GitHub serves the asset URLs under the new name, so 1.x copies would refuse them. Order:
+The product was renamed MCP for Primavera P6 in 2.0, but the repository keeps the name `nizarhamza/p6-mcp`:
+every installed copy (1.x included) downloads updates only from `https://github.com/nizarhamza/p6-mcp/releases/download/`,
+and a rename would make GitHub serve the asset URLs under the new name, which they refuse. Do not rename it.
 
-1. Release 2.0.0 while the repository is still `nizarhamza/p6-mcp`: 1.x copies update themselves to 2.0.0.
-2. Once they had the time to update (the tray checks at its start and then on its schedule), rename the
-   repository to `mcp-for-primavera-p6` (Settings > General > Repository name; GitHub redirects the old URLs),
-   then `git remote set-url origin https://github.com/nizarhamza/mcp-for-primavera-p6.git`.
-3. 2.0.0 looks for releases under the new name first and falls back to the old one on a 404, and accepts
-   downloads from both names, so it updates before and after the rename. Never create a new repository named
-   `p6-mcp`: it would break the redirect.
-
-Until the rename, the README badges and links that use the new name do not resolve; keep that window short.
 The skill shop catalog (nizarhamza/p6-mcp-shop) checks skills against a tag of this repository: pin its
 workflows to the new release (`P6MCP_REF`) once the tag exists.
 

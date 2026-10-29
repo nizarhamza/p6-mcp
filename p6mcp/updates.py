@@ -12,22 +12,15 @@ import os
 import re
 import subprocess
 import sys
-import urllib.error
 import urllib.request
 from typing import Optional
 
 from p6mcp import __version__
 
-REPO = "nizarhamza/mcp-for-primavera-p6"
-# The repository was nizarhamza/p6-mcp before 2.0. Releases may be made under either name (2.0 ships before the
-# rename so that 1.x copies, which only download from the old name, can update): check() falls back to the old
-# name while the new one does not exist yet, and downloads are accepted from both.
-OLD_REPOS = ("nizarhamza/p6-mcp",)
+REPO = "nizarhamza/p6-mcp"
 REPO_URL = f"https://github.com/{REPO}"
 LATEST_API = f"https://api.github.com/repos/{REPO}/releases/latest"
-OLD_LATEST_APIS = tuple(f"https://api.github.com/repos/{r}/releases/latest" for r in OLD_REPOS)
 DOWNLOAD_PREFIX = f"{REPO_URL}/releases/download/"  # assets are only fetched from this repository's releases
-DOWNLOAD_PREFIXES = (DOWNLOAD_PREFIX, *(f"https://github.com/{r}/releases/download/" for r in OLD_REPOS))
 TIMEOUT = 8
 DOWNLOAD_TIMEOUT = 60
 SUMS = "SHA256SUMS.txt"
@@ -53,17 +46,10 @@ def check(current: str = __version__, opener=urllib.request.urlopen) -> dict:
     out = {"current": current, "latest": None, "newer": False, "url": f"{REPO_URL}/releases", "assets": {},
            "error": None}
     try:
-        apis = (LATEST_API, *OLD_LATEST_APIS)
-        for i, api in enumerate(apis):
-            req = urllib.request.Request(api, headers={"Accept": "application/vnd.github+json",
-                                                       "User-Agent": f"p6mcp/{current}"})
-            try:
-                with opener(req, timeout=TIMEOUT) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                break
-            except urllib.error.HTTPError as e:  # 404: the repository is not renamed yet, try the old name
-                if e.code != 404 or i == len(apis) - 1:
-                    raise
+        req = urllib.request.Request(LATEST_API, headers={"Accept": "application/vnd.github+json",
+                                                          "User-Agent": f"p6mcp/{current}"})
+        with opener(req, timeout=TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
         tag: Optional[str] = data.get("tag_name")
         out["latest"] = tag.lstrip("v") if tag else None
         out["url"] = data.get("html_url") or out["url"]
@@ -94,7 +80,7 @@ def updates_dir() -> str:
 
 def _fetch(url: str, dest: str, opener) -> str:
     """Download url to dest (through dest.part) and return the SHA256 of the bytes."""
-    if not url.startswith(DOWNLOAD_PREFIXES):
+    if not url.startswith(DOWNLOAD_PREFIX):
         raise ValueError(f"refusing to download from {url!r}: not a release of {REPO}")
     h, tmp = hashlib.sha256(), dest + ".part"
     req = urllib.request.Request(url, headers={"User-Agent": f"p6mcp/{__version__}"})

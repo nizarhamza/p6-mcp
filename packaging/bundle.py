@@ -23,7 +23,7 @@ DIST = os.path.join(HERE, "dist")
 BUILD = os.path.join(HERE, "build")
 ROOT = os.path.dirname(HERE)
 LEGAL = ("LICENSE", "NOTICE")
-REPO = os.environ.get("P6MCP_REPO_URL", "https://github.com/nizarhamza/mcp-for-primavera-p6")
+REPO = os.environ.get("P6MCP_REPO_URL", "https://github.com/nizarhamza/p6-mcp")
 SITE = "https://mcp-for-primavera-p6.pages.dev/"
 
 

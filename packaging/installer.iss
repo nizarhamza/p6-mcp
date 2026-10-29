@@ -7,7 +7,7 @@
   #define AppVersion "0.0.0"
 #endif
 #ifndef RepoUrl
-  #define RepoUrl "https://github.com/nizarhamza/mcp-for-primavera-p6"
+  #define RepoUrl "https://github.com/nizarhamza/p6-mcp"
 #endif
 
 [Setup]

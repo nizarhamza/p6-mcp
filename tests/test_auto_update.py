@@ -67,16 +67,6 @@ def test_download_only_from_this_repository(tmp_path):
         updates.download({"latest": "1.0.0", "newer": False}, str(tmp_path), opener)
 
 
-def test_download_from_the_old_repository_name(tmp_path):
-    """Releases made before the rename keep nizarhamza/p6-mcp in their asset URLs."""
-    old = "https://github.com/nizarhamza/p6-mcp/releases/download/v9.9.9/"
-    digest = hashlib.sha256(PAYLOAD).hexdigest()
-    files = {old + EXE: PAYLOAD, old + updates.SUMS: f"{digest}  {EXE}\n".encode()}
-    info = {"latest": "9.9.9", "newer": True, "assets": {EXE: old + EXE, updates.SUMS: old + updates.SUMS}}
-    path = updates.download(info, str(tmp_path), lambda req, timeout: Resp(files[req.full_url]))
-    assert open(path, "rb").read() == PAYLOAD
-
-
 def test_parse_sums():
     h = "a" * 64
     assert updates.parse_sums(f"{h}  P6MCP-Setup-1.0.0.exe\n{h.upper()} *x.zip\nnoise") == {

@@ -51,8 +51,6 @@ Version 1.10.0 was never released: its changes ship in 2.0.0.
   (`%LOCALAPPDATA%\Programs\P6 MCP`), the program and file names (`p6mcp-server.exe`, `P6MCP-Setup-*.exe`), the
   settings and data folders and the `p6mcp` entry of the MCP clients do not change, so updates and client
   registrations keep working.
-- The GitHub repository becomes `nizarhamza/mcp-for-primavera-p6` (GitHub redirects the old name). Automatic
-  updates look for releases under the new name, then under the old one, and accept downloads from both.
 - Every tool now declares its four MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
   `openWorldHint`) as a literal on its own line of the source, so directory scanners that read the code see
   them. The values sent to MCP clients are unchanged.

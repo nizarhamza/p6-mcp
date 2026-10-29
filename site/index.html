@@ -38,8 +38,8 @@
       "operatingSystem": "Windows 10, Windows 11",
       "softwareVersion": "2.0.0",
       "url": "https://mcp-for-primavera-p6.pages.dev/",
-      "downloadUrl": "https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest",
-      "installUrl": "https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest",
+      "downloadUrl": "https://github.com/nizarhamza/p6-mcp/releases/latest",
+      "installUrl": "https://github.com/nizarhamza/p6-mcp/releases/latest",
       "softwareHelp": "https://mcp-for-primavera-p6.pages.dev/guides/",
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
       "isAccessibleForFree": true,
@@ -89,10 +89,10 @@
     <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span class="menu-icon" aria-hidden="true"></span><span class="menu-label">Menu</span></button>
     <nav class="site-nav" id="site-nav" aria-label="Main">
       <a href="/guides/">Guides</a>
-      <a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">Tools</a>
+      <a href="https://github.com/nizarhamza/p6-mcp#tools">Tools</a>
       <a href="#faq">FAQ</a>
-      <a href="https://github.com/nizarhamza/mcp-for-primavera-p6">GitHub</a>
-      <a class="btn btn-primary btn-small btn-nav" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>Download</a>
+      <a href="https://github.com/nizarhamza/p6-mcp">GitHub</a>
+      <a class="btn btn-primary btn-small btn-nav" href="https://github.com/nizarhamza/p6-mcp/releases/latest"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>Download</a>
     </nav>
   </div>
 </header>
@@ -105,7 +105,7 @@
         <h1 id="hero-title">Ask your Primavera&nbsp;P6 schedule, in plain language</h1>
         <p class="lede">A local <strong>Primavera P6 MCP server</strong> for Claude, ChatGPT, Cursor and VS Code. It reads the P6 Professional database or XER files and computes the answer from the schedule: driving path, total float, the DCMA 14-point check, what changed since the last update, what-if. When you allow it, it <strong>edits the schedule too</strong>: previewed, confirmed by you, backed up and logged.</p>
         <div class="cta-row">
-          <a class="btn btn-primary btn-download" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">
+          <a class="btn btn-primary btn-download" href="https://github.com/nizarhamza/p6-mcp/releases/latest">
             <span class="btn-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></span>
             <span class="btn-text">Download for Windows<small>Version 2.0.0 installer, Windows 10 and 11</small></span>
           </a>
@@ -224,7 +224,7 @@
       <div class="section-head">
         <h2 id="ask-title">Questions a scheduler asks, answered from the schedule</h2>
         <p>The server does the scheduling arithmetic on P6's own data; the model only explains the result. Dates and float come from the last schedule run (F9).</p>
-        <p class="more"><a href="https://github.com/nizarhamza/mcp-for-primavera-p6#tools">All 58 tools, with what each one reads or writes</a></p>
+        <p class="more"><a href="https://github.com/nizarhamza/p6-mcp#tools">All 58 tools, with what each one reads or writes</a></p>
       </div>
       <dl class="qa">
         <div><dt>What drives the finish date?</dt><dd><code>p6_driving_path</code> follows the driving predecessors back to the root cause (a constraint, the data date, an actual date); <code>p6_float_origin</code> says where the total float comes from.</dd></div>
@@ -304,8 +304,8 @@
           <li>Restart your MCP client and ask: "List my P6 projects".</li>
         </ol>
         <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download for Windows</a>
-          <a class="btn btn-light" href="https://github.com/nizarhamza/mcp-for-primavera-p6#connect-your-mcp-client">Manual setup per client</a>
+          <a class="btn btn-primary" href="https://github.com/nizarhamza/p6-mcp/releases/latest">Download for Windows</a>
+          <a class="btn btn-light" href="https://github.com/nizarhamza/p6-mcp#connect-your-mcp-client">Manual setup per client</a>
         </div>
       </div>
       <div>
@@ -347,7 +347,7 @@
       <details><summary>Can the AI change my P6 schedule?</summary><div><p>Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9.</p></div></details>
       <details><summary>Does my schedule leave my PC?</summary><div><p>The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio.</p></div></details>
       <details><summary>Which P6 versions and databases are supported?</summary><div><p>P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM and P6 Professional on SQL Server or Oracle are not supported.</p></div></details>
-      <details><summary>Does it work with ChatGPT?</summary><div><p>Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented in the <a href="https://github.com/nizarhamza/mcp-for-primavera-p6#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer.</p></div></details>
+      <details><summary>Does it work with ChatGPT?</summary><div><p>Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented in the <a href="https://github.com/nizarhamza/p6-mcp#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer.</p></div></details>
       <details><summary>Does it run on macOS or Linux?</summary><div><p>No. P6 Professional is a Windows program and the server is built for Windows 10 and 11.</p></div></details>
       </div>
     </div>
@@ -373,10 +373,10 @@
       <nav aria-label="Project">
         <p class="foot-title">Project</p>
         <ul>
-          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest">Download</a></li>
-          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6">Source and documentation</a></li>
-          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/blob/main/SECURITY.md">Security</a></li>
-          <li><a href="https://github.com/nizarhamza/mcp-for-primavera-p6/issues">Report an issue</a></li>
+          <li><a href="https://github.com/nizarhamza/p6-mcp/releases/latest">Download</a></li>
+          <li><a href="https://github.com/nizarhamza/p6-mcp">Source and documentation</a></li>
+          <li><a href="https://github.com/nizarhamza/p6-mcp/blob/main/SECURITY.md">Security</a></li>
+          <li><a href="https://github.com/nizarhamza/p6-mcp/issues">Report an issue</a></li>
           <li><a href="/llms.txt">llms.txt</a></li>
         </ul>
       </nav>

@@ -1,7 +1,7 @@
-<!-- mcp-name: io.github.nizarhamza/mcp-for-primavera-p6 -->
+<!-- mcp-name: io.github.nizarhamza/p6-mcp -->
 ![MCP for Primavera P6](assets/brand/png/p6mcp-banner.png)
 
-[![Latest release](https://img.shields.io/github/v/release/nizarhamza/mcp-for-primavera-p6?label=release)](https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/nizarhamza/p6-mcp?label=release)](https://github.com/nizarhamza/p6-mcp/releases/latest)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 ![Windows 10 and 11](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0A1A33)
 [![M8ven Score](https://m8ven.ai/badge/mcp/nizarhamza-p6-mcp-151l9d?v=5514a55ce01fb84cdf4699c8d59f0d6b)](https://m8ven.ai/mcp/nizarhamza-p6-mcp-151l9d?s=readme)
@@ -54,7 +54,7 @@ MCP for Primavera P6 runs on Windows 10 or 11, next to P6 Professional. Nothing 
 bundled.
 
 1. Download `P6MCP-Setup-<version>.exe` from
-   [Releases](https://github.com/nizarhamza/mcp-for-primavera-p6/releases/latest) and check it against
+   [Releases](https://github.com/nizarhamza/p6-mcp/releases/latest) and check it against
    `SHA256SUMS.txt` (`certutil -hashfile P6MCP-Setup-2.0.0.exe SHA256`).
 2. Run it. It installs for your Windows user only (no administrator rights) and, on its last page, offers to
    register the server with every MCP client it finds (Claude Desktop, Claude Code, Cursor, VS Code, LM Studio,
@@ -68,7 +68,7 @@ Release builds are not code signed yet: Windows SmartScreen may warn on first la
 Check the SHA-256 first. Other packages on the release page: a **portable zip** (no installation) and an
 **MCP bundle** (`.mcpb`, server only) that Claude Desktop installs in one click; it is also the package listed in
 the [official MCP Registry](https://registry.modelcontextprotocol.io) as
-`io.github.nizarhamza/mcp-for-primavera-p6`.
+`io.github.nizarhamza/p6-mcp`.
 
 ## Connect your MCP client
 

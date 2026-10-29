@@ -1,16 +1,16 @@
 # Launch checklist: MCP for Primavera P6 2.0.0
 
-The manual steps that follow the local commits: release, repository rename, landing site, search engines, MCP
-directories and content. The order of sections A to C matters (see "Repository name" in
-[docs/RELEASING.md](docs/RELEASING.md)): versions 1.x only download updates from the old repository name.
+The manual steps that follow the local commits: release, landing site, search engines, MCP directories and
+content. The repository keeps its name (see "Repository name" in [docs/RELEASING.md](docs/RELEASING.md)):
+every installed copy downloads its updates from it.
 
 Names used below:
 
 | Item | Value |
 |---|---|
 | Product | MCP for Primavera P6 (P6 MCP before 2.0) |
-| Repository | `nizarhamza/p6-mcp` today, `nizarhamza/mcp-for-primavera-p6` after the rename |
-| MCP Registry name | `io.github.nizarhamza/mcp-for-primavera-p6` |
+| Repository | `nizarhamza/p6-mcp` (no rename) |
+| MCP Registry name | `io.github.nizarhamza/p6-mcp` |
 | Site | `https://mcp-for-primavera-p6.pages.dev/` (Cloudflare Pages project `mcp-for-primavera-p6`) |
 | Skill shop catalog | `nizarhamza/p6-mcp-shop` (unchanged) |
 
@@ -26,8 +26,9 @@ Names used below:
 - [ ] Optional follow-up, not blocking: the skill shop catalog (its README, issue form, authoring guide and the
       core skills' texts) still says "P6 MCP".
 
-## B. Release 2.0.0 under the current name
+## B. Release 2.0.0
 
+- [ ] Date the 2.0.0 entry of `CHANGELOG.md`, commit.
 - [ ] Push `main` and the tag (the tag starts the Release workflow, which builds a draft release):
 
   ```bash
@@ -45,58 +46,30 @@ Names used below:
 - [ ] Run the manual test checklist of `docs/RELEASING.md` on the draft. For 2.0 add: an update over 1.9.0
       shows "MCP for Primavera P6" in Windows Settings > Apps and in the Start menu, the old "P6 MCP Settings"
       shortcut is gone, the client entries (`p6mcp`) and the settings are unchanged.
-- [ ] Choose when the MCP Registry entry is published:
-  - **Recommended: after the rename**, so the entry of 2.0.0 carries the new repository URL. Before publishing
-    the release, run `gh workflow disable registry.yml -R nizarhamza/p6-mcp`; enable and run it in section C.
-  - Or now: publishing the release runs the workflow at once; the entry then names the old URL, which GitHub
-    redirects. A version cannot be republished, so 2.0.0 keeps it.
 - [ ] Publish the release (GitHub, Releases, the v2.0.0 draft, Publish). The installed 1.x copies update
-      themselves to 2.0.0 within their next checks.
+      themselves to 2.0.0 within their next checks, and the MCP Registry workflow publishes the 2.0.0 entry.
 
-## C. Rename the repository (once the 1.x installs have updated, a few days later)
+## C. After the release
 
-- [ ] Check that this PC runs 2.0.0 (Settings, About).
-- [ ] Rename, then point the local clone at the new name:
-
-  ```bash
-  gh repo rename mcp-for-primavera-p6 -R nizarhamza/p6-mcp --yes
-  ```
-
-  ```bash
-  git -C D:/HAMZA/Documents/p6mcp remote set-url origin https://github.com/nizarhamza/mcp-for-primavera-p6.git
-  ```
-
-- [ ] Never create a new repository named `p6-mcp`: it would break the redirect the 1.x copies rely on.
-- [ ] Push the catalog commit that pins `P6MCP_REF` to `v2.0.0` and checks out the new repository name, then
-      check that "Check the catalog" is green:
+- [ ] Push the catalog commit that pins `P6MCP_REF` to `v2.0.0` (it needs the tag), then check that "Check the
+      catalog" is green:
 
   ```bash
   git -C D:/HAMZA/Documents/p6-mcp-shop push origin main
   ```
 
-- [ ] If the Registry workflow was disabled in section B, enable it and publish 2.0.0:
+- [ ] Check the MCP Registry entry:
 
   ```bash
-  gh workflow enable registry.yml -R nizarhamza/mcp-for-primavera-p6
+  curl "https://registry.modelcontextprotocol.io/v0/servers?search=nizarhamza/p6-mcp"
   ```
 
-  ```bash
-  gh workflow run registry.yml -R nizarhamza/mcp-for-primavera-p6 -f tag=v2.0.0
-  ```
-
-- [ ] Check the entry:
-
-  ```bash
-  curl "https://registry.modelcontextprotocol.io/v0/servers?search=mcp-for-primavera-p6"
-  ```
-
-- [ ] M8ven: the README badge URL contains the old slug (`nizarhamza-p6-mcp-151l9d`): ask for a rescan under
-      the new name and update the badge line.
-- [ ] hol-guard listing: open the follow-up PR (tools added since 1.9, new name).
+- [ ] Check that this PC updated to 2.0.0 (Settings, About).
+- [ ] hol-guard listing: open the follow-up PR (tools added since 1.9, new product name).
 
 ## D. Landing site on Cloudflare Pages
 
-- [ ] Cloudflare dashboard > Workers & Pages > Create > Pages > Connect to Git > `nizarhamza/mcp-for-primavera-p6`.
+- [ ] Cloudflare dashboard > Workers & Pages > Create > Pages > Connect to Git > `nizarhamza/p6-mcp`.
       Project name `mcp-for-primavera-p6`, production branch `main`, framework preset None, build command empty,
       build output directory `site`. Every push to `main` deploys.
 - [ ] Check `/`, `/guides/`, the four guides, `/llms.txt`, `/sitemap.xml`, `/robots.txt`, a missing URL (the
@@ -104,7 +77,7 @@ Names used below:
 - [ ] Set the repository homepage:
 
   ```bash
-  gh repo edit nizarhamza/mcp-for-primavera-p6 --homepage https://mcp-for-primavera-p6.pages.dev/
+  gh repo edit nizarhamza/p6-mcp --homepage https://mcp-for-primavera-p6.pages.dev/
   ```
 
 - [ ] If Cloudflare gives another subdomain (name taken) or you add a custom domain, replace
@@ -140,7 +113,7 @@ Names used below:
 - [ ] Smithery: local servers are published as MCPB bundles:
 
   ```bash
-  npx -y @smithery/cli mcp publish packaging/dist/p6mcp-2.0.0.mcpb -n nizarhamza/mcp-for-primavera-p6
+  npx -y @smithery/cli mcp publish packaging/dist/p6mcp-2.0.0.mcpb -n nizarhamza/p6-mcp
   ```
 
   Check the command against Smithery's publishing docs first (smithery.ai/docs/build/publish). The bundle is

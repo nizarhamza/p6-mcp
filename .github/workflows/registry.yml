@@ -1,7 +1,7 @@
 name: MCP Registry
 
 # Publishes this server to the official MCP Registry (registry.modelcontextprotocol.io) as
-# io.github.nizarhamza/mcp-for-primavera-p6, with the release's MCP bundle (.mcpb) as its package.
+# io.github.nizarhamza/p6-mcp, with the release's MCP bundle (.mcpb) as its package.
 # A tag vX.Y.Z runs release.yml, which builds and tests everything and creates a DRAFT release. Publishing that
 # release after the manual checklist (docs/RELEASING.md) makes the .mcpb public and runs this workflow; the
 # Registry entry then points at a file anyone can download. A manual run republishes an existing release.
