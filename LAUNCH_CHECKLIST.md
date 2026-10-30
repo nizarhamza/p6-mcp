@@ -1,8 +1,8 @@
 # Launch checklist: MCP for Primavera P6 2.0.0
 
-The manual steps that follow the local commits: release, landing site, search engines, MCP directories and
-content. The repository keeps its name (see "Repository name" in [docs/RELEASING.md](docs/RELEASING.md)):
-every installed copy downloads its updates from it.
+The manual steps that follow the local commits: release, landing site and MCP directories. The repository
+keeps its name (see "Repository name" in [docs/RELEASING.md](docs/RELEASING.md)): every installed copy
+downloads its updates from it.
 
 Names used below:
 
@@ -89,20 +89,7 @@ Names used below:
 - [ ] The site has no analytics. If you add Cloudflare Web Analytics, allow its script in the
       Content-Security-Policy of `site/_headers`.
 
-## E. Search engines
-
-- [ ] Google Search Console: add a URL-prefix property for `https://mcp-for-primavera-p6.pages.dev/`, verify it
-      with the HTML file method (put the `google<id>.html` file in `site/`, commit, wait for the deploy), submit
-      `sitemap.xml`, then URL inspection > Request indexing for the home page and the four guides.
-- [ ] Rich Results Test on the home page: the SoftwareApplication and FAQ data are read. Google shows a software
-      rich result only with ratings or reviews; there are none, and none should be invented.
-- [ ] Bing Webmaster Tools: import the site from Search Console and submit the sitemap (Bing also feeds the
-      search of ChatGPT and Copilot).
-- [ ] After two to four weeks, check the queries in Search Console: "primavera p6 mcp", "mcp server
-      primavera", "dcma 14 point check ai", "driving path p6". Adjust titles of pages with impressions and no
-      clicks.
-
-## F. MCP directories
+## E. MCP directories
 
 - [x] Official MCP Registry: section C (or automatic in B). `io.github.nizarhamza/p6-mcp` 2.0.0 is active and
       latest since 2026-10-29.
@@ -115,15 +102,6 @@ Names used below:
       Linux containers and cannot start a Windows server: expect the listing without a passing build. Glama
       indexed the repository on its own (rated A, 2026-10-30); its page says "P6 MCP" and 11 tools until it is
       claimed.
-- [ ] Smithery: local servers are published as MCPB bundles:
-
-  ```bash
-  npx -y @smithery/cli mcp publish packaging/dist/p6mcp-2.0.0.mcpb -n nizarhamza/p6-mcp
-  ```
-
-  Check the command against Smithery's publishing docs first (smithery.ai/docs/build/publish). The bundle is
-  Windows only and about 27 MB; if Smithery refuses it, skip Smithery.
-- [ ] mcp.so: Submit (top bar, sign-in needed) with the repository URL.
 - [x] Not required (decided 2026-10-30). MCP Server Finder: it takes submissions by email at
       info@mcpserverfinder.com: name, repository, site, one line ("Local MCP server for Primavera P6 Professional:
       analysis, DCMA check, what-if and safe write-back to the P6 database"), category (productivity or project
@@ -134,32 +112,11 @@ Names used below:
       "Primavera P6 Professional schedules (database or XER): critical and driving path, DCMA 14-point check,
       update comparison, CPM what-if, and edits written back to the P6 database after a dry run, a confirmation
       and a backup." Pull request #18074 opened 2026-10-30, bot checks green, waiting for the maintainers.
-- [ ] Also worth a submission: PulseMCP (pulsemcp.com), mcpservers.org, MCP Market (mcpmarket.com),
-      cursor.directory.
 - [x] Not required (decided 2026-10-30). Cline MCP Marketplace: an issue in `cline/mcp-marketplace` with a
       400 x 400 PNG logo (`assets/brand/png/p6mcp-icon-512.png` resized); its form asks you to confirm that Cline
       set the server up from the README or an `llms-install.md`.
 
-## G. Content
-
-Say who made the tool in every post, link the guide that answers the question rather than the download, and
-never show a real client schedule: use DEMO-SS225.
-
-- [ ] Planning Planet (Primavera forum): one post that starts from a scheduler's problem, for example "Tracing
-      the driving path back to the root cause in seconds: a free local tool for P6 Professional", with the
-      driving path guide link; answer the questions in the thread.
-- [ ] LinkedIn: an article "What an AI assistant can and cannot do with a Primavera P6 schedule" (the write path
-      and its safeguards, the DCMA check, the integrity review), plus the demo video uploaded natively (60 to 90
-      seconds, captions on).
-- [ ] YouTube: a 3 to 6 minute demo, title "Primavera P6 + Claude: driving path, DCMA check and safe edits (MCP
-      server)", chapters (install, driving path, DCMA check, compare updates, a confirmed edit and F9), links to
-      the site and the release in the description.
-- [ ] dev.to: a technical article, "Letting an AI assistant write to a Primavera P6 database safely" (dry run and
-      single-use tokens, backups, edit log, refusing writes while P6 runs, a CPM engine checked against F9),
-      tags `mcp`, `ai`, `python`, `productivity`, with the canonical link to the article itself and a link to
-      the site.
-
-## H. After the launch
+## F. After the launch
 
 - [ ] When a guide changes, update its `dateModified` (JSON-LD) and the `lastmod` of `site/sitemap.xml`.
 - [ ] The guide figures come from the public demo project: when a tool's output changes, rebuild the demo
