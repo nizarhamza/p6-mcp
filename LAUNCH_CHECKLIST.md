@@ -21,8 +21,8 @@ Names used below:
       PRC-TR-1040 finishes 15 working days earlier?" went through the installed server (1.9.0) on the demo database
       of `python tests/fixtures/make_demo.py <folder>`; the GIF shows those tool calls and results. Done
       2026-10-29.
-- [ ] Read the README and the site once more. Preview the site with
-      `python -m http.server 8765 --directory site` and open `http://localhost:8765/`.
+- [x] Read the README and the site once more. Preview the site with
+      `python -m http.server 8765 --directory site` and open `http://localhost:8765/`. Done 2026-10-30.
 - [ ] Optional follow-up, not blocking: the skill shop catalog (its README, issue form, authoring guide and the
       core skills' texts) still says "P6 MCP".
 
@@ -43,9 +43,10 @@ Names used below:
   git -C D:/HAMZA/Documents/p6mcp push origin v2.0.0
   ```
 
-- [ ] Run the manual test checklist of `docs/RELEASING.md` on the draft. For 2.0 add: an update over 1.9.0
+- [x] Run the manual test checklist of `docs/RELEASING.md` on the draft. For 2.0 add: an update over 1.9.0
       shows "MCP for Primavera P6" in Windows Settings > Apps and in the Start menu, the old "P6 MCP Settings"
-      shortcut is gone, the client entries (`p6mcp`) and the settings are unchanged.
+      shortcut is gone, the client entries (`p6mcp`) and the settings are unchanged. Checked 2026-10-30 on this
+      PC's automatic update from 1.9.0 (after the release was published).
 - [x] Publish the release (GitHub, Releases, the v2.0.0 draft, Publish). The installed 1.x copies update
       themselves to 2.0.0 within their next checks, and the MCP Registry workflow publishes the 2.0.0 entry.
 
