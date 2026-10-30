@@ -106,14 +106,15 @@ Names used below:
 
 - [x] Official MCP Registry: section C (or automatic in B). `io.github.nizarhamza/p6-mcp` 2.0.0 is active and
       latest since 2026-10-29.
-- [ ] GitHub's MCP registry (github.com/mcp) and VS Code's MCP gallery. Checked 2026-10-30: not listed. GitHub's
-      registry is curated (647 servers) and does not mirror the official one; GitHub takes nominations by email at
-      partnerships@github.com (GitHub blog, "How to find, install, and manage MCP servers with the GitHub MCP
-      Registry").
-- [ ] Glama: `glama.json` is at the repository root (maintainer `nizarhamza`). On glama.ai/mcp/servers, add the
-      repository URL, then use Claim. Glama's build check runs in Linux containers and cannot start a Windows
-      server: expect the listing without a passing build. Glama indexed the repository on its own (rated A,
-      2026-10-30); its page says "P6 MCP" and 11 tools until it is claimed.
+- [x] Not required (decided 2026-10-30). GitHub's MCP registry (github.com/mcp) and VS Code's MCP gallery.
+      Checked 2026-10-30: not listed. GitHub's registry is curated (647 servers) and does not mirror the official
+      one; GitHub takes nominations by email at partnerships@github.com (GitHub blog, "How to find, install, and
+      manage MCP servers with the GitHub MCP Registry").
+- [x] Not required (decided 2026-10-30). Glama: `glama.json` is at the repository root (maintainer
+      `nizarhamza`). On glama.ai/mcp/servers, add the repository URL, then use Claim. Glama's build check runs in
+      Linux containers and cannot start a Windows server: expect the listing without a passing build. Glama
+      indexed the repository on its own (rated A, 2026-10-30); its page says "P6 MCP" and 11 tools until it is
+      claimed.
 - [ ] Smithery: local servers are published as MCPB bundles:
 
   ```bash
@@ -123,19 +124,21 @@ Names used below:
   Check the command against Smithery's publishing docs first (smithery.ai/docs/build/publish). The bundle is
   Windows only and about 27 MB; if Smithery refuses it, skip Smithery.
 - [ ] mcp.so: Submit (top bar, sign-in needed) with the repository URL.
-- [ ] MCP Server Finder: it takes submissions by email at info@mcpserverfinder.com: name, repository, site, one
-      line ("Local MCP server for Primavera P6 Professional: analysis, DCMA check, what-if and safe write-back to
-      the P6 database"), category (productivity or project management).
+- [x] Not required (decided 2026-10-30). MCP Server Finder: it takes submissions by email at
+      info@mcpserverfinder.com: name, repository, site, one line ("Local MCP server for Primavera P6 Professional:
+      analysis, DCMA check, what-if and safe write-back to the P6 database"), category (productivity or project
+      management).
 - [x] awesome-mcp-servers (punkpeye): a pull request adding one line, alphabetically, under "Workplace &
       Productivity" (no Primavera server is listed there as of 2026-10-29). Follow the list's format: repository
       link, the Glama score badge once listed, the legend markers for Python, local service and Windows, then:
       "Primavera P6 Professional schedules (database or XER): critical and driving path, DCMA 14-point check,
       update comparison, CPM what-if, and edits written back to the P6 database after a dry run, a confirmation
       and a backup." Pull request #18074 opened 2026-10-30, bot checks green, waiting for the maintainers.
-- [ ] Also worth a submission: PulseMCP (pulsemcp.com), mcpservers.org, MCP Market (mcpmarket.com), the Cline MCP
-      Marketplace (an issue in `cline/mcp-marketplace` with a 400 x 400 PNG logo: `assets/brand/png/p6mcp-icon-512.png`
-      resized; its form asks you to confirm that Cline set the server up from the README or an `llms-install.md`),
+- [ ] Also worth a submission: PulseMCP (pulsemcp.com), mcpservers.org, MCP Market (mcpmarket.com),
       cursor.directory.
+- [x] Not required (decided 2026-10-30). Cline MCP Marketplace: an issue in `cline/mcp-marketplace` with a
+      400 x 400 PNG logo (`assets/brand/png/p6mcp-icon-512.png` resized); its form asks you to confirm that Cline
+      set the server up from the README or an `llms-install.md`.
 
 ## G. Content
 
