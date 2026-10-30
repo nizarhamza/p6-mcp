@@ -380,6 +380,23 @@ DIALOGS = f'''<div class="scrim" data-scrim></div>
   <p aria-hidden="true"></p>
 </dialog>'''
 
+# Loading skeleton of the page (shown until site.js has the page ready, then faded out; never shown without JS)
+_SK_LINES = "".join(f'<span class="sk{c}"></span>' for c in ("-line", "-line w2", "-line w3", "-line w4"))
+_SK_ITEM = '<span class="sk-item"><span class="sk sk-av"></span><span class="sk-lines"><span class="sk"></span><span class="sk"></span></span></span>'
+SKELETON = (
+    '<div class="page-skel" aria-hidden="true">'
+    '<div class="sk-bar"><div class="sk-top"><span class="sk sk-logo"></span><span class="sk sk-word"></span><span class="sk-gap"></span>'
+    '<span class="sk sk-search"></span><span class="sk sk-dot"></span><span class="sk sk-dot"></span><span class="sk sk-pill"></span></div></div>'
+    '<div class="sk-body">'
+    '<div class="sk-side">' + "".join('<span class="sk sk-h"></span>' + '<span class="sk"></span>' * n for n in (3, 5, 2, 5)) + '</div>'
+    '<div class="sk-main"><div class="sk-inner"><span class="sk sk-eyebrow"></span><span class="sk sk-title"></span><span class="sk sk-title s2"></span>'
+    + _SK_LINES.replace('class="sk-', 'class="sk sk-') +
+    '<span class="sk-row"><span class="sk sk-btn"></span><span class="sk sk-btn s2"></span></span>'
+    '<span class="sk-block">' + ('<span class="sk-col">' + _SK_ITEM * 3 + '</span>') * 3 + '</span></div></div>'
+    '<div class="sk-toc"><span class="sk sk-h"></span>' + '<span class="sk"></span>' * 8 + '<span class="sk sk-card"></span></div>'
+    '</div></div>'
+)
+
 NOSCRIPT = ('<noscript><style>@media (max-width: 64rem) { .sidebar { position: static !important; transform: none !important; '
             'visibility: visible !important; width: auto !important; height: auto !important; border-right: 0 !important; '
             'border-bottom: 1px solid var(--line) !important; } }</style></noscript>')
@@ -412,7 +429,7 @@ def page(meta, extra, content, toc_items):
     url = meta["url"]
     toc_html = toc(toc_items, CTA[meta["cta"]] if meta.get("cta") else "") if toc_items else ""
     layout = "layout" if toc_items else "layout layout-wide"
-    return (head(meta, extra) + "\n<body>\n" + sprite() + "\n" + topbar(url)
+    return (head(meta, extra) + "\n<body>\n" + SKELETON + "\n" + sprite() + "\n" + topbar(url)
             + f'\n<div class="{layout}">\n' + sidebar(url)
             + f'\n<main class="content" id="main" tabindex="-1">\n<div class="doc">\n{content}\n</div>\n</main>\n'
             + toc_html + "\n</div>\n" + FOOTER + "\n" + DIALOGS

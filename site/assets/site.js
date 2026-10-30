@@ -20,6 +20,36 @@
   }
   root.classList.add("ready");
 
+  // Loading skeleton of the page: faded out once the fonts are ready and the page has laid out (2.5 s at most).
+  (function () {
+    var skel = $(".page-skel");
+    if (!skel) return;
+    function done() { skel.classList.add("is-done"); }
+    var fonts = doc.fonts && doc.fonts.ready ? doc.fonts.ready : Promise.resolve();
+    Promise.race([fonts, new Promise(function (r) { setTimeout(r, 2500); })]).then(function () {
+      requestAnimationFrame(function () { requestAnimationFrame(done); });
+    });
+    window.addEventListener("pageshow", function (e) { if (e.persisted) done(); });
+  })();
+
+  // Images: their frame shimmers until the picture has loaded. Only pictures on display are watched, so the
+  // other theme's capture and hidden tabs are checked again when they appear.
+  function waitImages(scope) {
+    $$(".shot img", scope).forEach(function (img) {
+      if (img._waiting || img.offsetParent === null || (img.complete && img.naturalWidth)) return;
+      var box = img.parentNode;
+      img._waiting = true;
+      box.classList.add("img-wait");
+      function end() {
+        img._waiting = false;
+        if (!$$("img", box).some(function (i) { return i._waiting; })) box.classList.remove("img-wait");
+      }
+      img.addEventListener("load", end, { once: true });
+      img.addEventListener("error", end, { once: true });
+    });
+  }
+  waitImages();
+
   // Messages for screen readers (copied, search results...).
   var srStatus = $("#sr-status");
   function announce(text) {
@@ -58,6 +88,7 @@
       $$('meta[name="theme-color"]').forEach(function (m) { m.setAttribute("content", next === "dark" ? "#000000" : "#ffffff"); });
       try { localStorage.setItem("theme", next); } catch (e) { /* not remembered */ }
       label();
+      waitImages();
     });
   })();
 
@@ -345,7 +376,7 @@
         var p = doc.getElementById(t.getAttribute("aria-controls"));
         if (!p) return;
         p.hidden = !on;
-        if (on) { p.classList.remove("is-shown"); void p.offsetWidth; p.classList.add("is-shown"); }
+        if (on) { p.classList.remove("is-shown"); void p.offsetWidth; p.classList.add("is-shown"); waitImages(p); }
       });
       if (focus) tab.focus();
     }
@@ -374,7 +405,10 @@
         img.removeAttribute("src");
         img.setAttribute("width", shown.getAttribute("width"));
         img.setAttribute("height", shown.getAttribute("height"));
+        dlg.classList.add("img-wait");
+        img.onload = img.onerror = function () { dlg.classList.remove("img-wait"); };
         img.src = (isDark() && b.getAttribute("data-zoom-dark")) || b.getAttribute("data-zoom");
+        if (img.complete && img.naturalWidth) dlg.classList.remove("img-wait");
         img.alt = shown.alt;
         cap.textContent = shown.alt;
         dlg.showModal();
@@ -384,18 +418,39 @@
     dlg.addEventListener("click", function (e) { if (e.target === dlg || e.target === img) dlg.close(); });
   })();
 
-  // The recorded run: a still image until the visitor presses play.
+  // The recorded run: a still image until the visitor presses play; a shimmer while the animation downloads.
   $$("[data-player]").forEach(function (p) {
     var img = $("img", p);
     var btn = $(".player-btn", p);
     var label = $("span", btn);
     var still = img.getAttribute("src");
     var anim = img.getAttribute("data-anim-src");
-    btn.addEventListener("click", function () {
-      var playing = !p.classList.contains("is-playing");
+    var ready = false;
+    function show(playing) {
       p.classList.toggle("is-playing", playing);
       img.src = playing ? anim : still;
       label.textContent = playing ? "Stop the recording" : "Play the recording";
+    }
+    btn.addEventListener("click", function () {
+      if (p.classList.contains("is-loading")) return;
+      var playing = !p.classList.contains("is-playing");
+      if (!playing || ready) { show(playing); return; }
+      p.classList.add("is-loading");
+      btn.setAttribute("aria-busy", "true");
+      label.textContent = "Loading the recording...";
+      var pre = new Image();
+      pre.onload = function () {
+        ready = true;
+        p.classList.remove("is-loading");
+        btn.removeAttribute("aria-busy");
+        show(true);
+      };
+      pre.onerror = function () {
+        p.classList.remove("is-loading");
+        btn.removeAttribute("aria-busy");
+        label.textContent = "The recording did not load: try again";
+      };
+      pre.src = anim;
     });
   });
 
