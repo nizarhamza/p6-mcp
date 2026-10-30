@@ -23,8 +23,10 @@ Names used below:
       2026-10-29.
 - [x] Read the README and the site once more. Preview the site with
       `python -m http.server 8765 --directory site` and open `http://localhost:8765/`. Done 2026-10-30.
-- [ ] Optional follow-up, not blocking: the skill shop catalog (its README, issue form, authoring guide and the
-      core skills' texts) still says "P6 MCP".
+- [x] The skill shop catalog (README, authoring guide, issue form, workflows, messages, repository description)
+      names the app MCP for Primavera P6. Done 2026-10-30 (catalog 11aab8e). The skill files keep the marker
+      "written by P6 MCP Settings" (the app matches it), and the delay-whatif report keeps its one "P6 MCP"
+      sentence (changing it would publish a new version of a core skill).
 
 ## B. Release 2.0.0
 
@@ -90,8 +92,10 @@ Names used below:
       `tests/test_registry.py` checks that server.json and the bundle agree.
 - [x] Not required (decided 2026-10-30). Trademark note: Oracle's guidelines ask third parties not to use
       Oracle marks in domain names. A custom domain without "primavera" or "p6" is the safer long-term choice.
-- [ ] The site has no analytics. If you add Cloudflare Web Analytics, allow its script in the
-      Content-Security-Policy of `site/_headers`.
+- [x] Cloudflare Web Analytics is on (Pages project, Metrics, enabled 2026-10-30): Cloudflare injects its beacon
+      script on every deployment, and the Content-Security-Policy of `site/_headers` allows
+      `https://static.cloudflareinsights.com` (script-src) and `https://cloudflareinsights.com` (connect-src).
+      Visits: Cloudflare dashboard, the Pages project, Metrics, View Web Analytics.
 
 ## E. MCP directories
 
