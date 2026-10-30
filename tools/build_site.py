@@ -28,6 +28,7 @@ PAGES = os.path.join(ROOT, "site-src", "pages")
 CORE = os.path.join(ROOT, "p6mcp", "data", "core_skills")
 REL = "https://github.com/nizarhamza/p6-mcp/releases/latest"
 GH = "https://github.com/nizarhamza/p6-mcp"
+AUTHOR = "Nizar Hamza"  # as in the JSON-LD and NOTICE; link previews (LinkedIn) read it from <meta name="author">
 FORBIDDEN = ("—", "–", " -- ")  # writing rule of the site: no em dash, en dash or double hyphen
 
 
@@ -412,7 +413,8 @@ def head(meta, extra):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(meta["title"])}</title>
-{d}{rob}{canon}<meta name="color-scheme" content="light dark">
+{d}<meta name="author" content="{AUTHOR}">
+{rob}{canon}<meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/favicon.ico" sizes="any">
