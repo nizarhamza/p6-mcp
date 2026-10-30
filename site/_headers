@@ -12,17 +12,21 @@
   Cache-Control: public, max-age=31536000, immutable
 
 # One day for the other assets. Not a /assets/* rule: Cloudflare joins the headers of every matching rule,
-# so the fonts would get both max-age values.
+# so the fonts would get both max-age values. The pages load site.css, site.js and theme.js with ?v=<content
+# hash>, so a new version reaches visitors at once.
 /assets/img/*
-  Cache-Control: public, max-age=86400
-
-/assets/vendor/*
   Cache-Control: public, max-age=86400
 
 /assets/site.css
   Cache-Control: public, max-age=86400
 
 /assets/site.js
+  Cache-Control: public, max-age=86400
+
+/assets/theme.js
+  Cache-Control: public, max-age=86400
+
+/assets/search.json
   Cache-Control: public, max-age=86400
 
 /assets/og.png

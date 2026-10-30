@@ -10,8 +10,6 @@ binaries, schema documentation or sample data is distributed with this product.
 The Windows builds include third-party open source components (Python, Qt for Python, the MCP
 Python SDK and their dependencies), each under its own license.
 
-The landing site (site/) includes third-party files under their own licenses: the Archivo and
-IBM Plex Mono fonts (SIL Open Font License 1.1, see site/assets/fonts), GSAP and ScrollTrigger
-3.15.0 (GSAP Standard License, https://gsap.com/standard-license, see site/assets/vendor/gsap) and
-photographs from Unsplash (Unsplash License, https://unsplash.com/license), credited on the pages
-that show them.
+The landing site (site/) includes third-party files under their own licenses: the IBM Plex Sans
+and JetBrains Mono fonts (SIL Open Font License 1.1, see site/assets/fonts). Its images are captures
+of this product and of its output on the synthetic demo project.

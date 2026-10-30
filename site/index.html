@@ -6,13 +6,16 @@
 <title>Primavera P6 MCP Server: connect Claude, ChatGPT and Cursor to P6</title>
 <meta name="description" content="Local MCP server for Primavera P6 Professional and XER files: critical path, driving path, DCMA 14-point check, update comparison, what-if, and safe write-back.">
 <link rel="canonical" href="https://mcp-for-primavera-p6.pages.dev/">
-<meta name="theme-color" content="#0A1A33">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="preload" href="/assets/fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/site.css">
-<noscript><style>@media (max-width: 47.99rem) { .menu-toggle { display: none !important; } .masthead .wrap { flex-wrap: wrap !important; } .site-nav { position: static !important; display: flex !important; flex-direction: row !important; flex-wrap: wrap !important; opacity: 1 !important; visibility: visible !important; translate: none !important; padding: 0 !important; background: none !important; box-shadow: none !important; border: 0 !important; } .site-nav a { border: 0 !important; font-size: 0.95rem !important; padding: 0.35rem 0.1rem !important; } .home .hero { padding-top: calc(var(--masthead-h) + 4.5rem) !important; } }</style></noscript>
+<link rel="preload" href="/assets/fonts/ibm-plex-sans-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css?v=f10e5baf62">
+<script src="/assets/theme.js?v=e2090fef3f"></script>
+<noscript><style>@media (max-width: 64rem) { .sidebar { position: static !important; transform: none !important; visibility: visible !important; width: auto !important; height: auto !important; border-right: 0 !important; border-bottom: 1px solid var(--line) !important; } }</style></noscript>
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="MCP for Primavera P6">
 <meta property="og:title" content="Primavera P6 MCP Server: connect Claude, ChatGPT and Cursor to P6">
@@ -31,7 +34,10 @@
       "@type": "SoftwareApplication",
       "@id": "https://mcp-for-primavera-p6.pages.dev/#app",
       "name": "MCP for Primavera P6",
-      "alternateName": ["P6 MCP", "Primavera P6 MCP server"],
+      "alternateName": [
+        "P6 MCP",
+        "Primavera P6 MCP server"
+      ],
       "description": "Local Model Context Protocol (MCP) server that connects Claude, ChatGPT, Cursor, VS Code and other MCP clients to Primavera P6 Professional schedules (standalone SQLite database or XER files): critical path, driving path, total float, DCMA 14-point check, update comparison, CPM what-if, Monte Carlo risk, and edits written back to the P6 database after a dry run, a confirmation and a backup.",
       "applicationCategory": "BusinessApplication",
       "applicationSubCategory": "Project scheduling",
@@ -43,9 +49,17 @@
       "softwareHelp": "https://mcp-for-primavera-p6.pages.dev/guides/",
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
       "isAccessibleForFree": true,
-      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
       "image": "https://mcp-for-primavera-p6.pages.dev/assets/og.png",
-      "author": { "@type": "Person", "name": "Nizar Hamza", "url": "https://github.com/nizarhamza" },
+      "author": {
+        "@type": "Person",
+        "name": "Nizar Hamza",
+        "url": "https://github.com/nizarhamza"
+      },
       "featureList": [
         "Critical path, driving path and float paths of the last P6 schedule run",
         "DCMA 14-point check with the project's own P6 thresholds",
@@ -65,328 +79,701 @@
     {
       "@type": "FAQPage",
       "mainEntity": [
-        { "@type": "Question", "name": "What is an MCP server for Primavera P6?", "acceptedAnswer": { "@type": "Answer", "text": "MCP (Model Context Protocol) is the open standard AI assistants use to call tools. MCP for Primavera P6 gives an assistant 58 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model." } },
-        { "@type": "Question", "name": "Can the AI change my P6 schedule?", "acceptedAnswer": { "@type": "Answer", "text": "Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9." } },
-        { "@type": "Question", "name": "Does my schedule leave my PC?", "acceptedAnswer": { "@type": "Answer", "text": "The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio." } },
-        { "@type": "Question", "name": "Which P6 versions and databases are supported?", "acceptedAnswer": { "@type": "Answer", "text": "P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM and P6 Professional on SQL Server or Oracle are not supported." } },
-        { "@type": "Question", "name": "Does it work with ChatGPT?", "acceptedAnswer": { "@type": "Answer", "text": "Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer." } },
-        { "@type": "Question", "name": "Does it run on macOS or Linux?", "acceptedAnswer": { "@type": "Answer", "text": "No. P6 Professional is a Windows program and the server is built for Windows 10 and 11." } }
+        {
+          "@type": "Question",
+          "name": "What is an MCP server for Primavera P6?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "MCP (Model Context Protocol) is the open standard AI assistants use to call tools. MCP for Primavera P6 gives an assistant 58 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can the AI change my P6 schedule?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does my schedule leave my PC?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Are the dates computed by the AI?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Dates and float come from P6's last schedule run. What-if and risk use the server's CPM engine, and p6_cpm_validate shows how closely it matches P6's own dates on your project before you rely on it."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Which P6 versions and databases are supported?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM and P6 Professional on SQL Server or Oracle are not supported."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I need P6 installed?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Not for XER files: XER-only mode analyses them without P6 or a P6 database."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it work with ChatGPT?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it run on macOS or Linux?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. P6 Professional is a Windows program and the server is built for Windows 10 and 11."
+          }
+        }
       ]
     }
   ]
 }
 </script>
 </head>
-<body class="home">
+<body>
+<svg class="sprite" aria-hidden="true" focusable="false"><symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/></symbol><symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol><symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol><symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol><symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol><symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></symbol><symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></symbol><symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol><symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol><symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></symbol><symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol><symbol id="i-list" viewBox="0 0 24 24"><path d="M3 6h18M3 12h12M3 18h16"/></symbol><symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol><symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol><symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol><symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M9 4h6"/><path d="M9 13v2M15 13v2"/></symbol><symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol><symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></symbol><symbol id="i-file-code" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="m10 13-2 2 2 2M14 13l2 2-2 2"/></symbol><symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol><symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol><symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol><symbol id="i-git-branch" viewBox="0 0 24 24"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol><symbol id="i-package" viewBox="0 0 24 24"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol><symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol><symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></symbol><symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol><symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></symbol><symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v4M17 5h4M5 17v4M3 19h4"/></symbol><symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></symbol><symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol><symbol id="i-git-compare" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></symbol><symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></symbol><symbol id="i-archive" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol><symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol><symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/></symbol><symbol id="i-store" viewBox="0 0 24 24"><path d="M3 9l1.5-5h15L21 9"/><path d="M3 9h18v1.5a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M5 13.5V21h14v-7.5"/></symbol><symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m8.5 12 2.5 2.5 4.5-5"/></symbol><symbol id="i-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></symbol><symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol><symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></symbol><symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></symbol><symbol id="i-dice" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.1"/><circle cx="15.5" cy="8.5" r="1.1"/><circle cx="12" cy="12" r="1.1"/><circle cx="8.5" cy="15.5" r="1.1"/><circle cx="15.5" cy="15.5" r="1.1"/></symbol><symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol><symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></symbol><symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol><symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></symbol><symbol id="i-github" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></symbol><symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol><symbol id="i-clipboard-check" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></symbol><symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></symbol><symbol id="i-play-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m10 8 6 4-6 4z"/></symbol><symbol id="i-badge-check" viewBox="0 0 24 24"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m9 12 2 2 4-4"/></symbol><symbol id="i-test-tube" viewBox="0 0 24 24"><path d="M14.5 2v17.5c0 1.4-1.1 2.5-2.5 2.5s-2.5-1.1-2.5-2.5V2"/><path d="M8.5 2h7M14.5 16h-5"/></symbol><symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol><symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol><symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol><symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5"/><path d="M9 8V2M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z"/></symbol></svg>
 <a class="skip-link" href="#main">Skip to content</a>
-
-<header class="masthead masthead-over on-navy">
-  <div class="wrap">
-    <a class="brand" href="/" aria-label="MCP for Primavera P6, home">
-      <svg viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect x="4" y="56" width="16" height="8" rx="4" fill="#fff"/><path d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z" fill="#fff"/><rect x="58" y="42" width="46" height="12" rx="6" fill="#58A6FF"/><rect x="58" y="66" width="26" height="12" rx="6" fill="#58A6FF"/><path d="M96 64L104 72L96 80L88 72Z" fill="#58A6FF"/></g></svg>
-      <span><span class="brand-name">MCP</span> <span class="brand-tag">for Primavera P6</span></span>
-    </a>
-    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span class="menu-icon" aria-hidden="true"></span><span class="menu-label">Menu</span></button>
-    <nav class="site-nav" id="site-nav" aria-label="Main">
-      <a href="/guides/">Guides</a>
-      <a href="https://github.com/nizarhamza/p6-mcp#tools">Tools</a>
-      <a href="#faq">FAQ</a>
-      <a href="https://github.com/nizarhamza/p6-mcp">GitHub</a>
-      <a class="btn btn-primary btn-small btn-nav" href="https://github.com/nizarhamza/p6-mcp/releases/latest"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>Download</a>
+<header class="topbar">
+  <div class="topbar-inner">
+    <button class="icon-btn menu-btn" type="button" aria-expanded="false" aria-controls="sidebar" aria-label="Open the navigation"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg></button>
+    <a class="brand" href="/" aria-label="MCP for Primavera P6, home"><svg class="brand-mark" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg><span class="brand-word"><span class="brand-name">MCP</span><span class="brand-tag">for Primavera P6</span></span></a>
+    <button class="topbar-search" type="button" data-search-open aria-haspopup="dialog"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><span>Search the docs</span><kbd data-kbd>Ctrl K</kbd></button>
+    <button class="icon-btn search-btn-s" type="button" data-search-open aria-haspopup="dialog" aria-label="Search the docs"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg></button>
+    <nav class="topnav" aria-label="Main">
+      <a href="/guides/" aria-label="Guides"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg><span class="nav-text">Guides</span></a>
+      <a href="https://github.com/nizarhamza/p6-mcp" aria-label="GitHub"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg><span class="nav-text">GitHub</span></a>
+      <button class="icon-btn theme-toggle" type="button" data-theme-toggle aria-label="Switch to the dark theme"><svg class="icon i-moon" aria-hidden="true"><use href="#i-moon"/></svg><svg class="icon i-sun" aria-hidden="true"><use href="#i-sun"/></svg></button>
+      <a class="btn btn-primary btn-s btn-download" href="https://github.com/nizarhamza/p6-mcp/releases/latest"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
     </nav>
   </div>
 </header>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="side-group"><p class="side-title">Get started</p><ul class="side-list"><li><a href="#top" data-spy>Introduction</a></li><li><a href="#answers" data-spy>What it answers</a></li><li><a href="#install" data-spy>Install</a></li></ul></div><div class="side-group"><p class="side-title">How it works</p><ul class="side-list"><li><a href="#architecture" data-spy>Anatomy of a call</a></li><li><a href="#tools" data-spy>Tools</a></li><li><a href="#skills" data-spy>Skills</a></li><li><a href="#writes" data-spy>Safe writes</a></li><li><a href="#repository" data-spy>Repository</a></li></ul></div><div class="side-group"><p class="side-title">See it</p><ul class="side-list"><li><a href="#reports" data-spy>Reports</a></li><li><a href="#app" data-spy>Settings app</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul class="side-list"><li><a href="/guides/">All guides</a></li><li><a href="/guides/dcma-14-point-check-ai/">DCMA 14-point check</a></li><li><a href="/guides/driving-path-p6-claude/">Driving path</a></li><li><a href="/guides/compare-p6-updates-ai/">Comparing two updates</a></li><li><a href="/guides/review-xer-before-submission/">XER before submission</a></li></ul></div><div class="side-group"><p class="side-title">Help</p><ul class="side-list"><li><a href="#compare" data-spy>Compared with XER servers</a></li><li><a href="#faq" data-spy>FAQ</a></li><li><a href="https://github.com/nizarhamza/p6-mcp#readme">README on GitHub<svg class="icon ext" aria-hidden="true"><use href="#i-external"/></svg></a></li><li><a href="https://github.com/nizarhamza/p6-mcp-shop">Skill shop catalog<svg class="icon ext" aria-hidden="true"><use href="#i-external"/></svg></a></li><li><a href="https://github.com/nizarhamza/p6-mcp/releases">Releases<svg class="icon ext" aria-hidden="true"><use href="#i-external"/></svg></a></li></ul></div></nav>
+<main class="content" id="main" tabindex="-1">
+<div class="doc">
+<header class="doc-head">
+  <p class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Introduction</p>
+  <h1 class="page-title" id="top">Ask your Primavera&nbsp;P6 schedule, in plain language</h1>
+  <p class="lede"><strong>MCP for Primavera P6</strong> is a local MCP server for Claude, ChatGPT, Cursor and VS Code. It reads the P6 Professional database or XER files and computes the answer from the schedule: driving path, total float, the DCMA 14-point check, what changed since the last update, what-if and risk. When you allow it, it <strong>edits the schedule too</strong>: previewed, confirmed by you, backed up and logged.</p>
+  <div class="hero-actions">
+    <a class="btn btn-primary btn-stack" href="https://github.com/nizarhamza/p6-mcp/releases/latest"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Download for Windows<small>Version 2.0.0 installer, Windows 10 and 11</small></span></a>
+    <a class="btn btn-secondary" href="#architecture">See how it works</a>
+  </div>
+  <ul class="hero-meta">
+    <li><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Free, Apache 2.0</li>
+    <li><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Runs on your PC, no telemetry</li>
+    <li><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Writes off until you allow them</li>
+    <li><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Not affiliated with Oracle</li>
+  </ul>
 
-<main id="main">
-  <section class="hero on-navy" aria-labelledby="hero-title">
-    <img class="hero-photo" src="/assets/img/photo-1526628953301-3e589a6a8b74-1920.webp" srcset="/assets/img/photo-1526628953301-3e589a6a8b74-1280.webp 1280w, /assets/img/photo-1526628953301-3e589a6a8b74-1920.webp 1920w, /assets/img/photo-1526628953301-3e589a6a8b74-2560.webp 2560w" sizes="100vw" width="1920" height="1280" alt="" fetchpriority="high" decoding="async">
-    <div class="wrap hero-grid">
-      <div class="hero-copy">
-        <h1 id="hero-title">Ask your Primavera&nbsp;P6 schedule, in plain language</h1>
-        <p class="lede">A local <strong>Primavera P6 MCP server</strong> for Claude, ChatGPT, Cursor and VS Code. It reads the P6 Professional database or XER files and computes the answer from the schedule: driving path, total float, the DCMA 14-point check, what changed since the last update, what-if. When you allow it, it <strong>edits the schedule too</strong>: previewed, confirmed by you, backed up and logged.</p>
-        <div class="cta-row">
-          <a class="btn btn-primary btn-download" href="https://github.com/nizarhamza/p6-mcp/releases/latest">
-            <span class="btn-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></span>
-            <span class="btn-text">Download for Windows<small>Version 2.0.0 installer, Windows 10 and 11</small></span>
-          </a>
-          <a class="btn btn-ghost" href="/guides/">Read the guides</a>
-        </div>
-        <p class="cta-note">Free and open source under Apache 2.0. Not affiliated with Oracle.</p>
+  <figure class="diagram hero-fig" data-reveal data-anim aria-labelledby="ov-cap">
+    <div class="ov">
+      <div class="ov-col">
+        <p class="node-label"><svg class="icon" aria-hidden="true"><use href="#i-message"/></svg>MCP clients</p>
+        <ul class="ov-list">
+          <li><svg class="icon" aria-hidden="true"><use href="#i-bot"/></svg><span>Claude Desktop<small>installer or .mcpb</small></span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg><span>Claude Code</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg><span>Cursor, VS Code<small>Copilot agent mode</small></span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg><span>LM Studio, Cline<small>local models</small></span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>ChatGPT<small>Codex or a secure tunnel</small></span></li>
+        </ul>
       </div>
-
-      <figure class="transcript" aria-labelledby="demo-caption">
-        <div class="turn turn-q"><span class="who">You</span><p>What drives MS-1100 - Project completion?</p></div>
-        <div class="turn"><span class="who">Tool</span><p class="call">p6_driving_path(project="DEMO-SS225", target="MS-1100")</p></div>
-        <div class="gantt" style="--dd:25;--mf:319" role="img" aria-labelledby="gantt-desc">
-          <div class="gantt-scale" aria-hidden="true">
-            <span>Driving chain, root first</span>
-            <div class="gantt-months"><span>Oct 2026</span><span></span><span></span><span>Jan 2027</span><span></span><span></span><span>Apr</span><span></span><span></span><span>Jul</span><span></span><span></span><span>Oct</span></div>
-          </div>
-          <ol aria-hidden="true">
-            <li class="gantt-row"><span class="label"><b>PRC-TR-1040</b>Transformers, manufacturing</span><span class="track"><span class="bar" style="--s:25;--d:159;--i:0"></span></span></li>
-            <li class="gantt-row"><span class="label"><b>PRC-TR-1050</b>Factory acceptance test</span><span class="track"><span class="bar" style="--s:186;--d:5;--i:1"></span></span></li>
-            <li class="gantt-row"><span class="label"><b>PRC-TR-1060</b>Shipping and delivery</span><span class="track"><span class="bar" style="--s:193;--d:51;--i:2"></span></span></li>
-            <li class="gantt-row"><span class="label"><b>MS-1040</b>Transformers on site</span><span class="track"><span class="diamond" style="--s:243;--i:3"></span></span></li>
-            <li class="gantt-row"><span class="label"><b>CON-HV-1040</b>TR1 installation, oil filling</span><span class="track"><span class="bar" style="--s:244;--d:28;--i:4"></span></span></li>
-            <li class="gantt-row"><span class="label"><b>CON-HV-1050</b>TR2 installation, oil filling</span><span class="track"><span class="bar" style="--s:258;--d:28;--i:5"></span></span></li>
-            <li class="gantt-row"><span class="label"><b>CON-SEC-1050</b>Transformer firefighting</span><span class="track"><span class="bar" style="--s:287;--d:21;--i:6"></span></span></li>
-            <li class="gantt-row"><span class="label"><b>COM-PRE-1020</b>TR1 tests</span><span class="track"><span class="bar" style="--s:308;--d:7;--i:7"></span></span></li>
-            <li class="gantt-row"><span class="label"><b>MS-1070</b>Ready for energization</span><span class="track"><span class="diamond" style="--s:321;--i:8"></span></span></li>
-            <li class="gantt-row"><span class="label"><b>COM-ENR-1050</b>Trial operation</span><span class="track"><span class="bar" style="--s:335;--d:28;--i:9"></span></span></li>
-            <li class="gantt-row"><span class="label"><b>MS-1100</b>Project completion</span><span class="track"><span class="diamond" style="--s:369;--i:10"></span></span></li>
-          </ol>
-          <ul class="gantt-legend" aria-hidden="true">
-            <li><span class="key-line"></span>Data date 26 Oct 2026</li>
-            <li><span class="key-must"></span>Must finish by 16 Aug 2027</li>
-            <li><span class="key-bar"></span>Total float -36 d on every bar</li>
-          </ul>
-          <p id="gantt-desc" class="visually-hidden">Driving path of MS-1100 - Project completion, root first: PRC-TR-1040 - Power transformers 225/63 kV - manufacturing, in progress from the data date 26 Oct 2026 to 2 Apr 2027; factory acceptance test; shipping and delivery to site until 1 Jun 2027; transformer installation and oil filling in June and July; firefighting system; transformer tests; MS-1070 - Ready for energization on 18 Aug 2027; trial operation in September; MS-1100 - Project completion on 5 Oct 2027, after the must finish by date of 16 Aug 2027. Every activity shown has a total float of minus 36 days.</p>
-        </div>
-        <div class="turn"><span class="who">Answer</span><p class="answer">The finish is driven by PRC-TR-1040 - Power transformers 225/63 kV - manufacturing, still in progress: its remaining work starts at the data date. The chain then runs through delivery, installation, tests and trial operation. Total float is -36 days because the must finish by date (16 Aug 2027) is 36 working days before the forecast finish (5 Oct 2027).</p></div>
-        <figcaption id="demo-caption">Real output of <code>p6_driving_path</code> and <code>p6_float_origin</code> on the public demo project (synthetic data): 11 of the 24 activities on the path shown.</figcaption>
-      </figure>
-    </div>
-  </section>
-
-  <section class="section path" aria-labelledby="path-title">
-    <div class="path-stage">
-      <div class="wrap">
-        <div class="path-grid">
-          <div class="section-head path-copy">
-            <h2 id="path-title">Every update, the same questions</h2>
-            <ol class="path-notes">
-              <li class="is-current">
-                <p class="note-when">Data date 26 Oct 2026</p>
-                <h3>What drives the finish date?</h3>
-                <p><code>p6_driving_path</code> follows the driving predecessors of MS-1100 back to the root cause: transformer manufacturing, still in progress at the data date. <code>p6_float_origin</code> explains the -36 days of float: the must finish by date of 16 Aug 2027.</p>
-              </li>
-              <li>
-                <p class="note-when">Example: June 2027 update</p>
-                <h3>What changed since the last update?</h3>
-                <p><code>p6_compare_projects</code> compares the new update with the previous one, activity by activity and link by link: which dates slipped, why, and how much float was lost. <code>p6_update_integrity</code> lists the changes a reviewer should question.</p>
-              </li>
-              <li>
-                <p class="note-when">Example: August 2027 update</p>
-                <h3>Does the schedule still pass the DCMA check?</h3>
-                <p><code>p6_health_check</code> runs the 14 checks with the thresholds set in P6 for the project, plus the critical path test, CPLI and BEI, and lists the activities behind every failed check.</p>
-              </li>
-              <li>
-                <p class="note-when">Forecast finish 5 Oct 2027</p>
-                <h3>Will the finish date hold?</h3>
-                <p><code>p6_schedule_risk</code> runs a Monte Carlo simulation on the remaining durations: the P50 and P80 finish dates, the chance of finishing on time and how often each activity is critical.</p>
-              </li>
-            </ol>
-            <p class="path-hint"><span class="scroll-only">Scroll to move the data date through the year. </span>Demo project with synthetic data: its update is dated 26 Oct 2026, the June and August 2027 updates are examples.</p>
-          </div>
-          <ol class="path-frames">
-            <li data-start="25" style="--n:0">
-              <figure>
-                <div class="frame"><img src="/assets/img/photo-1769738360873-3ba6cac0b308-1200x760.webp" srcset="/assets/img/photo-1769738360873-3ba6cac0b308-640x405.webp 640w, /assets/img/photo-1769738360873-3ba6cac0b308-960x608.webp 960w, /assets/img/photo-1769738360873-3ba6cac0b308-1400x886.webp 1400w" sizes="(min-width: 64rem) 52vw, 74vw" width="1200" height="760" alt="A planner drawing a flowchart on a whiteboard" loading="lazy" decoding="async"></div>
-                <figcaption><b>p6_driving_path</b>What drives the finish date?<time>Data date 26 Oct 2026</time></figcaption>
-              </figure>
-            </li>
-            <li data-start="244" style="--n:1">
-              <figure>
-                <div class="frame"><img src="/assets/img/photo-1581092446327-9b52bd1570c2-1200x760.webp" srcset="/assets/img/photo-1581092446327-9b52bd1570c2-640x405.webp 640w, /assets/img/photo-1581092446327-9b52bd1570c2-960x608.webp 960w, /assets/img/photo-1581092446327-9b52bd1570c2-1400x886.webp 1400w" sizes="(min-width: 64rem) 52vw, 74vw" width="1200" height="760" alt="Two engineers reviewing drawings at a desk" loading="lazy" decoding="async"></div>
-                <figcaption><b>p6_compare_projects</b>What changed since the last update?<time>Example: June 2027 update</time></figcaption>
-              </figure>
-            </li>
-            <li data-start="308" style="--n:2">
-              <figure>
-                <div class="frame"><img src="/assets/img/photo-1460925895917-afdab827c52f-1200x760.webp" srcset="/assets/img/photo-1460925895917-afdab827c52f-640x405.webp 640w, /assets/img/photo-1460925895917-afdab827c52f-960x608.webp 960w, /assets/img/photo-1460925895917-afdab827c52f-1400x886.webp 1400w" sizes="(min-width: 64rem) 52vw, 74vw" width="1200" height="760" alt="A laptop showing charts on a dashboard" loading="lazy" decoding="async"></div>
-                <figcaption><b>p6_health_check</b>Does the schedule still pass the DCMA check?<time>Example: August 2027 update</time></figcaption>
-              </figure>
-            </li>
-            <li data-start="369" style="--n:3">
-              <figure>
-                <div class="frame"><img src="/assets/img/photo-1546263463-02ec45e884fd-1200x760.webp" srcset="/assets/img/photo-1546263463-02ec45e884fd-640x405.webp 640w, /assets/img/photo-1546263463-02ec45e884fd-960x608.webp 960w, /assets/img/photo-1546263463-02ec45e884fd-1400x886.webp 1400w" sizes="(min-width: 64rem) 52vw, 74vw" width="1200" height="760" alt="A wall calendar with past days crossed out" loading="lazy" decoding="async"></div>
-                <figcaption><b>p6_schedule_risk</b>Will the finish date hold?<time>Forecast finish 5 Oct 2027</time></figcaption>
-              </figure>
-            </li>
-          </ol>
-        </div>
-        <div class="path-timeline" aria-hidden="true">
-          <div class="path-axis" style="--dd:25">
-            <span class="bar" style="--s:25;--d:159"></span>
-            <span class="bar" style="--s:244;--d:28"></span>
-            <span class="bar" style="--s:308;--d:7"></span>
-            <span class="diamond" style="--s:369"></span>
-            <span class="playhead"><span class="playhead-date">26 Oct 2026</span></span>
-          </div>
-          <ol class="axis-months"><li>Oct 2026</li><li>Nov</li><li>Dec</li><li>Jan 2027</li><li>Feb</li><li>Mar</li><li>Apr</li><li>May</li><li>Jun</li><li>Jul</li><li>Aug</li><li>Sep</li><li>Oct</li></ol>
+      <div class="ov-link vwire-s">
+        <span class="ov-proto up">MCP protocol</span>
+        <span aria-hidden="true" class="wire wire-h"></span>
+        <span aria-hidden="true" class="wire wire-h ok rev" style="--wd:.9s"></span>
+        <span class="ov-proto">stdio or local HTTP</span>
+      </div>
+      <div class="ov-core">
+        <svg class="brand-mark" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg>
+        <p class="ov-name">MCP for Primavera P6</p>
+        <p>Local server and Settings app</p>
+        <ul class="ov-stats">
+          <li><b data-count="58">58</b>tools</li>
+          <li><b data-count="15">15</b>core skills</li>
+        </ul>
+        <div class="ov-gates">
+          <span class="pill"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>Policy gate</span>
+          <span class="pill"><svg class="icon" aria-hidden="true"><use href="#i-cpu"/></svg>CPM engine</span>
+          <span class="pill"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>Two-step writes</span>
         </div>
       </div>
-    </div>
-  </section>
-
-  <section class="section" aria-labelledby="ask-title">
-    <div class="wrap ask">
-      <div class="section-head">
-        <h2 id="ask-title">Questions a scheduler asks, answered from the schedule</h2>
-        <p>The server does the scheduling arithmetic on P6's own data; the model only explains the result. Dates and float come from the last schedule run (F9).</p>
-        <p class="more"><a href="https://github.com/nizarhamza/p6-mcp#tools">All 58 tools, with what each one reads or writes</a></p>
+      <div class="ov-link vwire-s">
+        <span class="ov-proto up">read-only snapshots</span>
+        <span aria-hidden="true" class="wire wire-h" style="--wd:.6s"></span>
+        <span aria-hidden="true" class="wire wire-h ok rev" style="--wd:1.2s"></span>
+        <span class="ov-proto">writes on your yes</span>
       </div>
-      <dl class="qa">
-        <div><dt>What drives the finish date?</dt><dd><code>p6_driving_path</code> follows the driving predecessors back to the root cause (a constraint, the data date, an actual date); <code>p6_float_origin</code> says where the total float comes from.</dd></div>
-        <div><dt>Does this schedule pass the DCMA 14-point check?</dt><dd><code>p6_health_check</code> runs the 14 checks with the thresholds set in P6 for the project, the critical path test, CPLI and BEI, and lists the activities behind every failed check. <a href="/guides/dcma-14-point-check-ai/">DCMA guide</a></dd></div>
-        <div><dt>What changed since last month's update?</dt><dd><code>p6_compare_projects</code> compares activity by activity and link by link, with slip causes and float erosion; <code>p6_update_integrity</code> lists the changes a reviewer should question. <a href="/guides/compare-p6-updates-ai/">Comparison guide</a></dd></div>
-        <div><dt>What if procurement takes four more weeks?</dt><dd><code>p6_schedule_whatif</code> applies the change in memory and runs a CPM engine checked against P6's own dates (<code>p6_cpm_validate</code>); nothing is written.</dd></div>
-        <div><dt>How likely is the contract finish?</dt><dd><code>p6_schedule_risk</code> runs a Monte Carlo simulation on the remaining durations: P50 and P80 finish, on-time probability, criticality index.</dd></div>
-        <div><dt>What is coming up in the next two weeks?</dt><dd><code>p6_lookahead</code> lists what starts, finishes or runs in the window, critical work first; <code>p6_milestones</code> sets each milestone against its baseline date.</dd></div>
-        <div><dt>Is this XER ready to submit?</dt><dd><code>p6_inspect_xer</code> runs the import pre-flight checks without importing; XER-only mode then runs every analysis on the file alone. <a href="/guides/review-xer-before-submission/">XER review guide</a></dd></div>
-      </dl>
-    </div>
-  </section>
-
-  <section class="section writes tinted" aria-labelledby="writes-title">
-    <div class="wrap split">
-      <div>
-        <h2 id="writes-title">Edits go through the steps you would take yourself</h2>
-        <p class="prose">XER-only MCP servers stop at reading a file, or rewrite an XER you import again. This one writes to the P6 Professional database: durations, logic, constraints, actual dates, units, UDFs. The server enforces this sequence on every call.</p>
-        <ol class="write-path">
-          <li><div><h3>Off until you turn it on</h3><p>Writes need the Full tool profile and "Allow write operations" in the Settings window.</p></div></li>
-          <li><div><h3>Dry run first</h3><p>The tool returns the plan of every change and a single-use confirmation token. Deletes and restores also need a typed confirmation.</p></div></li>
-          <li><div><h3>Your explicit yes, with P6 closed</h3><p>The write is refused while PM.exe runs, on an untested P6 schema, or if the database changed since the dry run.</p></div></li>
-          <li><div><h3>Backup, then one transaction</h3><p>A copy of the database is taken before the change; a batch of edits succeeds or fails as a whole.</p></div></li>
-          <li><div><h3>Edit log</h3><p>Every confirmed write is recorded with its before and after values. Any backup can be restored.</p></div></li>
-          <li><div><h3>F9 in P6</h3><p>Planned, early and late dates and float are never written: open P6 and schedule.</p></div></li>
-        </ol>
-      </div>
-      <div>
-        <figure class="writes-photo"><img src="/assets/img/photo-1581092795360-fd1ca04f0952-960x600.webp" srcset="/assets/img/photo-1581092795360-fd1ca04f0952-640x400.webp 640w, /assets/img/photo-1581092795360-fd1ca04f0952-960x600.webp 960w, /assets/img/photo-1581092795360-fd1ca04f0952-1280x800.webp 1280w" sizes="(min-width: 60rem) 34rem, 100vw" width="960" height="600" alt="Engineers at a desk with several monitors" loading="lazy" decoding="async"></figure>
-        <aside class="aside-note" aria-labelledby="scope-title">
-          <h3 id="scope-title">What it does not do</h3>
-          <ul>
-            <li>No P6 EPPM, no P6 on SQL Server or Oracle: P6 Professional standalone (SQLite) and XER files only.</li>
-            <li>Windows only, like P6 Professional.</li>
-            <li>No new activities except through an XER import.</li>
-            <li>No cloud service and no telemetry. What the tools return goes to the model your MCP client uses: pick a local model for confidential schedules.</li>
-          </ul>
-        </aside>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" aria-labelledby="compare-title">
-    <div class="wrap">
-      <div class="section-head">
-        <h2 id="compare-title">Compared with XER‑only MCP servers</h2>
-        <p>Several MCP servers parse P6 XER files. This one works on the P6 database itself and reads XER files too.</p>
-      </div>
-      <div class="table-wrap">
-        <table class="compare">
-          <caption>"Varies": some XER servers do it, others do not.</caption>
-          <colgroup><col><col class="ours"><col></colgroup>
-          <thead><tr><th scope="col">Capability</th><th scope="col" class="ours">MCP for Primavera P6</th><th scope="col">Typical XER-file MCP server</th></tr></thead>
-          <tbody>
-            <tr><th scope="row">Reads the P6 Professional database directly</th><td class="yes">Yes, every project, baseline, code, UDF and schedule option</td><td>No: export an XER first</td></tr>
-            <tr><th scope="row">Writes changes back to P6</th><td class="yes">Yes, into the database; then F9 in P6</td><td>No, or edits an XER you import again</td></tr>
-            <tr><th scope="row">Dry run, confirmation token, backup, edit log, restore</th><td class="yes">Yes, enforced by the server</td><td>Not applicable, or varies</td></tr>
-            <tr><th scope="row">Reads, imports and exports XER files</th><td class="yes">Yes, plus an XER-only mode</td><td>Reads them</td></tr>
-            <tr><th scope="row">CPM engine checked against P6's F9 dates</th><td class="yes">Yes, for what-if and Monte Carlo risk</td><td>Varies</td></tr>
-            <tr><th scope="row">DCMA thresholds taken from the P6 project</th><td class="yes">Yes, DCMA defaults when none are set</td><td>Varies</td></tr>
-            <tr><th scope="row">Installation</th><td>Windows installer and Settings window; registers your MCP clients</td><td>Usually a Python package</td></tr>
-            <tr><th scope="row">Runs on macOS or Linux</th><td>No</td><td>Usually yes</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <section class="section tinted" id="install" aria-labelledby="install-title">
-    <div class="wrap split">
-      <div>
-        <h2 id="install-title">Install in five minutes</h2>
-        <ol class="steps">
-          <li>Download <code>P6MCP-Setup-2.0.0.exe</code> from the latest release and check it against <code>SHA256SUMS.txt</code>.</li>
-          <li>Run it: per-user install, no administrator rights. On its last page it offers to register the server with the MCP clients it finds.</li>
-          <li>In the Settings window, pick your P6 database, click <strong>Test connection</strong> (read only), then <strong>Use this database</strong> and <strong>Save</strong>.</li>
-          <li>Restart your MCP client and ask: "List my P6 projects".</li>
-        </ol>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/nizarhamza/p6-mcp/releases/latest">Download for Windows</a>
-          <a class="btn btn-light" href="https://github.com/nizarhamza/p6-mcp#connect-your-mcp-client">Manual setup per client</a>
-        </div>
-      </div>
-      <div>
-        <h3>MCP clients</h3>
-        <ul class="clients">
-          <li>Claude Desktop <span>installer or .mcpb bundle</span></li>
-          <li>Claude Code <span>installer</span></li>
-          <li>Cursor <span>installer</span></li>
-          <li>VS Code (Copilot agent mode) <span>installer</span></li>
-          <li>LM Studio <span>installer</span></li>
-          <li>Cline <span>installer</span></li>
-          <li>ChatGPT <span>Codex or Secure MCP Tunnel, not tested yet</span></li>
-          <li>Any other MCP client <span>stdio or local HTTP</span></li>
+      <div class="ov-col">
+        <p class="node-label"><svg class="icon" aria-hidden="true"><use href="#i-database"/></svg>Your P6 data</p>
+        <ul class="ov-list">
+          <li><svg class="icon" aria-hidden="true"><use href="#i-database"/></svg><span>P6 Professional database<small>standalone, SQLite</small></span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg><span>XER files<small>inspect, import, export, XER-only mode</small></span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg><span>Backups and edit log<small>a backup before each write by default, every write logged</small></span></li>
         </ul>
       </div>
     </div>
-  </section>
+    <figcaption id="ov-cap">Your AI client calls the server's tools; the server reads the schedule on your PC and returns computed results. The model explains them. Nothing goes anywhere else, except what the tools return to the model your client uses.</figcaption>
+  </figure>
+</header>
 
-  <section class="section" aria-labelledby="guides-title">
-    <div class="wrap">
-      <div class="section-head">
-        <h2 id="guides-title">Guides</h2>
-        <p>Step by step, with the prompts to type and real results from the public demo project.</p>
-      </div>
-      <ul class="toc toc-media">
-        <li><a href="/guides/dcma-14-point-check-ai/"><img src="/assets/img/photo-1551288049-bebda4e38f71-800x500.webp" srcset="/assets/img/photo-1551288049-bebda4e38f71-480x300.webp 480w, /assets/img/photo-1551288049-bebda4e38f71-800x500.webp 800w, /assets/img/photo-1551288049-bebda4e38f71-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>DCMA 14-point check with AI</strong><span>Run the check with your P6 thresholds, read each failed check and drill into the activities behind it.</span></a></li>
-        <li><a href="/guides/driving-path-p6-claude/"><img src="/assets/img/photo-1531403009284-440f080d1e12-800x500.webp" srcset="/assets/img/photo-1531403009284-440f080d1e12-480x300.webp 480w, /assets/img/photo-1531403009284-440f080d1e12-800x500.webp 800w, /assets/img/photo-1531403009284-440f080d1e12-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>Driving path in P6 with Claude</strong><span>Trace what drives an activity back to its root cause and where its total float comes from.</span></a></li>
-        <li><a href="/guides/compare-p6-updates-ai/"><img src="/assets/img/photo-1599658880436-c61792e70672-800x500.webp" srcset="/assets/img/photo-1599658880436-c61792e70672-480x300.webp 480w, /assets/img/photo-1599658880436-c61792e70672-800x500.webp 800w, /assets/img/photo-1599658880436-c61792e70672-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>Comparing two P6 updates with AI</strong><span>Slips, slip causes, float erosion and logic changes, then the questions to ask about the update.</span></a></li>
-        <li><a href="/guides/review-xer-before-submission/"><img src="/assets/img/photo-1608303588026-884930af2559-800x500.webp" srcset="/assets/img/photo-1608303588026-884930af2559-480x300.webp 480w, /assets/img/photo-1608303588026-884930af2559-800x500.webp 800w, /assets/img/photo-1608303588026-884930af2559-1200x750.webp 1200w" sizes="(min-width: 75rem) 24vw, (min-width: 40rem) 46vw, 5.5rem" width="800" height="500" alt="" loading="lazy" decoding="async"><strong>AI review of an XER before submission</strong><span>File checks, logic, progress and integrity of an update XER before it goes to the client.</span></a></li>
-      </ul>
-    </div>
-  </section>
+<section class="doc-section" id="answers" aria-labelledby="answers-h">
+  <h2 id="answers-h"><a class="anchor" href="#answers" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>What it answers</h2>
+  <p>The questions a scheduler asks on every update. The server does the scheduling arithmetic on P6's own data; the model only explains the result. Dates and float come from the last schedule run (F9).</p>
+  <ul class="cards">
+    <li data-reveal><a class="card" href="/guides/driving-path-p6-claude/"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-route"/></svg></span><h3>What drives the finish date?</h3><p>The chain of driving predecessors back to its root cause (a constraint, the data date, an actual date), and where the total float comes from.</p><span class="tags"><span class="tag">p6_driving_path</span><span class="tag">p6_float_origin</span></span><span class="card-more">Driving path guide<svg class="icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></span></a></li>
+    <li data-reveal style="--i:1"><a class="card" href="/guides/dcma-14-point-check-ai/"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-clipboard-check"/></svg></span><h3>Does it pass the DCMA 14-point check?</h3><p>The 14 checks with the thresholds set in P6 for the project, the critical path test, CPLI and BEI, and the activities behind every failed check.</p><span class="tags"><span class="tag">p6_health_check</span></span><span class="card-more">DCMA guide<svg class="icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></span></a></li>
+    <li data-reveal><a class="card" href="/guides/compare-p6-updates-ai/"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-git-compare"/></svg></span><h3>What changed since the last update?</h3><p>Activity by activity and link by link: slips and their causes, float erosion, and the changes a reviewer should question.</p><span class="tags"><span class="tag">p6_compare_projects</span><span class="tag">p6_update_integrity</span></span><span class="card-more">Comparison guide<svg class="icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></span></a></li>
+    <li data-reveal style="--i:1"><div class="card"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-cpu"/></svg></span><h3>What if procurement takes four more weeks?</h3><p>The change is applied in memory and run through a CPM engine checked against P6's own dates. Nothing is written.</p><span class="tags"><span class="tag">p6_schedule_whatif</span><span class="tag">p6_cpm_validate</span></span></div></li>
+    <li data-reveal><div class="card"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-dice"/></svg></span><h3>How likely is the contract finish?</h3><p>Monte Carlo on the remaining durations: P50 and P80 finish dates, the chance of finishing on time, how often each activity is critical.</p><span class="tags"><span class="tag">p6_schedule_risk</span></span></div></li>
+    <li data-reveal style="--i:1"><div class="card"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></span><h3>What is coming up in the next weeks?</h3><p>What starts, finishes or runs in the window, critical work first, and each milestone against its baseline date.</p><span class="tags"><span class="tag">p6_lookahead</span><span class="tag">p6_milestones</span></span></div></li>
+    <li data-reveal><div class="card"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg></span><h3>How far along are we?</h3><p>Percent complete by units, physical and duration, earned value and SPI at the data date, and the S-curve against the baseline.</p><span class="tags"><span class="tag">p6_project_summary</span><span class="tag">p6_progress_curve</span></span></div></li>
+    <li data-reveal style="--i:1"><a class="card" href="/guides/review-xer-before-submission/"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></span><h3>Is this XER ready to submit?</h3><p>The import pre-flight checks without importing, then every analysis on the file alone in XER-only mode.</p><span class="tags"><span class="tag">p6_inspect_xer</span></span><span class="card-more">XER review guide<svg class="icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></span></a></li>
+  </ul>
+</section>
 
-  <section class="section faq" id="faq" aria-labelledby="faq-title">
-    <div class="wrap ask">
-      <div class="section-head"><h2 id="faq-title">FAQ</h2><p>Scope, privacy and what the AI is allowed to change.</p></div>
-      <div>
-      <details><summary>What is an MCP server for Primavera P6?</summary><div><p>MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant 58 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model.</p></div></details>
-      <details><summary>Can the AI change my P6 schedule?</summary><div><p>Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9.</p></div></details>
-      <details><summary>Does my schedule leave my PC?</summary><div><p>The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio.</p></div></details>
-      <details><summary>Which P6 versions and databases are supported?</summary><div><p>P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM and P6 Professional on SQL Server or Oracle are not supported.</p></div></details>
-      <details><summary>Does it work with ChatGPT?</summary><div><p>Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented in the <a href="https://github.com/nizarhamza/p6-mcp#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer.</p></div></details>
-      <details><summary>Does it run on macOS or Linux?</summary><div><p>No. P6 Professional is a Windows program and the server is built for Windows 10 and 11.</p></div></details>
+<section class="doc-section" id="architecture" aria-labelledby="architecture-h">
+  <h2 id="architecture-h"><a class="anchor" href="#architecture" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>Anatomy of a call</h2>
+  <p>One question, end to end. The model picks the tool and writes the answer; the server reads the schedule and does the computing, on your PC.</p>
+  <figure class="diagram has-controls" data-reveal data-anim aria-labelledby="seq-cap">
+    <p class="d-title">Sequence</p>
+    <div class="d-controls"><button class="d-btn" type="button" data-seq-toggle aria-label="Pause the animation"><svg class="icon i-pause" aria-hidden="true"><use href="#i-pause"/></svg><svg class="icon i-play" aria-hidden="true"><use href="#i-play"/></svg><span>Pause</span></button></div>
+    <div class="seq" data-seq data-interval="2300">
+      <div class="seq-heads">
+        <div class="seq-head"><svg class="icon" aria-hidden="true"><use href="#i-user"/></svg>You<small>in the chat</small></div>
+        <div class="seq-head"><svg class="icon" aria-hidden="true"><use href="#i-bot"/></svg>AI client<small>Claude, Cursor...</small></div>
+        <div class="seq-head"><svg class="mark-i" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg>MCP for P6<small>local process</small></div>
+        <div class="seq-head"><svg class="icon" aria-hidden="true"><use href="#i-database"/></svg>P6 database<small>SQLite or XER</small></div>
+      </div>
+      <ol class="seq-body">
+        <li class="seq-step s12" data-step><div class="seq-row"><span class="seq-arrow"></span></div><p class="seq-msg"><span><span class="visually-hidden">From you to the AI client: </span>"What drives MS-1100 - Project completion?"</span></p></li>
+        <li class="seq-step s23" data-step><div class="seq-row"><span class="seq-arrow"></span></div><p class="seq-msg"><span><span class="visually-hidden">From the AI client to MCP for P6: </span><code>p6_driving_path(project="DEMO-SS225", target="MS-1100")</code></span></p></li>
+        <li class="seq-step lane3" data-step><div class="seq-row"><span class="seq-self"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>Policy gate</span></div><p class="seq-msg"><span><span class="visually-hidden">Inside MCP for P6: </span>The tool is in the tool profile and only reads, so it runs. A write would need a dry run and your confirmation.</span></p></li>
+        <li class="seq-step s34" data-step><div class="seq-row"><span class="seq-arrow"></span></div><p class="seq-msg"><span><span class="visually-hidden">From MCP for P6 to the P6 database: </span>One read-only snapshot of the last F9: links, dates, calendars, the lag calendar rule</span></p></li>
+        <li class="seq-step lane3" data-step><div class="seq-row"><span class="seq-self"><svg class="icon" aria-hidden="true"><use href="#i-cpu"/></svg>Trace</span></div><p class="seq-msg"><span><span class="visually-hidden">Inside MCP for P6: </span>Follows the driving links back to the root cause: each lag on the lag-rule calendar, each gap in working time of the successor's calendar</span></p></li>
+        <li class="seq-step s23 l ret" data-step><div class="seq-row"><span class="seq-arrow"></span></div><p class="seq-msg"><span><span class="visually-hidden">From MCP for P6 back to the AI client: </span>JSON result: 24 activities on the path, root cause the data date, total float -36 days</span></p></li>
+        <li class="seq-step s12 l ret" data-step><div class="seq-row"><span class="seq-arrow"></span></div><p class="seq-msg"><span><span class="visually-hidden">From the AI client back to you: </span>"The finish is driven by PRC-TR-1040 - Power transformers 225/63 kV - manufacturing, still in progress..."</span></p></li>
+      </ol>
+    </div>
+    <figcaption id="seq-cap">A real call on the public demo project DEMO-SS225 (synthetic data). List tools return pages of <code>{total, offset, rows}</code>, so a long answer never floods the model.</figcaption>
+  </figure>
+</section>
+
+<section class="doc-section" id="tools" aria-labelledby="tools-h">
+  <h2 id="tools-h"><a class="anchor" href="#tools" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>58 tools, grouped by job</h2>
+  <p>37 read-only tools (11 of them in the Basic profile, for small local models), 2 that write a file, 18 write tools that stay off until you allow them, and 1 that changes the app's own settings. Pick a tool to see what it does.</p>
+  <div class="toolmap" data-toolmap>
+<div class="tm-bar">
+<div class="seg" role="group" aria-label="Filter the tools">
+<button type="button" data-filter="all" aria-pressed="true">All <span class="n">58</span></button>
+<button type="button" data-filter="read" aria-pressed="false">Read only <span class="n">37</span></button>
+<button type="button" data-filter="basic" aria-pressed="false">Basic profile <span class="n">11</span></button>
+<button type="button" data-filter="write" aria-pressed="false">Write <span class="n">18</span></button>
+<button type="button" data-filter="file" aria-pressed="false">Writes a file <span class="n">2</span></button>
+<button type="button" data-filter="settings" aria-pressed="false">App settings <span class="n">1</span></button>
+</div><p class="tm-count" aria-live="polite" aria-atomic="true"><b>58</b> tools shown</p></div>
+<div class="tm-grid reveal-chips" data-anim>
+<div class="tm-cat"><h3><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg>Projects and structure<span class="n">7</span></h3><ul class="tm-tools">
+<li><button type="button" class="tm-tool" id="t-p6_list_projects" data-name="p6_list_projects" data-access="read" data-acc="Read" data-basic data-desc="Projects with data date, start, finish, status, baseline and EPS; filter by EPS" aria-pressed="false" style="--k:0">p6_list_projects<span class="visually-hidden">, read, Basic profile</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_list_eps" data-name="p6_list_eps" data-access="read" data-acc="Read" data-desc="EPS tree with depth, path and project counts" aria-pressed="false" style="--k:1">p6_list_eps<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_project_summary" data-name="p6_project_summary" data-access="read" data-acc="Read" data-basic data-desc="One-call overview: dates, activity counts, critical counts, % complete by units, physical and duration, baseline variance and SPI" aria-pressed="false" style="--k:2">p6_project_summary<span class="visually-hidden">, read, Basic profile</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_list_wbs" data-name="p6_list_wbs" data-access="read" data-acc="Read" data-basic data-desc="WBS tree in P6 order with roll-ups: activities, dates, float, units % and baseline planned %" aria-pressed="false" style="--k:3">p6_list_wbs<span class="visually-hidden">, read, Basic profile</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_list_calendars" data-name="p6_list_calendars" data-access="read" data-acc="Read" data-desc="Calendars with work week, hours per day and holiday exceptions" aria-pressed="false" style="--k:4">p6_list_calendars<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_list_udfs" data-name="p6_list_udfs" data-access="read" data-acc="Read" data-desc="User defined fields (UDF columns) with how much each one is used" aria-pressed="false" style="--k:5">p6_list_udfs<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_schedule_options" data-name="p6_schedule_options" data-access="read" data-acc="Read" data-desc="Schedule options of a project, of an XER file, or both side by side" aria-pressed="false" style="--k:6">p6_schedule_options<span class="visually-hidden">, read</span></button></li>
+</ul></div>
+<div class="tm-cat"><h3><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg>Activities and relationships<span class="n">5</span></h3><ul class="tm-tools">
+<li><button type="button" class="tm-tool" id="t-p6_query_activities" data-name="p6_query_activities" data-access="read" data-acc="Read" data-basic data-desc="Search activities by name, Activity ID, WBS, status, total float, dates, activity code or UDF, with chosen columns" aria-pressed="false" style="--k:7">p6_query_activities<span class="visually-hidden">, read, Basic profile</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_get_activity" data-name="p6_get_activity" data-access="read" data-acc="Read" data-basic data-desc="Everything about one activity: dates, durations, float, constraints, logic, resources, codes, UDFs, notebooks" aria-pressed="false" style="--k:8">p6_get_activity<span class="visually-hidden">, read, Basic profile</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_get_relationships" data-name="p6_get_relationships" data-access="read" data-acc="Read" data-basic data-desc="Predecessors and successors of an activity, lags in hours and days" aria-pressed="false" style="--k:9">p6_get_relationships<span class="visually-hidden">, read, Basic profile</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_lookahead" data-name="p6_lookahead" data-access="read" data-acc="Read" data-basic data-desc="What starts, finishes or is in progress in the next weeks, critical work flagged" aria-pressed="false" style="--k:10">p6_lookahead<span class="visually-hidden">, read, Basic profile</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_milestones" data-name="p6_milestones" data-access="read" data-acc="Read" data-desc="Milestones against the baseline: variance in working and calendar days, float, critical" aria-pressed="false" style="--k:11">p6_milestones<span class="visually-hidden">, read</span></button></li>
+</ul></div>
+<div class="tm-cat"><h3><svg class="icon" aria-hidden="true"><use href="#i-route"/></svg>Critical path and float<span class="n">5</span></h3><ul class="tm-tools">
+<li><button type="button" class="tm-tool" id="t-p6_critical_path" data-name="p6_critical_path" data-access="read" data-acc="Read" data-basic data-desc="Critical activities as the project defines them (total float or longest path)" aria-pressed="false" style="--k:12">p6_critical_path<span class="visually-hidden">, read, Basic profile</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_driving_path" data-name="p6_driving_path" data-access="read" data-acc="Read" data-desc="The chain of driving predecessors behind an activity&#x27;s dates, back to its root cause" aria-pressed="false" style="--k:13">p6_driving_path<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_float_paths" data-name="p6_float_paths" data-access="read" data-acc="Read" data-desc="Float paths of the last P6 schedule run, in P6 order" aria-pressed="false" style="--k:14">p6_float_paths<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_float_origin" data-name="p6_float_origin" data-access="read" data-acc="Read" data-desc="Where an activity&#x27;s total float comes from: the successor chain that sets its late dates" aria-pressed="false" style="--k:15">p6_float_origin<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_float_analysis" data-name="p6_float_analysis" data-access="read" data-acc="Read" data-basic data-desc="Total and free float distribution by range" aria-pressed="false" style="--k:16">p6_float_analysis<span class="visually-hidden">, read, Basic profile</span></button></li>
+</ul></div>
+<div class="tm-cat"><h3><svg class="icon" aria-hidden="true"><use href="#i-clipboard-check"/></svg>Schedule quality<span class="n">5</span></h3><ul class="tm-tools">
+<li><button type="button" class="tm-tool" id="t-p6_health_check" data-name="p6_health_check" data-access="read" data-acc="Read" data-basic data-desc="DCMA 14-point check (the project&#x27;s own P6 thresholds when set), critical path test, CPLI, BEI and a weighted score" aria-pressed="false" style="--k:17">p6_health_check<span class="visually-hidden">, read, Basic profile</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_health_check_compare" data-name="p6_health_check_compare" data-access="read" data-acc="Read" data-desc="Health check now against an earlier run: what got better or worse" aria-pressed="false" style="--k:18">p6_health_check_compare<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_dangling" data-name="p6_dangling" data-access="read" data-acc="Read" data-desc="Open starts and open finishes, each with a suggested link to close it" aria-pressed="false" style="--k:19">p6_dangling<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_redundant_links" data-name="p6_redundant_links" data-access="read" data-acc="Read" data-desc="Links that are candidates for removal (transitive, duplicate, to completed work)" aria-pressed="false" style="--k:20">p6_redundant_links<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_progress_check" data-name="p6_progress_check" data-access="read" data-acc="Read" data-desc="Out-of-sequence progress and status inconsistencies" aria-pressed="false" style="--k:21">p6_progress_check<span class="visually-hidden">, read</span></button></li>
+</ul></div>
+<div class="tm-cat"><h3><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg>Progress and reporting<span class="n">4</span></h3><ul class="tm-tools">
+<li><button type="button" class="tm-tool" id="t-p6_progress_curve" data-name="p6_progress_curve" data-access="read" data-acc="Read" data-desc="S-curve by month or week (units or cost) against the baseline, earned value at the data date" aria-pressed="false" style="--k:22">p6_progress_curve<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_group_summary" data-name="p6_group_summary" data-access="read" data-acc="Read" data-desc="Activities, units and dates grouped by status, type, WBS level or activity code" aria-pressed="false" style="--k:23">p6_group_summary<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_resource_summary" data-name="p6_resource_summary" data-access="read" data-acc="Read" data-desc="Units and costs per resource, and activities per status" aria-pressed="false" style="--k:24">p6_resource_summary<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_export_dashboard" data-name="p6_export_dashboard" data-access="file" data-acc="Writes a file" data-desc="Excel project controls dashboard: one A3 page with charts, plus detail sheets" aria-pressed="false" style="--k:25">p6_export_dashboard<span class="visually-hidden">, writes a file</span></button></li>
+</ul></div>
+<div class="tm-cat"><h3><svg class="icon" aria-hidden="true"><use href="#i-git-compare"/></svg>Comparison, what-if and risk<span class="n">5</span></h3><ul class="tm-tools">
+<li><button type="button" class="tm-tool" id="t-p6_compare_projects" data-name="p6_compare_projects" data-access="read" data-acc="Read" data-desc="Two updates or a baseline compared activity by activity and link by link, with slip causes and float erosion" aria-pressed="false" style="--k:26">p6_compare_projects<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_update_integrity" data-name="p6_update_integrity" data-access="read" data-acc="Read" data-desc="Review of an update against the previous one: changes a reviewer should question" aria-pressed="false" style="--k:27">p6_update_integrity<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_cpm_validate" data-name="p6_cpm_validate" data-access="read" data-acc="Read" data-desc="Runs the built-in CPM engine and compares it with P6&#x27;s last F9, activity by activity" aria-pressed="false" style="--k:28">p6_cpm_validate<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_schedule_whatif" data-name="p6_schedule_whatif" data-access="read" data-acc="Read" data-desc="What-if in memory: add or remove links, change durations or constraints, see the new finish" aria-pressed="false" style="--k:29">p6_schedule_whatif<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_schedule_risk" data-name="p6_schedule_risk" data-access="read" data-acc="Read" data-desc="Monte Carlo schedule risk in memory: finish percentiles, on-time probability, criticality index" aria-pressed="false" style="--k:30">p6_schedule_risk<span class="visually-hidden">, read</span></button></li>
+</ul></div>
+<div class="tm-cat"><h3><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>XER files<span class="n">3</span></h3><ul class="tm-tools">
+<li><button type="button" class="tm-tool" id="t-p6_inspect_xer" data-name="p6_inspect_xer" data-access="read" data-acc="Read" data-desc="Reads an XER file without importing it and runs the import pre-flight checks" aria-pressed="false" style="--k:31">p6_inspect_xer<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_import_xer" data-name="p6_import_xer" data-access="write" data-acc="Write" data-desc="Imports an XER as a new project, a baseline or an update of an existing project" aria-pressed="false" style="--k:32">p6_import_xer<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_export_xer" data-name="p6_export_xer" data-access="file" data-acc="Writes a file" data-desc="Exports a project to an XER file, schedule options included" aria-pressed="false" style="--k:33">p6_export_xer<span class="visually-hidden">, writes a file</span></button></li>
+</ul></div>
+<div class="tm-cat"><h3><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg>Edits (off by default)<span class="n">15</span></h3><ul class="tm-tools">
+<li><button type="button" class="tm-tool" id="t-p6_update_activity" data-name="p6_update_activity" data-access="write" data-acc="Write" data-desc="Edits an activity: name, durations, constraint, actual dates, physical % complete" aria-pressed="false" style="--k:34">p6_update_activity<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_update_assignment" data-name="p6_update_assignment" data-access="write" data-acc="Write" data-desc="Sets budgeted, actual or remaining units of one resource assignment" aria-pressed="false" style="--k:35">p6_update_assignment<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_update_assignments" data-name="p6_update_assignments" data-access="write" data-acc="Write" data-desc="Sets the units of many assignments in one all-or-nothing change" aria-pressed="false" style="--k:36">p6_update_assignments<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_update_udf" data-name="p6_update_udf" data-access="write" data-acc="Write" data-desc="Sets or clears one activity UDF value" aria-pressed="false" style="--k:37">p6_update_udf<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_update_udfs" data-name="p6_update_udfs" data-access="write" data-acc="Write" data-desc="Sets or clears many activity UDF values in one change" aria-pressed="false" style="--k:38">p6_update_udfs<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_add_relationship" data-name="p6_add_relationship" data-access="write" data-acc="Write" data-desc="Adds a relationship (FS, SS, FF, SF, with lag)" aria-pressed="false" style="--k:39">p6_add_relationship<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_add_relationships" data-name="p6_add_relationships" data-access="write" data-acc="Write" data-desc="Adds many relationships in one all-or-nothing change" aria-pressed="false" style="--k:40">p6_add_relationships<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_update_relationship" data-name="p6_update_relationship" data-access="write" data-acc="Write" data-desc="Changes the type or lag of a relationship" aria-pressed="false" style="--k:41">p6_update_relationship<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_update_relationships" data-name="p6_update_relationships" data-access="write" data-acc="Write" data-desc="Changes many relationships in one change" aria-pressed="false" style="--k:42">p6_update_relationships<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_delete_relationship" data-name="p6_delete_relationship" data-access="write" data-acc="Write" data-desc="Deletes a relationship" aria-pressed="false" style="--k:43">p6_delete_relationship<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_delete_relationships" data-name="p6_delete_relationships" data-access="write" data-acc="Write" data-desc="Deletes many relationships in one change" aria-pressed="false" style="--k:44">p6_delete_relationships<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_set_schedule_options" data-name="p6_set_schedule_options" data-access="write" data-acc="Write" data-desc="Writes a project&#x27;s schedule options, or copies them from an XER file" aria-pressed="false" style="--k:45">p6_set_schedule_options<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_create_eps" data-name="p6_create_eps" data-access="write" data-acc="Write" data-desc="Creates an EPS node" aria-pressed="false" style="--k:46">p6_create_eps<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_delete_activity" data-name="p6_delete_activity" data-access="write" data-acc="Delete or replace" data-desc="Deletes an activity and everything attached to it, as P6 does" aria-pressed="false" style="--k:47">p6_delete_activity<span class="visually-hidden">, delete or replace</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_delete_project" data-name="p6_delete_project" data-access="write" data-acc="Delete or replace" data-desc="Deletes one or more projects, as P6 does" aria-pressed="false" style="--k:48">p6_delete_project<span class="visually-hidden">, delete or replace</span></button></li>
+</ul></div>
+<div class="tm-cat"><h3><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>Backups, log and diagnostics<span class="n">6</span></h3><ul class="tm-tools">
+<li><button type="button" class="tm-tool" id="t-p6_backup_database" data-name="p6_backup_database" data-access="write" data-acc="Write" data-desc="Takes a backup of the P6 database now" aria-pressed="false" style="--k:49">p6_backup_database<span class="visually-hidden">, write</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_list_backups" data-name="p6_list_backups" data-access="read" data-acc="Read" data-desc="Lists the backups, automatic (before writes) and manual" aria-pressed="false" style="--k:50">p6_list_backups<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_restore_backup" data-name="p6_restore_backup" data-access="write" data-acc="Delete or replace" data-desc="Puts a backup back in place, after a safety backup of the current database" aria-pressed="false" style="--k:51">p6_restore_backup<span class="visually-hidden">, delete or replace</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_edit_log" data-name="p6_edit_log" data-access="read" data-acc="Read" data-desc="Every confirmed write, with its parameters, before and after values" aria-pressed="false" style="--k:52">p6_edit_log<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_diagnose" data-name="p6_diagnose" data-access="read" data-acc="Read" data-basic data-desc="Configuration, database, P6 version and P6 running state at a glance" aria-pressed="false" style="--k:53">p6_diagnose<span class="visually-hidden">, read, Basic profile</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_sql_select" data-name="p6_sql_select" data-access="read" data-acc="Read" data-desc="Read-only SQL on the P6 database, as a last resort" aria-pressed="false" style="--k:54">p6_sql_select<span class="visually-hidden">, read</span></button></li>
+</ul></div>
+<div class="tm-cat"><h3><svg class="icon" aria-hidden="true"><use href="#i-store"/></svg>Skill shop<span class="n">3</span></h3><ul class="tm-tools">
+<li><button type="button" class="tm-tool" id="t-p6_shop_search" data-name="p6_shop_search" data-access="read" data-acc="Read" data-desc="Searches the skill shop (ready-made P6 workflows shared on GitHub)" aria-pressed="false" style="--k:55">p6_shop_search<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_shop_get" data-name="p6_shop_get" data-access="read" data-acc="Read" data-desc="Shows one skill of the shop in full" aria-pressed="false" style="--k:56">p6_shop_get<span class="visually-hidden">, read</span></button></li>
+<li><button type="button" class="tm-tool" id="t-p6_shop_install" data-name="p6_shop_install" data-access="settings" data-acc="App settings" data-desc="Installs or updates a skill from the shop, after your confirmation" aria-pressed="false" style="--k:57">p6_shop_install<span class="visually-hidden">, app settings</span></button></li>
+</ul></div>
+</div>
+<div class="tm-detail" aria-live="polite"><p class="hint">Select a tool to see what it does, what it may change and whether the Basic profile offers it.</p></div>
+<ul class="tm-legend" aria-label="Legend"><li><i></i>Read only</li><li><i class="w"></i>Write (off by default)</li><li><i class="f"></i>Writes a file</li><li><i class="s"></i>App settings</li><li><i class="b">B</i>In the Basic profile</li></ul>
+<p class="tm-more">The <a href="https://github.com/nizarhamza/p6-mcp#tools">tool tables of the README</a> list the same tools, generated from the code.</p>
+</div>
+</section>
+
+<section class="doc-section" id="skills" aria-labelledby="skills-h">
+  <h2 id="skills-h"><a class="anchor" href="#skills" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>Skills: one request, one fixed report</h2>
+  <p>A P6 skill is a <code>SKILL.md</code> that tells the AI which tools to call, in which order, and which field fills each figure of the report. The figures are copied from the schedule, never computed by the model. Clients use a skill when your request matches its description; Claude Code also runs it as <code>/p6-&lt;name&gt;</code>.</p>
+  <figure class="diagram has-controls" data-reveal data-anim aria-labelledby="skr-cap">
+    <p class="d-title">A skill run</p>
+    <div class="d-controls"><button class="d-btn" type="button" data-seq-toggle aria-label="Pause the animation"><svg class="icon i-pause" aria-hidden="true"><use href="#i-pause"/></svg><svg class="icon i-play" aria-hidden="true"><use href="#i-play"/></svg><span>Pause</span></button></div>
+    <div class="skr" data-seq data-interval="1300" data-hold="4">
+      <div class="skr-col">
+        <p class="node-label">You ask</p>
+        <p class="bubble" data-at="0">Weekly update review of DEMO-SS225 against the previous update, 3 weeks look-ahead.</p>
+        <p class="node-label">The client picks the skill</p>
+        <div class="skr-file" data-at="1">
+          <p class="fn"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>p6-weekly-update-review</p>
+          <p>Progress, finish, critical path, slippage, changes, look-ahead and actions. Read only.</p>
+          <ul>
+            <li><code>SKILL.md</code>the calls, in order</li>
+            <li><code>fields.md</code>a field per figure</li>
+            <li><code>report.md</code>the report to fill</li>
+            <li><code>checks.md</code>stop rules</li>
+          </ul>
+        </div>
+      </div>
+      <div class="skr-link vwire-s" aria-hidden="true"><span aria-hidden="true" class="wire wire-h"></span></div>
+      <div class="skr-col">
+        <p class="node-label">Six calls, one page each</p>
+        <ol class="skr-calls">
+          <li class="skr-call" data-at="2"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_project_summary</code></li>
+          <li class="skr-call" data-at="3"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_progress_check</code></li>
+          <li class="skr-call" data-at="4"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_critical_path</code></li>
+          <li class="skr-call" data-at="5"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_lookahead</code></li>
+          <li class="skr-call" data-at="6"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_compare_projects</code></li>
+          <li class="skr-call" data-at="7"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_compare_projects</code></li>
+        </ol>
+      </div>
+      <div class="skr-link vwire-s" aria-hidden="true"><span aria-hidden="true" class="wire wire-h ok" style="--wd:.8s"></span></div>
+      <div class="skr-col">
+        <p class="node-label">The report</p>
+        <div class="skr-report" data-at="8">
+          <p class="rp-title">Weekly update review of DEMO-SS225</p>
+          <p class="sub">Data date 2026-10-26, read only</p>
+          <div class="kpis"><span><b>49.7%</b>units complete</span><span><b>0.85</b>SPI (units)</span><span><b>+36.0</b>wd finish</span></div>
+          <div class="ln h"></div><div class="ln"></div><div class="ln" style="width:82%"></div>
+          <div class="ln h"></div><div class="ln"></div><div class="ln" style="width:64%"></div>
+          <div class="ln h"></div><div class="ln" style="width:90%"></div>
+        </div>
       </div>
     </div>
-  </section>
+    <figcaption id="skr-cap">The weekly update review skill on the demo project: the request, the skill the client picks, its six tool calls and the report. A shortened replay of the exchange is under <a href="#reports">Reports</a>.</figcaption>
+  </figure>
+
+  <h3>The 15 core skills</h3>
+  <p>Installed by the app at its first start and kept up to date from the skill shop. Three of them use write tools and are offered only when writes are allowed.</p>
+  <ul class="skills-grid">
+<li class="skill" data-reveal style="--i:0"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Weekly update review</h4><p>Progress, finish, critical path, slippage, changes since the last update, look-ahead and actions.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_project_summary</span><span class="visually-hidden">, </span><span class="t">p6_progress_check</span><span class="visually-hidden">, </span><span class="t">p6_critical_path</span><span class="visually-hidden">, </span><span class="t">p6_lookahead</span><span class="visually-hidden">, </span><span class="t">p6_compare_projects</span></p></li>
+<li class="skill" data-reveal style="--i:1"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Schedule quality audit</h4><p>DCMA 14 score and grade, engine check, trend, dangling ends, redundant links; fixes proposed only.</p><span class="badge-w">Uses write tools</span><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_cpm_validate</span><span class="visually-hidden">, </span><span class="t">p6_health_check</span><span class="visually-hidden">, </span><span class="t">p6_health_check_compare</span><span class="visually-hidden">, </span><span class="t">p6_dangling</span><span class="visually-hidden">, </span><span class="t">p6_redundant_links</span><span class="visually-hidden">, </span><span class="t">p6_float_analysis</span><span class="visually-hidden">, </span><span class="t">p6_float_origin</span></p></li>
+<li class="skill" data-reveal style="--i:2"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Update import (safe)</h4><p>Inspect an update XER, dry run the import, report what it would change, apply on your yes.</p><span class="badge-w">Uses write tools</span><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_inspect_xer</span><span class="visually-hidden">, </span><span class="t">p6_import_xer</span></p></li>
+<li class="skill" data-reveal style="--i:0"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Delay what-if</h4><p>Delay one activity in memory: what drives it, then the new finish, milestones and critical counts.</p><span class="badge-w">Uses write tools</span><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_get_activity</span><span class="visually-hidden">, </span><span class="t">p6_driving_path</span><span class="visually-hidden">, </span><span class="t">p6_float_origin</span><span class="visually-hidden">, </span><span class="t">p6_schedule_whatif</span></p></li>
+<li class="skill" data-reveal style="--i:1"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Baseline variance</h4><p>Finish variance, slip causes, the activities that moved most, logic changes and earned value.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_project_summary</span><span class="visually-hidden">, </span><span class="t">p6_compare_projects</span><span class="visually-hidden">, </span><span class="t">p6_progress_curve</span></p></li>
+<li class="skill" data-reveal style="--i:2"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Excel dashboard</h4><p>The Excel dashboard, then a short summary of its cards, failed DCMA checks and warnings.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_project_summary</span><span class="visually-hidden">, </span><span class="t">p6_export_dashboard</span></p></li>
+<li class="skill" data-reveal style="--i:0"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>List projects by EPS</h4><p>The projects of the database grouped by EPS, with status, data date and finish.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_list_eps</span><span class="visually-hidden">, </span><span class="t">p6_list_projects</span></p></li>
+<li class="skill" data-reveal style="--i:1"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Look-ahead brief</h4><p>What runs, starts and finishes in the next weeks, critical work first, week by week.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_lookahead</span></p></li>
+<li class="skill" data-reveal style="--i:2"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Progress and earned value</h4><p>Percent complete by every method, earned value and SPI, the S-curve against the baseline.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_project_summary</span><span class="visually-hidden">, </span><span class="t">p6_progress_curve</span><span class="visually-hidden">, </span><span class="t">p6_list_wbs</span></p></li>
+<li class="skill" data-reveal style="--i:0"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Float and near-critical</h4><p>Float statistics and ranges, the float paths of the last F9, near-critical activities.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_float_analysis</span><span class="visually-hidden">, </span><span class="t">p6_float_paths</span><span class="visually-hidden">, </span><span class="t">p6_critical_path</span></p></li>
+<li class="skill" data-reveal style="--i:1"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Milestone tracker</h4><p>Milestones against the baseline, the most late ones and what drives the first of them.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_milestones</span><span class="visually-hidden">, </span><span class="t">p6_driving_path</span></p></li>
+<li class="skill" data-reveal style="--i:2"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Resource and WBS summary</h4><p>Units and costs by resource, then activities and units by WBS and by status.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_resource_summary</span><span class="visually-hidden">, </span><span class="t">p6_group_summary</span></p></li>
+<li class="skill" data-reveal style="--i:0"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Update integrity audit</h4><p>Changes in an update that a reviewer should question, against the previous update.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_update_integrity</span><span class="visually-hidden">, </span><span class="t">p6_compare_projects</span></p></li>
+<li class="skill" data-reveal style="--i:1"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Schedule risk (Monte Carlo)</h4><p>Monte Carlo on the CPM engine: P50 and P80 finish, chance to finish on time, criticality.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_cpm_validate</span><span class="visually-hidden">, </span><span class="t">p6_schedule_risk</span></p></li>
+<li class="skill" data-reveal style="--i:2"><h4><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Logic and date integrity</h4><p>Do the stored dates follow from the logic? The CPM engine against the last F9.</p><p class="chain"><span class="visually-hidden">Tools it calls: </span><span class="t">p6_cpm_validate</span><span class="visually-hidden">, </span><span class="t">p6_schedule_options</span></p></li>
+</ul>
+
+  <h3>The skill shop</h3>
+  <p>A public catalog on GitHub: the core set maintained with the app and the skills other users share. Read a skill before installing it: it is instructions for the AI.</p>
+  <figure class="diagram has-controls" data-reveal data-anim aria-labelledby="shop-cap">
+    <p class="d-title">Life of a shared skill</p>
+    <div class="d-controls"><button class="d-btn" type="button" data-seq-toggle aria-label="Pause the animation"><svg class="icon i-pause" aria-hidden="true"><use href="#i-pause"/></svg><svg class="icon i-play" aria-hidden="true"><use href="#i-play"/></svg><span>Pause</span></button></div>
+    <ol class="flow" style="--n:5" data-seq data-interval="1500" data-hold="2">
+      <li class="flow-step" data-step><span class="flow-dot"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg></span><p class="fs-title">Write or copy a skill</p><p>Settings, Skills: New, or Copy to my skills</p></li>
+      <li class="flow-step" data-step><span class="flow-dot"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg></span><p class="fs-title">Share on GitHub</p><p>The app copies it; you paste it in the share form</p></li>
+      <li class="flow-step" data-step><span class="flow-dot"><svg class="icon" aria-hidden="true"><use href="#i-badge-check"/></svg></span><p class="fs-title">Review</p><p>The maintainer reads it and approves</p></li>
+      <li class="flow-step" data-step><span class="flow-dot"><svg class="icon" aria-hidden="true"><use href="#i-play-circle"/></svg></span><p class="fs-title">Published</p><p>A GitHub Action checks it and adds it to the catalog</p></li>
+      <li class="flow-step" data-step><span class="flow-dot"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg></span><p class="fs-title">Installed anywhere</p><p>Skill shop page, or ask your AI (after your confirmation)</p></li>
+    </ol>
+    <p class="flow-loop">newer versions reach every app through automatic updates; skills you edited are left alone</p>
+    <figcaption id="shop-cap">Sharing needs a free GitHub account; without one, export the skill to a zip file. Reading the catalog needs no account.</figcaption>
+  </figure>
+</section>
+
+<section class="doc-section" id="reports" aria-labelledby="reports-h">
+  <h2 id="reports-h"><a class="anchor" href="#reports" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>Reports you can check</h2>
+  <p>Three outputs of the public demo project DEMO-SS225 (a 225/63 kV substation with synthetic data, data date 26 Oct 2026), from real runs of the server; the chat replay is shortened.</p>
+
+  <h3>Weekly update review, in the chat</h3>
+  <p>A replay of a real run of the weekly update review skill: the six calls, then the report filled from their fields.</p>
+  <figure data-reveal aria-labelledby="chat-cap">
+    <div class="chat" data-chat>
+      <div class="chat-bar"><span class="dot" aria-hidden="true"></span><span class="ttl">AI client</span><span>p6mcp connected</span><button class="d-btn" type="button" data-chat-toggle aria-label="Play the replay"><svg class="icon i-pause" aria-hidden="true"><use href="#i-pause"/></svg><svg class="icon i-play" aria-hidden="true"><use href="#i-play"/></svg><span>Pause</span></button></div>
+      <div class="chat-body" tabindex="0" role="region" aria-label="Chat replay">
+        <p class="msg msg-user">Can you run the weekly update review of DEMO-SS225 and compare it with the previous update DEMO-SS225_PREV, with a 3 week critical look-ahead?</p>
+        <p class="msg msg-skill"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Using the skill p6-weekly-update-review</p>
+        <div class="typing" aria-hidden="true"><i></i><i></i><i></i></div>
+        <ol class="msg calls" aria-label="Tool calls">
+          <li class="call"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_project_summary</code><span>Units 49.7% complete, baseline planned 54.1%, SPI 0.85; finish 2027-10-05, 36.0 working days after the must finish date.</span></li>
+          <li class="call"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_progress_check</code><span>0 out of sequence links; the 7 status checks all at 0; retained logic.</span></li>
+          <li class="call"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_critical_path</code><span>40 critical open activities, 37 with negative float; first page of 15.</span></li>
+          <li class="call"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_lookahead</code><span>26 Oct to 16 Nov 2026: 2 critical activities, both in progress.</span></li>
+          <li class="call"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_compare_projects</code><span>Against DEMO-SS225_BL: 199 activities finish later, 10 earlier.</span></li>
+          <li class="call"><span class="st"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><code>p6_compare_projects</code><span>Against DEMO-SS225_PREV: 1 activity removed, 5 no longer critical.</span></li>
+        </ol>
+        <div class="typing" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="msg msg-report">
+          <p class="r-h3">Weekly update review of DEMO-SS225</p>
+          <p>Data date 2026-10-26, last schedule run (F9) 2026-10-26 17:30. Read only: nothing was written to the database.</p>
+          <p class="r-h4">Progress</p>
+          <ul>
+            <li>Units % complete (actual / at completion units, labor and nonlabor): 49.7%.</li>
+            <li>Physical % complete (weighted by budget units): 45.7%; duration % complete: 66.4%; activities completed: 65.0%.</li>
+            <li>Baseline planned units % at the data date: 54.1%; SPI (units, earned / baseline planned): 0.85.</li>
+          </ul>
+          <p class="r-h4">Finish</p>
+          <ul>
+            <li>Scheduled finish 2027-10-05, must finish by 2027-08-16: 50.0 calendar days, 36.0 working days of the project calendar (positive = later).</li>
+            <li>Baseline used: DEMO-SS225_BL. Scheduled finish against the baseline's: 50.0 calendar days, 36.0 working days.</li>
+          </ul>
+          <p class="r-h4">Critical path</p>
+          <p>Critical open activities: 40; open activities with negative float: 37.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th scope="col">Activity</th><th scope="col">Early finish</th><th scope="col" class="num">Remaining (d)</th><th scope="col" class="num">Total float (d)</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">PRC-TR-1040 - Power transformers 225/63 kV - manufacturing</th><td>2027-04-02</td><td class="num">106.0</td><td class="num">-36.0</td></tr>
+              <tr><th scope="row">PRC-TR-1050 - Power transformers 225/63 kV - factory acceptance test</th><td>2027-04-09</td><td class="num">5.0</td><td class="num">-36.0</td></tr>
+              <tr><th scope="row">PRC-TR-1060 - Power transformers 225/63 kV - shipping and delivery to site</th><td>2027-06-01</td><td class="num">35.0</td><td class="num">-36.0</td></tr>
+              <tr><th scope="row">MS-1040 - Power transformers delivered to site</th><td>2027-06-01</td><td class="num">0.0</td><td class="num">-36.0</td></tr>
+            </tbody>
+          </table></div>
+          <p>Showing the first 4 of 40 critical activities.</p>
+          <p class="r-h4">Slipped against the baseline</p>
+          <p>Matched activities finishing later: 199; earlier: 10. Causes: late start 144, late start and longer duration 45, longer duration 10, on time 5, earlier 10.</p>
+          <p class="r-h4">Since the previous update</p>
+          <p>Compared with DEMO-SS225_PREV (data date 2026-10-19): open activities with less total float 1; became critical 0; no longer critical 5. CON-SITE-1050 - Temporary site facilities was removed; MS-1100 - Project completion finishes 10.0 working days earlier, its float from -56.0 to -36.0 days.</p>
+          <p class="r-h4">Critical look-ahead (3 weeks)</p>
+          <ul>
+            <li>PRC-GIS225-1040 - 225 kV GIS - manufacturing: in progress, total float -5.0 d.</li>
+            <li>PRC-TR-1040 - Power transformers 225/63 kV - manufacturing: in progress, total float -36.0 d.</li>
+          </ul>
+          <p class="r-h4">Actions</p>
+          <ul>
+            <li>Open activities with negative float: 37. Recover them: the schedule misses the must finish date or a constraint.</li>
+            <li>Activities whose physical % and units % differ: 4. Check them.</li>
+            <li>Critical activities in the look-ahead window: 2. Follow them up.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <figcaption id="chat-cap">Real tool results and report text from the demo project; shortened here (the skill shows 15 rows per table, plus the tables of slips, progress checks and changes). Any MCP client shows the same exchange in its own chat.</figcaption>
+  </figure>
+
+  <h3>Excel dashboard</h3>
+  <p><code>p6_export_dashboard</code> writes a finished workbook from the last F9: values and native Excel charts, no formulas. One A3 page, then three detail sheets. Select an image to see it at full size.</p>
+  <figure data-reveal aria-labelledby="xl-cap">
+    <div class="window" data-tabs>
+      <div class="window-bar"><svg class="app-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="3" fill="#107c41"/><path d="M8 8l8 8M16 8l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg><span class="ttl">DEMO-SS225-dashboard.xlsx</span><span class="win-btns" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="cls"></i></span></div>
+      <div class="tab-panels">
+        <div class="tab-panel" id="xl-p1" role="tabpanel" aria-labelledby="xl-t1">
+          <button class="zoom shot" type="button" data-zoom="/assets/img/dashboard-2600.webp"><img src="/assets/img/dashboard-1300.webp" srcset="/assets/img/dashboard-1300.webp 1300w, /assets/img/dashboard-2600.webp 2600w" sizes="(min-width: 64rem) 48rem, 100vw" width="1300" height="878" alt="Dashboard sheet: 7 cards (progress 49.67%, 40 critical, 72 delayed, schedule variance -15.5%, forecast completion 05-Oct-27, 235 d remaining, 8 milestones late), the S-curve, finish variance by WBS, WBS and level 2 progress, milestones and the critical and delayed activities" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button>
+        </div>
+        <div class="tab-panel" id="xl-p2" role="tabpanel" aria-labelledby="xl-t2" hidden>
+          <button class="zoom shot" type="button" data-zoom="/assets/img/sheet-overview-2000.webp"><img src="/assets/img/sheet-overview-1000.webp" srcset="/assets/img/sheet-overview-1000.webp 1000w, /assets/img/sheet-overview-2000.webp 2000w" sizes="(min-width: 64rem) 48rem, 100vw" width="1000" height="296" alt="Schedule Overview sheet folded to WBS level 2: baseline, current and actual dates, percent complete and labor units per WBS band" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button>
+        </div>
+        <div class="tab-panel" id="xl-p3" role="tabpanel" aria-labelledby="xl-t3" hidden>
+          <button class="zoom shot" type="button" data-zoom="/assets/img/sheet-critical-2000.webp"><img src="/assets/img/sheet-critical-1000.webp" srcset="/assets/img/sheet-critical-1000.webp 1000w, /assets/img/sheet-critical-2000.webp 2000w" sizes="(min-width: 64rem) 48rem, 100vw" width="1000" height="526" alt="Critical Path sheet: the float paths 1 to 5 of the last F9, one block per path" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button>
+        </div>
+        <div class="tab-panel" id="xl-p4" role="tabpanel" aria-labelledby="xl-t4" hidden>
+          <button class="zoom shot" type="button" data-zoom="/assets/img/sheet-reports-2000.webp"><img src="/assets/img/sheet-reports-1000.webp" srcset="/assets/img/sheet-reports-1000.webp 1000w, /assets/img/sheet-reports-2000.webp 2000w" sizes="(min-width: 64rem) 48rem, 100vw" width="1000" height="530" alt="Reports sheet: the DCMA 14 table with pass and fail results, counts, values and thresholds" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button>
+        </div>
+      </div>
+      <div class="sheet-tabs" role="tablist" aria-label="Sheets">
+        <button type="button" role="tab" id="xl-t1" aria-controls="xl-p1" aria-selected="true">Dashboard</button>
+        <button type="button" role="tab" id="xl-t2" aria-controls="xl-p2" aria-selected="false" tabindex="-1">Schedule Overview</button>
+        <button type="button" role="tab" id="xl-t3" aria-controls="xl-p3" aria-selected="false" tabindex="-1">Critical Path</button>
+        <button type="button" role="tab" id="xl-t4" aria-controls="xl-p4" aria-selected="false" tabindex="-1">Reports</button>
+      </div>
+    </div>
+    <figcaption id="xl-cap">Exported from DEMO-SS225 with <code>company="Demo Contractor"</code> and the default colors. On the demo, 7 DCMA checks fail: lags, finish to start links, high float, negative float, missed tasks, CPLI and BEI.</figcaption>
+  </figure>
+  <ul class="kpi-row" data-reveal aria-label="Dashboard cards as the export returns them">
+    <li><b>49.67%</b>Overall progress, 54.06% planned</li>
+    <li><b>40</b>Critical activities</li>
+    <li><b>72</b>Delayed activities, 3 at risk</li>
+    <li><b>-15.5%</b>Schedule variance, SPI 0.85</li>
+    <li><b>05-Oct-27</b>Forecast completion, +36.0 wd</li>
+    <li><b>235 d</b>Remaining duration</li>
+    <li><b>8 of 8</b>Open milestones late</li>
+  </ul>
+
+  <h3>Driving path and what-if, recorded</h3>
+  <p>A 30 second replay of a real run: the assistant traces the driving path of MS-1100 - Project completion, then tests a change on PRC-TR-1040 - Power transformers 225/63 kV - manufacturing.</p>
+  <figure data-reveal aria-labelledby="gif-cap">
+    <div class="window player" data-player>
+      <div class="window-bar"><svg class="app-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor" opacity=".25"/><path d="M10 8l6 4-6 4z" fill="currentColor"/></svg><span class="ttl">Recorded run on DEMO-SS225</span><span class="win-btns" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="cls"></i></span></div>
+      <div class="shot player-stage">
+        <img src="/assets/img/demo-poster.webp" data-anim-src="/assets/img/demo.gif" width="1280" height="720" alt="Replay of a run on the demo project: the assistant traces the driving path of MS-1100 - Project completion, then runs a what-if on PRC-TR-1040 - Power transformers 225/63 kV - manufacturing" loading="lazy" decoding="async">
+        <button class="player-btn" type="button"><svg class="icon i-play" aria-hidden="true"><use href="#i-play"/></svg><svg class="icon i-pause" aria-hidden="true"><use href="#i-pause"/></svg><span>Play the recording</span></button>
+      </div>
+    </div>
+    <figcaption id="gif-cap">Rendered from the real tool results of the installed server on the demo database (30 s, 0.5 MB, loads when you press play).</figcaption>
+  </figure>
+  <details class="transcript">
+    <summary>Transcript of the recording</summary>
+    <div>
+      <p><strong>You:</strong> What drives MS-1100 - Project completion in DEMO-SS225?</p>
+      <p><strong>Tools:</strong> <code>p6_driving_path(project="DEMO-SS225", target="MS-1100")</code> returns 24 activities, root PRC-TR-1040 - Power transformers 225/63 kV - manufacturing at the data date. <code>p6_float_origin(project="DEMO-SS225", task_code="MS-1100")</code>: the float comes from the project must finish by date, 16 Aug 2027.</p>
+      <p><strong>Assistant:</strong> MS-1100 - Project completion is forecast for 5 Oct 2027. Its driving path has 24 activities and starts at the data date with PRC-TR-1040 - Power transformers 225/63 kV - manufacturing, still in progress, then the factory test, delivery, installation of TR1 and TR2, tests and energization. Total float is -36 days: the project must finish by 16 Aug 2027.</p>
+      <p><strong>You:</strong> What if PRC-TR-1040 - Power transformers 225/63 kV - manufacturing finishes 15 working days earlier?</p>
+      <p><strong>Tool:</strong> <code>p6_schedule_whatif(project="DEMO-SS225", edits=[{"op": "duration", "task_code": "PRC-TR-1040", "add_remaining_days": -15}])</code>, in memory: finish 14 Sep 2027, 15 working days earlier.</p>
+      <p><strong>Assistant:</strong> Nothing is written: in memory, the finish moves from 5 Oct to 14 Sep 2027, 15 working days (21 calendar days) earlier. Total float on the path improves from -36 to -21 days, and 27 activities move. The engine matches P6's last F9 on 100 % of the open activities.</p>
+    </div>
+  </details>
+</section>
+
+<section class="doc-section" id="app" aria-labelledby="app-h">
+  <h2 id="app-h"><a class="anchor" href="#app" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>The Settings app</h2>
+  <p>Installed with the server, it holds every setting the server reads: the database, the MCP clients, the tool profile and the write switch, the instructions every client receives, the skills and the shop. It follows the Windows light or dark mode, like these captures follow this page's theme.</p>
+  <div class="gallery" data-tabs data-reveal><div class="tabs-list" role="tablist" aria-label="Settings pages"><button class="tab" type="button" role="tab" id="st-t1" aria-controls="st-p1" aria-selected="true"><svg class="icon" aria-hidden="true"><use href="#i-database"/></svg>Database</button><button class="tab" type="button" role="tab" id="st-t2" aria-controls="st-p2" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-plug"/></svg>MCP clients</button><button class="tab" type="button" role="tab" id="st-t3" aria-controls="st-p3" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>Tools and safety</button><button class="tab" type="button" role="tab" id="st-t4" aria-controls="st-p4" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-message"/></svg>Instructions</button><button class="tab" type="button" role="tab" id="st-t5" aria-controls="st-p5" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Skills</button><button class="tab" type="button" role="tab" id="st-t6" aria-controls="st-p6" aria-selected="false" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-store"/></svg>Skill shop</button></div><div class="tab-panels"><div class="tab-panel" role="tabpanel" id="st-p1" aria-labelledby="st-t1"><figure><div class="window"><div class="window-bar"><svg class="app-ico" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg><span class="ttl">MCP for Primavera P6 Settings</span><span class="win-btns" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="cls"></i></span></div><button class="zoom shot" type="button" data-zoom="/assets/img/settings-database-2360.webp" data-zoom-dark="/assets/img/settings-database-dark-2360.webp"><img class="only-light" src="/assets/img/settings-database-1180.webp" srcset="/assets/img/settings-database-1180.webp 1180w, /assets/img/settings-database-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, Database page" loading="lazy" decoding="async"><img class="only-dark" src="/assets/img/settings-database-dark-1180.webp" srcset="/assets/img/settings-database-dark-1180.webp 1180w, /assets/img/settings-database-dark-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, Database page, dark mode" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button></div><figcaption><strong>Database.</strong> Pick the P6 database (suggestions come from P6&#x27;s own connection list). Test connection reads it read only: P6 version, schema, projects. Or switch to XER files only.</figcaption></figure></div><div class="tab-panel" role="tabpanel" id="st-p2" aria-labelledby="st-t2" hidden><figure><div class="window"><div class="window-bar"><svg class="app-ico" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg><span class="ttl">MCP for Primavera P6 Settings</span><span class="win-btns" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="cls"></i></span></div><button class="zoom shot" type="button" data-zoom="/assets/img/settings-clients-2360.webp" data-zoom-dark="/assets/img/settings-clients-dark-2360.webp"><img class="only-light" src="/assets/img/settings-clients-1180.webp" srcset="/assets/img/settings-clients-1180.webp 1180w, /assets/img/settings-clients-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, MCP clients page" loading="lazy" decoding="async"><img class="only-dark" src="/assets/img/settings-clients-dark-1180.webp" srcset="/assets/img/settings-clients-dark-1180.webp 1180w, /assets/img/settings-clients-dark-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, MCP clients page, dark mode" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button></div><figcaption><strong>MCP clients.</strong> Finds Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline, and adds, repairs or removes only the p6mcp entry, after a backup of the file. Install skills writes the P6 skills to the client&#x27;s skills folder.</figcaption></figure></div><div class="tab-panel" role="tabpanel" id="st-p3" aria-labelledby="st-t3" hidden><figure><div class="window"><div class="window-bar"><svg class="app-ico" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg><span class="ttl">MCP for Primavera P6 Settings</span><span class="win-btns" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="cls"></i></span></div><button class="zoom shot" type="button" data-zoom="/assets/img/settings-tools-2360.webp" data-zoom-dark="/assets/img/settings-tools-dark-2360.webp"><img class="only-light" src="/assets/img/settings-tools-1180.webp" srcset="/assets/img/settings-tools-1180.webp 1180w, /assets/img/settings-tools-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, Tools and safety page" loading="lazy" decoding="async"><img class="only-dark" src="/assets/img/settings-tools-dark-1180.webp" srcset="/assets/img/settings-tools-dark-1180.webp 1180w, /assets/img/settings-tools-dark-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, Tools and safety page, dark mode" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button></div><figcaption><strong>Tools and safety.</strong> Basic (11 read-only tools) or Full (58). Writes stay off until you allow them; a backup before every write, writes refused while P6 runs, the skill shop on or off.</figcaption></figure></div><div class="tab-panel" role="tabpanel" id="st-p4" aria-labelledby="st-t4" hidden><figure><div class="window"><div class="window-bar"><svg class="app-ico" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg><span class="ttl">MCP for Primavera P6 Settings</span><span class="win-btns" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="cls"></i></span></div><button class="zoom shot" type="button" data-zoom="/assets/img/settings-instructions-2360.webp" data-zoom-dark="/assets/img/settings-instructions-dark-2360.webp"><img class="only-light" src="/assets/img/settings-instructions-1180.webp" srcset="/assets/img/settings-instructions-1180.webp 1180w, /assets/img/settings-instructions-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, Instructions page" loading="lazy" decoding="async"><img class="only-dark" src="/assets/img/settings-instructions-dark-1180.webp" srcset="/assets/img/settings-instructions-dark-1180.webp 1180w, /assets/img/settings-instructions-dark-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, Instructions page, dark mode" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button></div><figcaption><strong>Instructions.</strong> What every MCP client receives when it connects. Turn built-in lines off or add your own rules, such as how to write activities.</figcaption></figure></div><div class="tab-panel" role="tabpanel" id="st-p5" aria-labelledby="st-t5" hidden><figure><div class="window"><div class="window-bar"><svg class="app-ico" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg><span class="ttl">MCP for Primavera P6 Settings</span><span class="win-btns" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="cls"></i></span></div><button class="zoom shot" type="button" data-zoom="/assets/img/settings-skills-2360.webp" data-zoom-dark="/assets/img/settings-skills-dark-2360.webp"><img class="only-light" src="/assets/img/settings-skills-1180.webp" srcset="/assets/img/settings-skills-1180.webp 1180w, /assets/img/settings-skills-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, Skills page" loading="lazy" decoding="async"><img class="only-dark" src="/assets/img/settings-skills-dark-1180.webp" srcset="/assets/img/settings-skills-dark-1180.webp 1180w, /assets/img/settings-skills-dark-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, Skills page, dark mode" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button></div><figcaption><strong>Skills.</strong> The installed skills, whether the current tool settings offer them and where they come from. Edit one, or write your own.</figcaption></figure></div><div class="tab-panel" role="tabpanel" id="st-p6" aria-labelledby="st-t6" hidden><figure><div class="window"><div class="window-bar"><svg class="app-ico" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg><span class="ttl">MCP for Primavera P6 Settings</span><span class="win-btns" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="cls"></i></span></div><button class="zoom shot" type="button" data-zoom="/assets/img/settings-shop-2360.webp" data-zoom-dark="/assets/img/settings-shop-dark-2360.webp"><img class="only-light" src="/assets/img/settings-shop-1180.webp" srcset="/assets/img/settings-shop-1180.webp 1180w, /assets/img/settings-shop-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, Skill shop page" loading="lazy" decoding="async"><img class="only-dark" src="/assets/img/settings-shop-dark-1180.webp" srcset="/assets/img/settings-shop-dark-1180.webp 1180w, /assets/img/settings-shop-dark-2360.webp 2360w" sizes="(min-width: 64rem) 48rem, 100vw" width="1180" height="900" alt="Settings window, Skill shop page, dark mode" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button></div><figcaption><strong>Skill shop.</strong> The public catalog on GitHub: read a skill in full before installing it. Share yours from the Skills page.</figcaption></figure></div></div></div>
+</section>
+
+<section class="doc-section" id="writes" aria-labelledby="writes-h">
+  <h2 id="writes-h"><a class="anchor" href="#writes" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>Safe writes</h2>
+  <p>XER-file servers read a file, and some edit an XER that you import again. This one writes to the P6 Professional database itself: durations, logic, constraints, actual dates, units, UDFs. The server enforces this sequence on every call, whatever the client.</p>
+  <figure class="diagram has-controls" data-reveal data-anim aria-labelledby="wr-cap">
+    <p class="d-title">Every write</p>
+    <div class="d-controls"><button class="d-btn" type="button" data-seq-toggle aria-label="Pause the animation"><svg class="icon i-pause" aria-hidden="true"><use href="#i-pause"/></svg><svg class="icon i-play" aria-hidden="true"><use href="#i-play"/></svg><span>Pause</span></button></div>
+    <ol class="flow" style="--n:6" data-seq data-interval="1400" data-hold="2">
+      <li class="flow-step" data-step><span class="flow-dot"><svg class="icon" aria-hidden="true"><use href="#i-power"/></svg></span><p class="fs-title">Off by default</p><p>Full profile and Allow write operations, in Settings</p></li>
+      <li class="flow-step" data-step><span class="flow-dot"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg></span><p class="fs-title">Dry run</p><p>The plan of every change and a single-use token</p></li>
+      <li class="flow-step" data-step><span class="flow-dot"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span><p class="fs-title">Your explicit yes</p><p>The same call with the token, P6 closed</p></li>
+      <li class="flow-step" data-step><span class="flow-dot"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg></span><p class="fs-title">Backup</p><p>A copy of the database first (on by default)</p></li>
+      <li class="flow-step" data-step><span class="flow-dot"><svg class="icon" aria-hidden="true"><use href="#i-database"/></svg></span><p class="fs-title">One transaction</p><p>A batch succeeds or fails as a whole</p></li>
+      <li class="flow-step" data-step><span class="flow-dot"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg></span><p class="fs-title">Edit log</p><p>Before and after values; any backup can be restored</p></li>
+    </ol>
+    <div class="refusals"><svg class="icon" aria-hidden="true"><use href="#i-x-circle"/></svg><div><strong>Refused, with nothing written, when:</strong><ul><li>P6 (PM.exe) is running (on by default)</li><li>the P6 schema is untested and not trusted</li><li>the database changed since the dry run</li><li>a delete or restore lacks its typed confirmation</li></ul></div></div>
+    <figcaption id="wr-cap">These rules live in the server, not in the Settings window: every client gets the same two-step flow.</figcaption>
+  </figure>
+  <div class="callout" data-reveal><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg><div><strong>Then press F9 in P6</strong><p>Planned, early and late dates and float are never written: the server updates the audit fields the way P6 does, and P6 computes the dates when you schedule.</p></div></div>
+</section>
+
+<section class="doc-section" id="repository" aria-labelledby="repository-h">
+  <h2 id="repository-h"><a class="anchor" href="#repository" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>What is in the repository</h2>
+  <p>Two public repositories: the server and app, and the skill catalog. Everything you install is built from them by GitHub Actions.</p>
+  <figure class="diagram" data-reveal data-anim aria-labelledby="repo-cap">
+    <div class="repo">
+      <div class="repo-card">
+        <p class="repo-name"><svg class="icon" aria-hidden="true"><use href="#i-git-branch"/></svg><a href="https://github.com/nizarhamza/p6-mcp">nizarhamza/p6-mcp</a></p>
+        <p>The server, the Settings app, the installer and this site. Python 3.10 or later (the installer bundles 3.13), Apache 2.0.</p>
+        <ul class="tree">
+          <li class="hot"><svg class="icon" aria-hidden="true"><use href="#i-file-code"/></svg><code>p6mcp/server.py</code><span>The 58 tools, the CPM engine, XER read and write</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg><code>policy.py, confirm.py</code><span>Tool profiles, the gate and the two-step writes</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-zap"/></svg><code>http_server.py</code><span>Local HTTP on 127.0.0.1 with a bearer token</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><code>p6mcp/clients/</code><span>One adapter per MCP client: register, repair, remove</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><code>skills.py, shop.py</code><span>P6 skills, the core set and the skill shop</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><code>p6mcp/settings_app/</code><span>Settings window and tray app (PySide6), updates</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-package"/></svg><code>packaging/</code><span>PyInstaller build, Inno Setup installer, .mcpb</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-test-tube"/></svg><code>tests/</code><span>pytest on a synthetic P6 database and the demo project</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><code>site/</code><span>This site</span></li>
+        </ul>
+      </div>
+      <div class="repo-mid vwire-s" aria-hidden="true"><span aria-hidden="true" class="wire wire-h"></span></div>
+      <div class="repo-out">
+        <div class="out"><svg class="icon" aria-hidden="true"><use href="#i-package"/></svg><div><strong>GitHub Releases</strong>Windows installer, portable zip, .mcpb bundle and SHA256SUMS, built by the release workflow</div></div>
+        <div class="out"><svg class="icon" aria-hidden="true"><use href="#i-badge-check"/></svg><div><strong>MCP Registry</strong><code>io.github.nizarhamza/p6-mcp</code>, published with each release</div></div>
+        <div class="out"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><div><strong>This site</strong>Deployed from <code>site/</code> on every push</div></div>
+      </div>
+    </div>
+    <div class="repo-join vwire"><span aria-hidden="true" class="wire wire-h rev" style="--wd:.9s"></span><span>core skills bundled with each release</span></div>
+    <div class="repo">
+      <div class="repo-card">
+        <p class="repo-name"><svg class="icon" aria-hidden="true"><use href="#i-git-branch"/></svg><a href="https://github.com/nizarhamza/p6-mcp-shop">nizarhamza/p6-mcp-shop</a></p>
+        <p>The skill catalog: the core set and the skills users share.</p>
+        <ul class="tree">
+          <li class="hot"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><code>src/&lt;skill&gt;/</code><span>Template, reference files and call spec of each skill</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-file-code"/></svg><code>tools/catalog.py</code><span>Builds and checks the catalog</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-test-tube"/></svg><code>tools/golden.py</code><span>Runs each core skill on the demo project</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-play-circle"/></svg><code>.github/workflows/</code><span>Check every change, publish approved skills</span></li>
+        </ul>
+      </div>
+      <div class="repo-mid vwire-s" aria-hidden="true"><span aria-hidden="true" class="wire wire-h" style="--wd:.5s"></span></div>
+      <div class="repo-out">
+        <div class="out"><svg class="icon" aria-hidden="true"><use href="#i-store"/></svg><div><strong>Catalog index</strong>Read by the Skill shop page and the <code>p6_shop_*</code> tools; no account needed</div></div>
+      </div>
+    </div>
+    <figcaption id="repo-cap">The app's only network calls go to GitHub: release updates and the skill catalog. Both can be turned off in Settings.</figcaption>
+  </figure>
+</section>
+
+<section class="doc-section" id="install" aria-labelledby="install-h">
+  <h2 id="install-h"><a class="anchor" href="#install" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>Install in five minutes</h2>
+  <p>Windows 10 or 11, next to P6 Professional. Python is bundled: nothing else to install.</p>
+  <ol class="steps">
+    <li data-reveal><h3>Download</h3><p><code>P6MCP-Setup-2.0.0.exe</code> from the latest release; check it against <code>SHA256SUMS.txt</code>.</p></li>
+    <li data-reveal><h3>Run the installer</h3><p>Per-user install, no administrator rights. Its last page offers to register the server with the MCP clients it finds.</p></li>
+    <li data-reveal><h3>Pick your database</h3><p>In the Settings window: your P6 database, <strong>Test connection</strong> (read only), <strong>Use this database</strong>, <strong>Save</strong>.</p></li>
+    <li data-reveal><h3>Ask</h3><p>Restart your MCP client and ask: "List my P6 projects".</p></li>
+  </ol>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="https://github.com/nizarhamza/p6-mcp/releases/latest"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download for Windows</a>
+    <a class="btn btn-secondary" href="https://github.com/nizarhamza/p6-mcp#connect-your-mcp-client">Manual setup per client</a>
+  </div>
+  <h3>MCP clients</h3>
+  <ul class="client-list">
+    <li>Claude Desktop <span>installer or .mcpb bundle</span></li>
+    <li>Claude Code <span>installer</span></li>
+    <li>Cursor <span>installer</span></li>
+    <li>VS Code (Copilot agent mode) <span>installer</span></li>
+    <li>LM Studio <span>installer</span></li>
+    <li>Cline <span>installer</span></li>
+    <li>ChatGPT <span>Codex or Secure MCP Tunnel, not tested yet</span></li>
+    <li>Any other MCP client <span>stdio or local HTTP</span></li>
+  </ul>
+</section>
+
+<section class="doc-section" id="compare" aria-labelledby="compare-h">
+  <h2 id="compare-h"><a class="anchor" href="#compare" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>Compared with XER-only servers</h2>
+  <p>Several MCP servers parse P6 XER files. This one works on the P6 database itself and reads XER files too.</p>
+  <div class="table-wrap">
+    <table class="compare">
+      <caption>"Varies": some XER servers do it, others do not.</caption>
+      <thead><tr><th scope="col">Capability</th><th scope="col" class="ours">MCP for Primavera P6</th><th scope="col">Typical XER-file MCP server</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Reads the P6 Professional database directly</th><td class="ours">Yes, every project, baseline, code, UDF and schedule option</td><td>No: export an XER first</td></tr>
+        <tr><th scope="row">Writes changes back to P6</th><td class="ours">Yes, into the database; then F9 in P6</td><td>No, or edits an XER you import again</td></tr>
+        <tr><th scope="row">Dry run, confirmation token, backup, edit log, restore</th><td class="ours">Yes, enforced by the server</td><td>Not applicable, or varies</td></tr>
+        <tr><th scope="row">Reads, imports and exports XER files</th><td class="ours">Yes, plus an XER-only mode</td><td>Reads them</td></tr>
+        <tr><th scope="row">CPM engine checked against P6's F9 dates</th><td class="ours">Yes, for what-if and Monte Carlo risk</td><td>Varies</td></tr>
+        <tr><th scope="row">DCMA thresholds taken from the P6 project</th><td class="ours">Yes, DCMA defaults when none are set</td><td>Varies</td></tr>
+        <tr><th scope="row">Excel dashboard and P6 skills</th><td class="ours">Yes</td><td>Varies</td></tr>
+        <tr><th scope="row">Installation</th><td class="ours">Windows installer and Settings window; registers your MCP clients</td><td>Usually a Python package</td></tr>
+        <tr><th scope="row">Runs on macOS or Linux</th><td class="ours">No</td><td>Usually yes</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="doc-section" id="faq" aria-labelledby="faq-h">
+  <h2 id="faq-h"><a class="anchor" href="#faq" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>FAQ</h2>
+  <div class="faq">
+    <details><summary>What is an MCP server for Primavera P6?</summary><div><p>MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant 58 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model.</p></div></details>
+    <details><summary>Can the AI change my P6 schedule?</summary><div><p>Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9.</p></div></details>
+    <details><summary>Does my schedule leave my PC?</summary><div><p>The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio.</p></div></details>
+    <details><summary>Are the dates computed by the AI?</summary><div><p>No. Dates and float come from P6's last schedule run. What-if and risk use the server's CPM engine, and <code>p6_cpm_validate</code> shows how closely it matches P6's own dates on your project before you rely on it.</p></div></details>
+    <details><summary>Which P6 versions and databases are supported?</summary><div><p>P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM and P6 Professional on SQL Server or Oracle are not supported.</p></div></details>
+    <details><summary>Do I need P6 installed?</summary><div><p>Not for XER files: XER-only mode analyses them without P6 or a P6 database.</p></div></details>
+    <details><summary>Does it work with ChatGPT?</summary><div><p>Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented in the <a href="https://github.com/nizarhamza/p6-mcp#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer.</p></div></details>
+    <details><summary>Does it run on macOS or Linux?</summary><div><p>No. P6 Professional is a Windows program and the server is built for Windows 10 and 11.</p></div></details>
+  </div>
+</section>
+
+</div>
 </main>
-
-<footer class="site-foot on-navy">
-  <div class="wrap">
+<nav class="toc" aria-labelledby="toc-h"><p class="toc-title" id="toc-h"><svg class="icon" aria-hidden="true"><use href="#i-list"/></svg>On this page</p><ol><li><a href="#top">Introduction</a></li><li><a href="#answers">What it answers</a></li><li><a href="#architecture">Anatomy of a call</a></li><li><a href="#tools">58 tools, grouped by job</a></li><li><a href="#skills">Skills: one request, one fixed report</a></li><li><a href="#reports">Reports you can check</a></li><li><a href="#app">The Settings app</a></li><li><a href="#writes">Safe writes</a></li><li><a href="#repository">What is in the repository</a></li><li><a href="#install">Install in five minutes</a></li><li><a href="#compare">Compared with XER-only servers</a></li><li><a href="#faq">FAQ</a></li></ol><div class="toc-cta"><strong>Free Windows installer</strong><p>Registers the server with the MCP clients it finds.</p><a class="btn btn-primary btn-s" href="https://github.com/nizarhamza/p6-mcp/releases/latest"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download 2.0.0</a></div></nav>
+</div>
+<footer class="site-foot">
+  <div class="foot-inner">
     <div class="foot-grid">
-      <div>
-        <p class="foot-title">MCP for Primavera P6</p>
+      <div class="foot-brand">
+        <a class="brand" href="/" aria-label="MCP for Primavera P6, home"><svg class="brand-mark" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg><span class="brand-word"><span class="brand-name">MCP</span><span class="brand-tag">for Primavera P6</span></span></a>
         <p>Local MCP server for Primavera P6 Professional schedules. Free and open source under the Apache License 2.0.</p>
       </div>
-      <nav aria-label="Guides">
-        <p class="foot-title">Guides</p>
-        <ul>
-          <li><a href="/guides/dcma-14-point-check-ai/">DCMA 14-point check with AI</a></li>
-          <li><a href="/guides/driving-path-p6-claude/">Driving path in P6 with Claude</a></li>
-          <li><a href="/guides/compare-p6-updates-ai/">Comparing two P6 updates</a></li>
-          <li><a href="/guides/review-xer-before-submission/">Reviewing an XER before submission</a></li>
-        </ul>
-      </nav>
-      <nav aria-label="Project">
-        <p class="foot-title">Project</p>
-        <ul>
-          <li><a href="https://github.com/nizarhamza/p6-mcp/releases/latest">Download</a></li>
-          <li><a href="https://github.com/nizarhamza/p6-mcp">Source and documentation</a></li>
-          <li><a href="https://github.com/nizarhamza/p6-mcp/blob/main/SECURITY.md">Security</a></li>
-          <li><a href="https://github.com/nizarhamza/p6-mcp/issues">Report an issue</a></li>
-          <li><a href="/llms.txt">llms.txt</a></li>
-        </ul>
-      </nav>
+      <nav aria-label="Documentation, footer"><p class="foot-title">Docs</p><ul>
+        <li><a href="/">Introduction</a></li><li><a href="/#tools">Tools</a></li><li><a href="/#skills">Skills</a></li>
+        <li><a href="/#install">Install</a></li><li><a href="/#faq">FAQ</a></li></ul></nav>
+      <nav aria-label="Guides, footer"><p class="foot-title">Guides</p><ul>
+        <li><a href="/guides/dcma-14-point-check-ai/">DCMA 14-point check with AI</a></li>
+        <li><a href="/guides/driving-path-p6-claude/">Driving path in P6 with Claude</a></li>
+        <li><a href="/guides/compare-p6-updates-ai/">Comparing two P6 updates</a></li>
+        <li><a href="/guides/review-xer-before-submission/">Reviewing an XER before submission</a></li></ul></nav>
+      <nav aria-label="Project, footer"><p class="foot-title">Project</p><ul>
+        <li><a href="https://github.com/nizarhamza/p6-mcp/releases/latest">Download</a></li><li><a href="https://github.com/nizarhamza/p6-mcp">Source and documentation</a></li>
+        <li><a href="https://github.com/nizarhamza/p6-mcp-shop">Skill shop catalog</a></li>
+        <li><a href="https://github.com/nizarhamza/p6-mcp/blob/main/SECURITY.md">Security</a></li><li><a href="https://github.com/nizarhamza/p6-mcp/issues">Report an issue</a></li>
+        <li><a href="/llms.txt">llms.txt</a></li></ul></nav>
     </div>
     <p class="legal">MCP for Primavera P6 is an independent project, not affiliated with, endorsed or sponsored by Oracle. Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. The demo project shown on this site is synthetic.</p>
-    <p class="credits">Photographs from Unsplash: <a href="https://unsplash.com/photos/turned-on-monitoring-screen-qwtCeJ5cLYs">dashboard</a> by Stephen Dawson, <a href="https://unsplash.com/photos/woman-drawing-a-flowchart-on-a-whiteboard-46G4xEr122c">whiteboard</a> by Beatriz Cattel, <a href="https://unsplash.com/photos/man-in-orange-and-white-striped-polo-shirt-beside-woman-in-black-and-white-floral-dress-df7erzy97sg">plan review</a> by ThisisEngineering, <a href="https://unsplash.com/photos/laptop-computer-on-glass-top-table-hpjSkU2UYSU">charts on a laptop</a> by Carlos Muza, <a href="https://unsplash.com/photos/2018-december-calendar-with-crossout-marks-OJWivczp3aY">calendar</a> by Adam Tinworth, <a href="https://unsplash.com/photos/man-in-black-and-white-checkered-dress-shirt-sitting-on-black-office-rolling-chair-w_zE6qlkQKA">engineers at their screens</a> by ThisisEngineering, <a href="https://unsplash.com/photos/graphs-of-performance-analytics-on-a-laptop-screen-JKUTrJ4vK00">analytics dashboard</a> by Luke Chesser, <a href="https://unsplash.com/photos/person-working-on-blue-and-white-paper-on-board-qWwpHwip31M">planning board</a> by Alvaro Reyes, <a href="https://unsplash.com/photos/person-using-macbook-pro-on-black-table-eveI7MOcSmw">dashboard on a laptop</a> by Myriam Jessier, <a href="https://unsplash.com/photos/people-reviewing-architectural-blueprints-on-desk-3QzMBrvCeyQ">drawing review</a> by Pedro Miranda.</p>
   </div>
 </footer>
-<script src="/assets/vendor/gsap/gsap.min.js" defer></script>
-<script src="/assets/vendor/gsap/ScrollTrigger.min.js" defer></script>
-<script src="/assets/site.js" defer></script>
+<div class="scrim" data-scrim></div>
+<div class="visually-hidden" role="status" aria-live="polite" id="sr-status"></div>
+<dialog class="search-dlg" id="search-dlg" aria-label="Search the docs" data-index="/assets/search.json?v=06c0b1ea3f">
+  <div class="search-head"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input type="text" id="search-q" placeholder="Search pages, tools and skills" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="search-res" aria-autocomplete="list" aria-label="Search"><button class="icon-btn" type="button" data-search-close aria-label="Close the search"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <p class="search-empty" id="search-msg" hidden></p>
+  <ul class="search-res" id="search-res" role="listbox" aria-label="Results"></ul>
+  <p class="visually-hidden" role="status" aria-live="polite" id="search-status"></p>
+  <div class="search-foot"><span><kbd>Enter</kbd> open</span><span><kbd>&#8593;</kbd> <kbd>&#8595;</kbd> move</span><span><kbd>Esc</kbd> close</span></div>
+</dialog>
+<dialog class="lightbox" id="lightbox" aria-label="Image at full size">
+  <button class="icon-btn lb-close" type="button" data-lb-close aria-label="Close the image"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+  <img alt="" width="2360" height="1800">
+  <p aria-hidden="true"></p>
+</dialog>
+<script src="/assets/site.js?v=78edff6f56" defer></script>
 </body>
 </html>

@@ -6,13 +6,16 @@
 <title>AI Review of a P6 XER File Before Submission: a checklist</title>
 <meta name="description" content="Check a Primavera P6 XER update with an AI assistant before you submit it, or when you receive one: file checks, logic, progress, integrity against the previous update.">
 <link rel="canonical" href="https://mcp-for-primavera-p6.pages.dev/guides/review-xer-before-submission/">
-<meta name="theme-color" content="#0A1A33">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="preload" href="/assets/fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/site.css">
-<noscript><style>@media (max-width: 47.99rem) { .menu-toggle { display: none !important; } .masthead .wrap { flex-wrap: wrap !important; } .site-nav { position: static !important; display: flex !important; flex-direction: row !important; flex-wrap: wrap !important; opacity: 1 !important; visibility: visible !important; translate: none !important; padding: 0 !important; background: none !important; box-shadow: none !important; border: 0 !important; } .site-nav a { border: 0 !important; font-size: 0.95rem !important; padding: 0.35rem 0.1rem !important; } .home .hero { padding-top: calc(var(--masthead-h) + 4.5rem) !important; } }</style></noscript>
+<link rel="preload" href="/assets/fonts/ibm-plex-sans-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css?v=f10e5baf62">
+<script src="/assets/theme.js?v=e2090fef3f"></script>
+<noscript><style>@media (max-width: 64rem) { .sidebar { position: static !important; transform: none !important; visibility: visible !important; width: auto !important; height: auto !important; border-right: 0 !important; border-bottom: 1px solid var(--line) !important; } }</style></noscript>
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="MCP for Primavera P6">
 <meta property="og:title" content="AI review of a P6 XER file before submission">
@@ -52,62 +55,37 @@
 </script>
 </head>
 <body>
+<svg class="sprite" aria-hidden="true" focusable="false"><symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4.2-4.2"/></symbol><symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol><symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol><symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol><symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol><symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></symbol><symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></symbol><symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol><symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol><symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></symbol><symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol><symbol id="i-list" viewBox="0 0 24 24"><path d="M3 6h18M3 12h12M3 18h16"/></symbol><symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol><symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol><symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol><symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M9 4h6"/><path d="M9 13v2M15 13v2"/></symbol><symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol><symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></symbol><symbol id="i-file-code" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="m10 13-2 2 2 2M14 13l2 2-2 2"/></symbol><symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol><symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol><symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol><symbol id="i-git-branch" viewBox="0 0 24 24"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol><symbol id="i-package" viewBox="0 0 24 24"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol><symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol><symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></symbol><symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol><symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></symbol><symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v4M17 5h4M5 17v4M3 19h4"/></symbol><symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></symbol><symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol><symbol id="i-git-compare" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></symbol><symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></symbol><symbol id="i-archive" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol><symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol><symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/></symbol><symbol id="i-store" viewBox="0 0 24 24"><path d="M3 9l1.5-5h15L21 9"/><path d="M3 9h18v1.5a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M5 13.5V21h14v-7.5"/></symbol><symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m8.5 12 2.5 2.5 4.5-5"/></symbol><symbol id="i-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></symbol><symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol><symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></symbol><symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></symbol><symbol id="i-dice" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.1"/><circle cx="15.5" cy="8.5" r="1.1"/><circle cx="12" cy="12" r="1.1"/><circle cx="8.5" cy="15.5" r="1.1"/><circle cx="15.5" cy="15.5" r="1.1"/></symbol><symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol><symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></symbol><symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol><symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></symbol><symbol id="i-github" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></symbol><symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol><symbol id="i-clipboard-check" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></symbol><symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></symbol><symbol id="i-play-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m10 8 6 4-6 4z"/></symbol><symbol id="i-badge-check" viewBox="0 0 24 24"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m9 12 2 2 4-4"/></symbol><symbol id="i-test-tube" viewBox="0 0 24 24"><path d="M14.5 2v17.5c0 1.4-1.1 2.5-2.5 2.5s-2.5-1.1-2.5-2.5V2"/><path d="M8.5 2h7M14.5 16h-5"/></symbol><symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol><symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol><symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol><symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5"/><path d="M9 8V2M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z"/></symbol></svg>
 <a class="skip-link" href="#main">Skip to content</a>
-
-<header class="masthead on-navy">
-  <div class="wrap">
-    <a class="brand" href="/" aria-label="MCP for Primavera P6, home">
-      <svg viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect x="4" y="56" width="16" height="8" rx="4" fill="#fff"/><path d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z" fill="#fff"/><rect x="58" y="42" width="46" height="12" rx="6" fill="#58A6FF"/><rect x="58" y="66" width="26" height="12" rx="6" fill="#58A6FF"/><path d="M96 64L104 72L96 80L88 72Z" fill="#58A6FF"/></g></svg>
-      <span><span class="brand-name">MCP</span> <span class="brand-tag">for Primavera P6</span></span>
-    </a>
-    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav"><span class="menu-icon" aria-hidden="true"></span><span class="menu-label">Menu</span></button>
-    <nav class="site-nav" id="site-nav" aria-label="Main">
-      <a href="/guides/" aria-current="page">Guides</a>
-      <a href="https://github.com/nizarhamza/p6-mcp#tools">Tools</a>
-      <a href="/#faq">FAQ</a>
-      <a href="https://github.com/nizarhamza/p6-mcp">GitHub</a>
-      <a class="btn btn-primary btn-small btn-nav" href="https://github.com/nizarhamza/p6-mcp/releases/latest"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>Download</a>
+<header class="topbar">
+  <div class="topbar-inner">
+    <button class="icon-btn menu-btn" type="button" aria-expanded="false" aria-controls="sidebar" aria-label="Open the navigation"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg></button>
+    <a class="brand" href="/" aria-label="MCP for Primavera P6, home"><svg class="brand-mark" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg><span class="brand-word"><span class="brand-name">MCP</span><span class="brand-tag">for Primavera P6</span></span></a>
+    <button class="topbar-search" type="button" data-search-open aria-haspopup="dialog"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><span>Search the docs</span><kbd data-kbd>Ctrl K</kbd></button>
+    <button class="icon-btn search-btn-s" type="button" data-search-open aria-haspopup="dialog" aria-label="Search the docs"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg></button>
+    <nav class="topnav" aria-label="Main">
+      <a href="/guides/" aria-label="Guides" class="is-section"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg><span class="nav-text">Guides</span></a>
+      <a href="https://github.com/nizarhamza/p6-mcp" aria-label="GitHub"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg><span class="nav-text">GitHub</span></a>
+      <button class="icon-btn theme-toggle" type="button" data-theme-toggle aria-label="Switch to the dark theme"><svg class="icon i-moon" aria-hidden="true"><use href="#i-moon"/></svg><svg class="icon i-sun" aria-hidden="true"><use href="#i-sun"/></svg></button>
+      <a class="btn btn-primary btn-s btn-download" href="https://github.com/nizarhamza/p6-mcp/releases/latest"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
     </nav>
   </div>
 </header>
-
-<main id="main">
-  <section class="doc-head on-navy has-photo" aria-labelledby="page-title">
-    <img class="doc-photo" src="/assets/img/photo-1608303588026-884930af2559-1600x672.webp" srcset="/assets/img/photo-1608303588026-884930af2559-960x403.webp 960w, /assets/img/photo-1608303588026-884930af2559-1600x672.webp 1600w, /assets/img/photo-1608303588026-884930af2559-2400x1008.webp 2400w" sizes="100vw" width="1600" height="672" alt="" fetchpriority="high" decoding="async">
-    <div class="wrap">
-      <nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">Guides</a></li><li aria-current="page">XER review</li></ol></nav>
-      <h1 id="page-title">AI review of a P6 XER file before submission</h1>
-      <p class="lede">The monthly update XER is what the client sees. Check it the way their reviewer will, before it leaves: the file itself, the logic, the progress and what changed since the last submission. The same steps work when you are the reviewer.</p>
-      <p class="doc-meta">Tools: <code>p6_inspect_xer</code>, <code>p6_health_check</code>, <code>p6_dangling</code>, <code>p6_redundant_links</code>, <code>p6_progress_check</code>, <code>p6_update_integrity</code>, <code>p6_schedule_options</code> &middot; Profile: Full</p>
-      <div class="timescale" aria-hidden="true"></div>
-    </div>
-  </section>
-
-  <div class="wrap doc">
-    <nav class="doc-nav" aria-labelledby="toc-title">
-      <h2 id="toc-title">On this page</h2>
-      <ol>
-        <li><a href="#load">Open the XER without importing it</a></li>
-        <li><a href="#file">1. The file</a></li>
-        <li><a href="#logic">2. Logic and quality</a></li>
-        <li><a href="#progress">3. Progress</a></li>
-        <li><a href="#changes">4. Changes since the last submission</a></li>
-        <li><a href="#options">5. Schedule options</a></li>
-        <li><a href="#checklist">Checklist</a></li>
-        <li><a href="#privacy">Confidential projects</a></li>
-      </ol>
-    </nav>
-
-    <article class="article">
-      <h2 id="load">Open the XER without importing it</h2>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Documentation"><div class="side-group"><p class="side-title">Get started</p><ul class="side-list"><li><a href="/#top">Introduction</a></li><li><a href="/#answers">What it answers</a></li><li><a href="/#install">Install</a></li></ul></div><div class="side-group"><p class="side-title">How it works</p><ul class="side-list"><li><a href="/#architecture">Anatomy of a call</a></li><li><a href="/#tools">Tools</a></li><li><a href="/#skills">Skills</a></li><li><a href="/#writes">Safe writes</a></li><li><a href="/#repository">Repository</a></li></ul></div><div class="side-group"><p class="side-title">See it</p><ul class="side-list"><li><a href="/#reports">Reports</a></li><li><a href="/#app">Settings app</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul class="side-list"><li><a href="/guides/">All guides</a></li><li><a href="/guides/dcma-14-point-check-ai/">DCMA 14-point check</a></li><li><a href="/guides/driving-path-p6-claude/">Driving path</a></li><li><a href="/guides/compare-p6-updates-ai/">Comparing two updates</a></li><li><a href="/guides/review-xer-before-submission/" aria-current="page">XER before submission</a></li></ul></div><div class="side-group"><p class="side-title">Help</p><ul class="side-list"><li><a href="/#compare">Compared with XER servers</a></li><li><a href="/#faq">FAQ</a></li><li><a href="https://github.com/nizarhamza/p6-mcp#readme">README on GitHub<svg class="icon ext" aria-hidden="true"><use href="#i-external"/></svg></a></li><li><a href="https://github.com/nizarhamza/p6-mcp-shop">Skill shop catalog<svg class="icon ext" aria-hidden="true"><use href="#i-external"/></svg></a></li><li><a href="https://github.com/nizarhamza/p6-mcp/releases">Releases<svg class="icon ext" aria-hidden="true"><use href="#i-external"/></svg></a></li></ul></div></nav>
+<main class="content" id="main" tabindex="-1">
+<div class="doc">
+<header class="doc-head"><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">Guides</a></li><li aria-current="page">XER review</li></ol></nav><h1 class="page-title" id="page-title">AI review of a P6 XER file before submission</h1><p class="lede">The monthly update XER is what the client sees. Check it the way their reviewer will, before it leaves: the file itself, the logic, the progress and what changed since the last submission. The same steps work when you are the reviewer.</p><p class="doc-meta">Tools: <code>p6_inspect_xer</code>, <code>p6_health_check</code>, <code>p6_dangling</code>, <code>p6_redundant_links</code>, <code>p6_progress_check</code>, <code>p6_update_integrity</code>, <code>p6_schedule_options</code> &middot; Profile: Full</p><p class="doc-note"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span>Every result on this page comes from DEMO-SS225, a public demo project with synthetic data.</span></p></header>
+<article class="prose">
+      <h2 id="load"><a class="anchor" href="#load" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>Open the XER without importing it</h2>
       <p>Nothing here writes to a P6 database. In the Settings window choose <strong>Database &gt; Data source &gt; XER files only</strong>, add the XER you are about to send, and the previous submission if you have it, then click <strong>Load and check</strong>. The files are read into a private read-only copy and every read tool works on it. P6 does not need to be installed.</p>
 
-      <h2 id="file">1. The file</h2>
+      <h2 id="file"><a class="anchor" href="#file" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>1. The file</h2>
       <pre class="prompt" data-copy="prompt">Inspect D:\Submissions\DEMO-SS225_2026-10.xer and tell me if anything would fail or be lost on import.</pre>
       <p><code>p6_inspect_xer</code> reads the file without importing it: header and P6 version, encoding (UTF-8, or cp1252 with the offset of the first non UTF-8 byte), the end marker, rows per table, projects with their data dates, and the import pre-flight. The pre-flight reports errors that would stop an import (an activity without WBS or calendar, a duplicate Activity ID, an assignment of an activity missing from the file, a row whose field count does not match its table) and warnings.</p>
       <p>On the demo update: exported by P6 24.12, UTF-8 without byte order mark, end marker present, one project (DEMO-SS225, data date 26 Oct 2026) with 214 activities, 332 relationships and 257 resource assignments, no errors and no warnings.</p>
 
-      <h2 id="logic">2. Logic and quality</h2>
+      <h2 id="logic"><a class="anchor" href="#logic" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>2. Logic and quality</h2>
       <pre class="prompt" data-copy="prompt">Run the DCMA 14-point check on the XER project, then list its open starts and open finishes and the links that are candidates for removal.</pre>
       <ul>
         <li><code>p6_health_check</code>: the DCMA 14 checks (see the <a href="/guides/dcma-14-point-check-ai/">DCMA guide</a>). An XER carries no P6 schedule check settings, so the DCMA defaults apply unless you give thresholds.</li>
@@ -115,19 +93,19 @@
         <li><code>p6_redundant_links</code>: links implied by another chain of finish-to-start links, duplicates, and links from completed predecessors to open work, each with what removing it would change.</li>
       </ul>
 
-      <h2 id="progress">3. Progress</h2>
+      <h2 id="progress"><a class="anchor" href="#progress" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>3. Progress</h2>
       <pre class="prompt" data-copy="prompt">Check the progress of the XER project: out-of-sequence links and status inconsistencies.</pre>
       <p><code>p6_progress_check</code> lists the links whose successor progressed before its predecessor allowed it (by link type) and the status inconsistencies: in progress without an actual start, completed with remaining work, 100 % but not completed, not started with actual dates. The demo update has no out-of-sequence link and no inconsistency.</p>
 
-      <h2 id="changes">4. Changes since the last submission</h2>
+      <h2 id="changes"><a class="anchor" href="#changes" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>4. Changes since the last submission</h2>
       <pre class="prompt" data-copy="prompt">Run an integrity review of DEMO-SS225 against the previous submission DEMO-SS225~2 and list the flags.</pre>
       <p>When the previous submission is loaded too, <code>p6_update_integrity</code> raises what a client's reviewer will ask about: open ends tied to the finish, negative float cleared by a constraint or a moved must finish by date, actual dates rewritten, durations cut, links to critical work removed, link types and lags changed, schedule options and calendars changed, in-progress or critical activities deleted, a data date that did not move. On the demo update it raises ten flags, detailed in the <a href="/guides/compare-p6-updates-ai/">comparison guide</a>. Every flag is a question to answer before submission, not a verdict.</p>
 
-      <h2 id="options">5. Schedule options</h2>
+      <h2 id="options"><a class="anchor" href="#options" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>5. Schedule options</h2>
       <pre class="prompt" data-copy="prompt">Compare the schedule options in the XER with the ones of project DEMO-SS225 in my database.</pre>
       <p><code>p6_schedule_options(project="DEMO-SS225", xer_path="...")</code> shows the options stored in P6 and the ones in the XER side by side, differences first: retained logic or progress override, the lag calendar, open-ended activities critical, the critical definition. A change of options between submissions moves dates without a single activity changing.</p>
 
-      <h2 id="checklist">Checklist</h2>
+      <h2 id="checklist"><a class="anchor" href="#checklist" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>Checklist</h2>
       <div class="table-wrap">
         <table>
           <thead><tr><th scope="col">Check</th><th scope="col">Tool</th><th scope="col">Ready to submit when</th></tr></thead>
@@ -142,65 +120,51 @@
         </table>
       </div>
 
-      <h2 id="privacy">Confidential projects</h2>
-      <p>The server reads the XER on your PC and sends nothing anywhere. The results of each tool go to the AI model your MCP client uses: with a cloud model, they reach its provider, like any message you type. If the submission is confidential, run the review with a local model, for example in LM Studio; pick one that handles many tools, since this review uses the Full profile.</p>
-
-      <div class="next-guides">
-        <h2>Next</h2>
-        <ul class="toc">
-          <li><a href="/guides/compare-p6-updates-ai/"><strong>Comparing two P6 updates with AI</strong><span>The integrity flags of the demo update, one by one.</span></a></li>
-          <li><a href="/guides/dcma-14-point-check-ai/"><strong>DCMA 14-point check with AI</strong><span>Read each check and drill into it.</span></a></li>
-        </ul>
-      </div>
-    </article>
-    <aside class="doc-rail" aria-labelledby="rail-title">
-      <div class="rail-card">
-        <h2 id="rail-title">Try it on your own schedule</h2>
-        <p>Free Windows installer. It registers the server with Claude, Cursor, VS Code and the other MCP clients it finds, and works on your P6 database or on an XER file.</p>
-        <a class="btn btn-primary btn-download btn-rail" href="https://github.com/nizarhamza/p6-mcp/releases/latest">
-          <span class="btn-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></span>
-          <span class="btn-text">Download for Windows<small>Version 2.0.0, Windows 10 and 11</small></span>
-        </a>
-        <a class="rail-link" href="/#install">How to install</a>
-      </div>
-      <p class="rail-note">Every result on this page comes from DEMO-SS225, a public demo project with synthetic data.</p>
-    </aside>
-  </div>
+      <h2 id="privacy"><a class="anchor" href="#privacy" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>Confidential projects</h2>
+      <p>The server reads the XER on your PC and sends nothing anywhere. The results of each tool go to the AI model your MCP client uses: with a cloud model, they reach its provider, like any message you type. If the submission is confidential, run the review with a local model, for example in LM Studio; pick one that handles many tools, since this review uses the Full profile.</p></article>
+<div class="next-guides"><h2 id="next-guides">Next</h2><ul class="cards"><li><a class="card" href="/guides/compare-p6-updates-ai/"><h3>Comparing two P6 updates with AI</h3><p>The integrity flags of the demo update, one by one.</p><span class="card-more">Read the guide<svg class="icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></span></a></li><li><a class="card" href="/guides/dcma-14-point-check-ai/"><h3>DCMA 14-point check with AI</h3><p>Read each check and drill into it.</p><span class="card-more">Read the guide<svg class="icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></span></a></li></ul></div>
+</div>
 </main>
-
-<footer class="site-foot on-navy">
-  <div class="wrap">
+<nav class="toc" aria-labelledby="toc-h"><p class="toc-title" id="toc-h"><svg class="icon" aria-hidden="true"><use href="#i-list"/></svg>On this page</p><ol><li><a href="#load">Open the XER without importing it</a></li><li><a href="#file">1. The file</a></li><li><a href="#logic">2. Logic and quality</a></li><li><a href="#progress">3. Progress</a></li><li><a href="#changes">4. Changes since the last submission</a></li><li><a href="#options">5. Schedule options</a></li><li><a href="#checklist">Checklist</a></li><li><a href="#privacy">Confidential projects</a></li></ol><div class="toc-cta"><strong>Try it on your own schedule</strong><p>Free Windows installer. Works on your P6 database or on an XER file.</p><a class="btn btn-primary btn-s" href="https://github.com/nizarhamza/p6-mcp/releases/latest"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download 2.0.0</a></div></nav>
+</div>
+<footer class="site-foot">
+  <div class="foot-inner">
     <div class="foot-grid">
-      <div>
-        <p class="foot-title">MCP for Primavera P6</p>
+      <div class="foot-brand">
+        <a class="brand" href="/" aria-label="MCP for Primavera P6, home"><svg class="brand-mark" viewBox="0 0 120 120" aria-hidden="true"><g transform="translate(6 0)"><rect class="m-body" x="4" y="56" width="16" height="8" rx="4"/><path class="m-body" d="M36 28H48Q52 28 52 32V88Q52 92 48 92H36A20 20 0 0 1 16 72V48A20 20 0 0 1 36 28Z"/><rect class="m-bar" x="58" y="42" width="46" height="12" rx="6"/><rect class="m-bar" x="58" y="66" width="26" height="12" rx="6"/><path class="m-bar" d="M96 64L104 72L96 80L88 72Z"/></g></svg><span class="brand-word"><span class="brand-name">MCP</span><span class="brand-tag">for Primavera P6</span></span></a>
         <p>Local MCP server for Primavera P6 Professional schedules. Free and open source under the Apache License 2.0.</p>
       </div>
-      <nav aria-label="Guides">
-        <p class="foot-title">Guides</p>
-        <ul>
-          <li><a href="/guides/dcma-14-point-check-ai/">DCMA 14-point check with AI</a></li>
-          <li><a href="/guides/driving-path-p6-claude/">Driving path in P6 with Claude</a></li>
-          <li><a href="/guides/compare-p6-updates-ai/">Comparing two P6 updates</a></li>
-          <li><a href="/guides/review-xer-before-submission/">Reviewing an XER before submission</a></li>
-        </ul>
-      </nav>
-      <nav aria-label="Project">
-        <p class="foot-title">Project</p>
-        <ul>
-          <li><a href="https://github.com/nizarhamza/p6-mcp/releases/latest">Download</a></li>
-          <li><a href="https://github.com/nizarhamza/p6-mcp">Source and documentation</a></li>
-          <li><a href="https://github.com/nizarhamza/p6-mcp/blob/main/SECURITY.md">Security</a></li>
-          <li><a href="https://github.com/nizarhamza/p6-mcp/issues">Report an issue</a></li>
-          <li><a href="/llms.txt">llms.txt</a></li>
-        </ul>
-      </nav>
+      <nav aria-label="Documentation, footer"><p class="foot-title">Docs</p><ul>
+        <li><a href="/">Introduction</a></li><li><a href="/#tools">Tools</a></li><li><a href="/#skills">Skills</a></li>
+        <li><a href="/#install">Install</a></li><li><a href="/#faq">FAQ</a></li></ul></nav>
+      <nav aria-label="Guides, footer"><p class="foot-title">Guides</p><ul>
+        <li><a href="/guides/dcma-14-point-check-ai/">DCMA 14-point check with AI</a></li>
+        <li><a href="/guides/driving-path-p6-claude/">Driving path in P6 with Claude</a></li>
+        <li><a href="/guides/compare-p6-updates-ai/">Comparing two P6 updates</a></li>
+        <li><a href="/guides/review-xer-before-submission/">Reviewing an XER before submission</a></li></ul></nav>
+      <nav aria-label="Project, footer"><p class="foot-title">Project</p><ul>
+        <li><a href="https://github.com/nizarhamza/p6-mcp/releases/latest">Download</a></li><li><a href="https://github.com/nizarhamza/p6-mcp">Source and documentation</a></li>
+        <li><a href="https://github.com/nizarhamza/p6-mcp-shop">Skill shop catalog</a></li>
+        <li><a href="https://github.com/nizarhamza/p6-mcp/blob/main/SECURITY.md">Security</a></li><li><a href="https://github.com/nizarhamza/p6-mcp/issues">Report an issue</a></li>
+        <li><a href="/llms.txt">llms.txt</a></li></ul></nav>
     </div>
     <p class="legal">MCP for Primavera P6 is an independent project, not affiliated with, endorsed or sponsored by Oracle. Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. The demo project shown on this site is synthetic.</p>
-    <p class="credits">Photographs from Unsplash: <a href="https://unsplash.com/photos/people-reviewing-architectural-blueprints-on-desk-3QzMBrvCeyQ">drawing review</a> by Pedro Miranda.</p>
   </div>
 </footer>
-<script src="/assets/vendor/gsap/gsap.min.js" defer></script>
-<script src="/assets/vendor/gsap/ScrollTrigger.min.js" defer></script>
-<script src="/assets/site.js" defer></script>
+<div class="scrim" data-scrim></div>
+<div class="visually-hidden" role="status" aria-live="polite" id="sr-status"></div>
+<dialog class="search-dlg" id="search-dlg" aria-label="Search the docs" data-index="/assets/search.json?v=06c0b1ea3f">
+  <div class="search-head"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input type="text" id="search-q" placeholder="Search pages, tools and skills" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="search-res" aria-autocomplete="list" aria-label="Search"><button class="icon-btn" type="button" data-search-close aria-label="Close the search"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <p class="search-empty" id="search-msg" hidden></p>
+  <ul class="search-res" id="search-res" role="listbox" aria-label="Results"></ul>
+  <p class="visually-hidden" role="status" aria-live="polite" id="search-status"></p>
+  <div class="search-foot"><span><kbd>Enter</kbd> open</span><span><kbd>&#8593;</kbd> <kbd>&#8595;</kbd> move</span><span><kbd>Esc</kbd> close</span></div>
+</dialog>
+<dialog class="lightbox" id="lightbox" aria-label="Image at full size">
+  <button class="icon-btn lb-close" type="button" data-lb-close aria-label="Close the image"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+  <img alt="" width="2360" height="1800">
+  <p aria-hidden="true"></p>
+</dialog>
+<script src="/assets/site.js?v=78edff6f56" defer></script>
 </body>
 </html>
