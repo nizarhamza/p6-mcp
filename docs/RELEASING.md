@@ -39,8 +39,9 @@ Unsigned builds work but Windows SmartScreen warns about them. Signing is in pla
   it only through its own SignTool hook).
 - In the workflow, `P6MCP_SIGNING` = `pfx` uses the secrets `P6MCP_PFX_BASE64` and `P6MCP_PFX_PASSWORD`.
 
-Status: no certificate yet. The signing steps have not run against a real certificate; check the first
-signed build with `signtool verify /pa /v`.
+Status: not required (decided 2026-10-30): releases ship unsigned, with no certificate. The signing steps
+stay in place but have not run against a real certificate; if signing is added later, check the first signed
+build with `signtool verify /pa /v`.
 
 ## Release
 

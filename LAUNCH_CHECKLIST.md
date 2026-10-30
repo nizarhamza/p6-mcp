@@ -49,6 +49,9 @@ Names used below:
       PC's automatic update from 1.9.0 (after the release was published).
 - [x] Publish the release (GitHub, Releases, the v2.0.0 draft, Publish). The installed 1.x copies update
       themselves to 2.0.0 within their next checks, and the MCP Registry workflow publishes the 2.0.0 entry.
+- [x] Not required (decided 2026-10-30). Code signing: releases ship unsigned (SmartScreen may warn on first
+      launch, the README says so). The signing steps stay behind `P6MCP_SIGNING` (`docs/RELEASING.md`, "Code
+      signing").
 
 ## C. After the release
 
@@ -85,8 +88,8 @@ Names used below:
       `https://mcp-for-primavera-p6.pages.dev` everywhere: `site/` (canonical, Open Graph, JSON-LD, sitemap,
       robots, llms.txt), `server.json` (websiteUrl, icon), `packaging/bundle.py` (SITE) and the README FAQ link.
       `tests/test_registry.py` checks that server.json and the bundle agree.
-- [ ] Trademark note: Oracle's guidelines ask third parties not to use Oracle marks in domain names. A custom
-      domain without "primavera" or "p6" is the safer long-term choice.
+- [x] Not required (decided 2026-10-30). Trademark note: Oracle's guidelines ask third parties not to use
+      Oracle marks in domain names. A custom domain without "primavera" or "p6" is the safer long-term choice.
 - [ ] The site has no analytics. If you add Cloudflare Web Analytics, allow its script in the
       Content-Security-Policy of `site/_headers`.
 
