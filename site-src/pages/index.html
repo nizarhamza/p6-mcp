@@ -1,0 +1,596 @@
+<!--page
+{
+  "url": "/",
+  "title": "Primavera P6 MCP Server: connect Claude, ChatGPT and Cursor to P6",
+  "description": "Local MCP server for Primavera P6 Professional and XER files: critical path, driving path, DCMA 14-point check, update comparison, what-if, and safe write-back.",
+  "canonical": "https://mcp-for-primavera-p6.pages.dev/",
+  "toc": "auto",
+  "cta": "home"
+}
+-->
+<!--head-->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="MCP for Primavera P6">
+<meta property="og:title" content="Primavera P6 MCP Server: connect Claude, ChatGPT and Cursor to P6">
+<meta property="og:description" content="Ask your P6 schedule in plain language. Driving path, total float, DCMA 14-point check, update comparison and what-if, computed from the schedule. Edits only with your confirmation.">
+<meta property="og:url" content="https://mcp-for-primavera-p6.pages.dev/">
+<meta property="og:image" content="https://mcp-for-primavera-p6.pages.dev/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="MCP for Primavera P6: local MCP server for P6 schedules">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://mcp-for-primavera-p6.pages.dev/#app",
+      "name": "MCP for Primavera P6",
+      "alternateName": [
+        "P6 MCP",
+        "Primavera P6 MCP server"
+      ],
+      "description": "Local Model Context Protocol (MCP) server that connects Claude, ChatGPT, Cursor, VS Code and other MCP clients to Primavera P6 Professional schedules (standalone SQLite database or XER files): critical path, driving path, total float, DCMA 14-point check, update comparison, CPM what-if, Monte Carlo risk, and edits written back to the P6 database after a dry run, a confirmation and a backup.",
+      "applicationCategory": "BusinessApplication",
+      "applicationSubCategory": "Project scheduling",
+      "operatingSystem": "Windows 10, Windows 11",
+      "softwareVersion": "2.0.0",
+      "url": "https://mcp-for-primavera-p6.pages.dev/",
+      "downloadUrl": "https://github.com/nizarhamza/p6-mcp/releases/latest",
+      "installUrl": "https://github.com/nizarhamza/p6-mcp/releases/latest",
+      "softwareHelp": "https://mcp-for-primavera-p6.pages.dev/guides/",
+      "license": "https://www.apache.org/licenses/LICENSE-2.0",
+      "isAccessibleForFree": true,
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "image": "https://mcp-for-primavera-p6.pages.dev/assets/og.png",
+      "author": {
+        "@type": "Person",
+        "name": "Nizar Hamza",
+        "url": "https://github.com/nizarhamza"
+      },
+      "featureList": [
+        "Critical path, driving path and float paths of the last P6 schedule run",
+        "DCMA 14-point check with the project's own P6 thresholds",
+        "Comparison of two P6 updates or a baseline, with an update integrity review",
+        "CPM what-if and Monte Carlo schedule risk in memory",
+        "XER inspection, import and export, and an XER-only mode",
+        "Edits written to the P6 Professional database after a dry run, a confirmation token and a backup, with an edit log",
+        "Excel project controls dashboard"
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://mcp-for-primavera-p6.pages.dev/#site",
+      "name": "MCP for Primavera P6",
+      "url": "https://mcp-for-primavera-p6.pages.dev/"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is an MCP server for Primavera P6?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "MCP (Model Context Protocol) is the open standard AI assistants use to call tools. MCP for Primavera P6 gives an assistant 58 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can the AI change my P6 schedule?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does my schedule leave my PC?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Are the dates computed by the AI?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Dates and float come from P6's last schedule run. What-if and risk use the server's CPM engine, and p6_cpm_validate shows how closely it matches P6's own dates on your project before you rely on it."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Which P6 versions and databases are supported?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM and P6 Professional on SQL Server or Oracle are not supported."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I need P6 installed?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Not for XER files: XER-only mode analyses them without P6 or a P6 database."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it work with ChatGPT?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it run on macOS or Linux?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. P6 Professional is a Windows program and the server is built for Windows 10 and 11."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+<!--/head-->
+<header class="doc-head">
+  <p class="eyebrow">[[i:sparkles]]Introduction</p>
+  <h1 class="page-title" id="top">Ask your Primavera&nbsp;P6 schedule, in plain language</h1>
+  <p class="lede"><strong>MCP for Primavera P6</strong> is a local MCP server for Claude, ChatGPT, Cursor and VS Code. It reads the P6 Professional database or XER files and computes the answer from the schedule: driving path, total float, the DCMA 14-point check, what changed since the last update, what-if and risk. When you allow it, it <strong>edits the schedule too</strong>: previewed, confirmed by you, backed up and logged.</p>
+  <div class="hero-actions">
+    <a class="btn btn-primary btn-stack" href="https://github.com/nizarhamza/p6-mcp/releases/latest">[[i:download]]<span>Download for Windows<small>Version 2.0.0 installer, Windows 10 and 11</small></span></a>
+    <a class="btn btn-secondary" href="#architecture">See how it works</a>
+  </div>
+  <ul class="hero-meta">
+    <li>[[i:check-circle]]Free, Apache 2.0</li>
+    <li>[[i:check-circle]]Runs on your PC, no telemetry</li>
+    <li>[[i:check-circle]]Writes off until you allow them</li>
+    <li>[[i:check-circle]]Not affiliated with Oracle</li>
+  </ul>
+
+  <figure class="diagram hero-fig" data-reveal data-anim aria-labelledby="ov-cap">
+    <div class="ov">
+      <div class="ov-col">
+        <p class="node-label">[[i:message]]MCP clients</p>
+        <ul class="ov-list">
+          <li>[[i:bot]]<span>Claude Desktop<small>installer or .mcpb</small></span></li>
+          <li>[[i:terminal]]<span>Claude Code</span></li>
+          <li>[[i:code]]<span>Cursor, VS Code<small>Copilot agent mode</small></span></li>
+          <li>[[i:monitor]]<span>LM Studio, Cline<small>local models</small></span></li>
+          <li>[[i:globe]]<span>ChatGPT<small>Codex or a secure tunnel</small></span></li>
+        </ul>
+      </div>
+      <div class="ov-link vwire-s">
+        <span class="ov-proto up">MCP protocol</span>
+        <span aria-hidden="true" class="wire wire-h"></span>
+        <span aria-hidden="true" class="wire wire-h ok rev" style="--wd:.9s"></span>
+        <span class="ov-proto">stdio or local HTTP</span>
+      </div>
+      <div class="ov-core">
+        [[mark]]
+        <p class="ov-name">MCP for Primavera P6</p>
+        <p>Local server and Settings app</p>
+        <ul class="ov-stats">
+          <li><b data-count="58">58</b>tools</li>
+          <li><b data-count="15">15</b>core skills</li>
+        </ul>
+        <div class="ov-gates">
+          <span class="pill">[[i:shield]]Policy gate</span>
+          <span class="pill">[[i:cpu]]CPM engine</span>
+          <span class="pill">[[i:key]]Two-step writes</span>
+        </div>
+      </div>
+      <div class="ov-link vwire-s">
+        <span class="ov-proto up">read-only snapshots</span>
+        <span aria-hidden="true" class="wire wire-h" style="--wd:.6s"></span>
+        <span aria-hidden="true" class="wire wire-h ok rev" style="--wd:1.2s"></span>
+        <span class="ov-proto">writes on your yes</span>
+      </div>
+      <div class="ov-col">
+        <p class="node-label">[[i:database]]Your P6 data</p>
+        <ul class="ov-list">
+          <li>[[i:database]]<span>P6 Professional database<small>standalone, SQLite</small></span></li>
+          <li>[[i:file]]<span>XER files<small>inspect, import, export, XER-only mode</small></span></li>
+          <li>[[i:archive]]<span>Backups and edit log<small>a backup before each write by default, every write logged</small></span></li>
+        </ul>
+      </div>
+    </div>
+    <figcaption id="ov-cap">Your AI client calls the server's tools; the server reads the schedule on your PC and returns computed results. The model explains them. Nothing goes anywhere else, except what the tools return to the model your client uses.</figcaption>
+  </figure>
+</header>
+
+<section class="doc-section" id="answers" aria-labelledby="answers-h">
+  <h2 id="answers-h"><a class="anchor" href="#answers" aria-hidden="true" tabindex="-1">[[i:link]]</a>What it answers</h2>
+  <p>The questions a scheduler asks on every update. The server does the scheduling arithmetic on P6's own data; the model only explains the result. Dates and float come from the last schedule run (F9).</p>
+  <ul class="cards">
+    <li data-reveal><a class="card" href="/guides/driving-path-p6-claude/"><span class="card-icon">[[i:route]]</span><h3>What drives the finish date?</h3><p>The chain of driving predecessors back to its root cause (a constraint, the data date, an actual date), and where the total float comes from.</p><span class="tags"><span class="tag">p6_driving_path</span><span class="tag">p6_float_origin</span></span><span class="card-more">Driving path guide[[i:arrow-right]]</span></a></li>
+    <li data-reveal style="--i:1"><a class="card" href="/guides/dcma-14-point-check-ai/"><span class="card-icon">[[i:clipboard-check]]</span><h3>Does it pass the DCMA 14-point check?</h3><p>The 14 checks with the thresholds set in P6 for the project, the critical path test, CPLI and BEI, and the activities behind every failed check.</p><span class="tags"><span class="tag">p6_health_check</span></span><span class="card-more">DCMA guide[[i:arrow-right]]</span></a></li>
+    <li data-reveal><a class="card" href="/guides/compare-p6-updates-ai/"><span class="card-icon">[[i:git-compare]]</span><h3>What changed since the last update?</h3><p>Activity by activity and link by link: slips and their causes, float erosion, and the changes a reviewer should question.</p><span class="tags"><span class="tag">p6_compare_projects</span><span class="tag">p6_update_integrity</span></span><span class="card-more">Comparison guide[[i:arrow-right]]</span></a></li>
+    <li data-reveal style="--i:1"><div class="card"><span class="card-icon">[[i:cpu]]</span><h3>What if procurement takes four more weeks?</h3><p>The change is applied in memory and run through a CPM engine checked against P6's own dates. Nothing is written.</p><span class="tags"><span class="tag">p6_schedule_whatif</span><span class="tag">p6_cpm_validate</span></span></div></li>
+    <li data-reveal><div class="card"><span class="card-icon">[[i:dice]]</span><h3>How likely is the contract finish?</h3><p>Monte Carlo on the remaining durations: P50 and P80 finish dates, the chance of finishing on time, how often each activity is critical.</p><span class="tags"><span class="tag">p6_schedule_risk</span></span></div></li>
+    <li data-reveal style="--i:1"><div class="card"><span class="card-icon">[[i:calendar]]</span><h3>What is coming up in the next weeks?</h3><p>What starts, finishes or runs in the window, critical work first, and each milestone against its baseline date.</p><span class="tags"><span class="tag">p6_lookahead</span><span class="tag">p6_milestones</span></span></div></li>
+    <li data-reveal><div class="card"><span class="card-icon">[[i:activity]]</span><h3>How far along are we?</h3><p>Percent complete by units, physical and duration, earned value and SPI at the data date, and the S-curve against the baseline.</p><span class="tags"><span class="tag">p6_project_summary</span><span class="tag">p6_progress_curve</span></span></div></li>
+    <li data-reveal style="--i:1"><a class="card" href="/guides/review-xer-before-submission/"><span class="card-icon">[[i:file]]</span><h3>Is this XER ready to submit?</h3><p>The import pre-flight checks without importing, then every analysis on the file alone in XER-only mode.</p><span class="tags"><span class="tag">p6_inspect_xer</span></span><span class="card-more">XER review guide[[i:arrow-right]]</span></a></li>
+  </ul>
+</section>
+
+<section class="doc-section" id="architecture" aria-labelledby="architecture-h">
+  <h2 id="architecture-h"><a class="anchor" href="#architecture" aria-hidden="true" tabindex="-1">[[i:link]]</a>Anatomy of a call</h2>
+  <p>One question, end to end. The model picks the tool and writes the answer; the server reads the schedule and does the computing, on your PC.</p>
+  <figure class="diagram has-controls" data-reveal data-anim aria-labelledby="seq-cap">
+    <p class="d-title">Sequence</p>
+    <div class="d-controls"><button class="d-btn" type="button" data-seq-toggle aria-label="Pause the animation">[[i:pause|i-pause]][[i:play|i-play]]<span>Pause</span></button></div>
+    <div class="seq" data-seq data-interval="2300">
+      <div class="seq-heads">
+        <div class="seq-head">[[i:user]]You<small>in the chat</small></div>
+        <div class="seq-head">[[i:bot]]AI client<small>Claude, Cursor...</small></div>
+        <div class="seq-head">[[mark-s]]MCP for P6<small>local process</small></div>
+        <div class="seq-head">[[i:database]]P6 database<small>SQLite or XER</small></div>
+      </div>
+      <ol class="seq-body">
+        <li class="seq-step s12" data-step><div class="seq-row"><span class="seq-arrow"></span></div><p class="seq-msg"><span><span class="visually-hidden">From you to the AI client: </span>"What drives MS-1100 - Project completion?"</span></p></li>
+        <li class="seq-step s23" data-step><div class="seq-row"><span class="seq-arrow"></span></div><p class="seq-msg"><span><span class="visually-hidden">From the AI client to MCP for P6: </span><code>p6_driving_path(project="DEMO-SS225", target="MS-1100")</code></span></p></li>
+        <li class="seq-step lane3" data-step><div class="seq-row"><span class="seq-self">[[i:shield]]Policy gate</span></div><p class="seq-msg"><span><span class="visually-hidden">Inside MCP for P6: </span>The tool is in the tool profile and only reads, so it runs. A write would need a dry run and your confirmation.</span></p></li>
+        <li class="seq-step s34" data-step><div class="seq-row"><span class="seq-arrow"></span></div><p class="seq-msg"><span><span class="visually-hidden">From MCP for P6 to the P6 database: </span>One read-only snapshot of the last F9: links, dates, calendars, the lag calendar rule</span></p></li>
+        <li class="seq-step lane3" data-step><div class="seq-row"><span class="seq-self">[[i:cpu]]Trace</span></div><p class="seq-msg"><span><span class="visually-hidden">Inside MCP for P6: </span>Follows the driving links back to the root cause: each lag on the lag-rule calendar, each gap in working time of the successor's calendar</span></p></li>
+        <li class="seq-step s23 l ret" data-step><div class="seq-row"><span class="seq-arrow"></span></div><p class="seq-msg"><span><span class="visually-hidden">From MCP for P6 back to the AI client: </span>JSON result: 24 activities on the path, root cause the data date, total float -36 days</span></p></li>
+        <li class="seq-step s12 l ret" data-step><div class="seq-row"><span class="seq-arrow"></span></div><p class="seq-msg"><span><span class="visually-hidden">From the AI client back to you: </span>"The finish is driven by PRC-TR-1040 - Power transformers 225/63 kV - manufacturing, still in progress..."</span></p></li>
+      </ol>
+    </div>
+    <figcaption id="seq-cap">A real call on the public demo project DEMO-SS225 (synthetic data). List tools return pages of <code>{total, offset, rows}</code>, so a long answer never floods the model.</figcaption>
+  </figure>
+</section>
+
+<section class="doc-section" id="tools" aria-labelledby="tools-h">
+  <h2 id="tools-h"><a class="anchor" href="#tools" aria-hidden="true" tabindex="-1">[[i:link]]</a>58 tools, grouped by job</h2>
+  <p>37 read-only tools (11 of them in the Basic profile, for small local models), 2 that write a file, 18 write tools that stay off until you allow them, and 1 that changes the app's own settings. Pick a tool to see what it does.</p>
+  [[toolmap]]
+</section>
+
+<section class="doc-section" id="skills" aria-labelledby="skills-h">
+  <h2 id="skills-h"><a class="anchor" href="#skills" aria-hidden="true" tabindex="-1">[[i:link]]</a>Skills: one request, one fixed report</h2>
+  <p>A P6 skill is a <code>SKILL.md</code> that tells the AI which tools to call, in which order, and which field fills each figure of the report. The figures are copied from the schedule, never computed by the model. Clients use a skill when your request matches its description; Claude Code also runs it as <code>/p6-&lt;name&gt;</code>.</p>
+  <figure class="diagram has-controls" data-reveal data-anim aria-labelledby="skr-cap">
+    <p class="d-title">A skill run</p>
+    <div class="d-controls"><button class="d-btn" type="button" data-seq-toggle aria-label="Pause the animation">[[i:pause|i-pause]][[i:play|i-play]]<span>Pause</span></button></div>
+    <div class="skr" data-seq data-interval="1300" data-hold="4">
+      <div class="skr-col">
+        <p class="node-label">You ask</p>
+        <p class="bubble" data-at="0">Weekly update review of DEMO-SS225 against the previous update, 3 weeks look-ahead.</p>
+        <p class="node-label">The client picks the skill</p>
+        <div class="skr-file" data-at="1">
+          <p class="fn">[[i:sparkles]]p6-weekly-update-review</p>
+          <p>Progress, finish, critical path, slippage, changes, look-ahead and actions. Read only.</p>
+          <ul>
+            <li><code>SKILL.md</code>the calls, in order</li>
+            <li><code>fields.md</code>a field per figure</li>
+            <li><code>report.md</code>the report to fill</li>
+            <li><code>checks.md</code>stop rules</li>
+          </ul>
+        </div>
+      </div>
+      <div class="skr-link vwire-s" aria-hidden="true"><span aria-hidden="true" class="wire wire-h"></span></div>
+      <div class="skr-col">
+        <p class="node-label">Six calls, one page each</p>
+        <ol class="skr-calls">
+          <li class="skr-call" data-at="2"><span class="st">[[tick]]</span><code>p6_project_summary</code></li>
+          <li class="skr-call" data-at="3"><span class="st">[[tick]]</span><code>p6_progress_check</code></li>
+          <li class="skr-call" data-at="4"><span class="st">[[tick]]</span><code>p6_critical_path</code></li>
+          <li class="skr-call" data-at="5"><span class="st">[[tick]]</span><code>p6_lookahead</code></li>
+          <li class="skr-call" data-at="6"><span class="st">[[tick]]</span><code>p6_compare_projects</code></li>
+          <li class="skr-call" data-at="7"><span class="st">[[tick]]</span><code>p6_compare_projects</code></li>
+        </ol>
+      </div>
+      <div class="skr-link vwire-s" aria-hidden="true"><span aria-hidden="true" class="wire wire-h ok" style="--wd:.8s"></span></div>
+      <div class="skr-col">
+        <p class="node-label">The report</p>
+        <div class="skr-report" data-at="8">
+          <p class="rp-title">Weekly update review of DEMO-SS225</p>
+          <p class="sub">Data date 2026-10-26, read only</p>
+          <div class="kpis"><span><b>49.7%</b>units complete</span><span><b>0.85</b>SPI (units)</span><span><b>+36.0</b>wd finish</span></div>
+          <div class="ln h"></div><div class="ln"></div><div class="ln" style="width:82%"></div>
+          <div class="ln h"></div><div class="ln"></div><div class="ln" style="width:64%"></div>
+          <div class="ln h"></div><div class="ln" style="width:90%"></div>
+        </div>
+      </div>
+    </div>
+    <figcaption id="skr-cap">The weekly update review skill on the demo project: the request, the skill the client picks, its six tool calls and the report. A shortened replay of the exchange is under <a href="#reports">Reports</a>.</figcaption>
+  </figure>
+
+  <h3>The 15 core skills</h3>
+  <p>Installed by the app at its first start and kept up to date from the skill shop. Three of them use write tools and are offered only when writes are allowed.</p>
+  [[skills]]
+
+  <h3>The skill shop</h3>
+  <p>A public catalog on GitHub: the core set maintained with the app and the skills other users share. Read a skill before installing it: it is instructions for the AI.</p>
+  <figure class="diagram has-controls" data-reveal data-anim aria-labelledby="shop-cap">
+    <p class="d-title">Life of a shared skill</p>
+    <div class="d-controls"><button class="d-btn" type="button" data-seq-toggle aria-label="Pause the animation">[[i:pause|i-pause]][[i:play|i-play]]<span>Pause</span></button></div>
+    <ol class="flow" style="--n:5" data-seq data-interval="1500" data-hold="2">
+      <li class="flow-step" data-step><span class="flow-dot">[[i:pencil]]</span><p class="fs-title">Write or copy a skill</p><p>Settings, Skills: New, or Copy to my skills</p></li>
+      <li class="flow-step" data-step><span class="flow-dot">[[i:share]]</span><p class="fs-title">Share on GitHub</p><p>The app copies it; you paste it in the share form</p></li>
+      <li class="flow-step" data-step><span class="flow-dot">[[i:badge-check]]</span><p class="fs-title">Review</p><p>The maintainer reads it and approves</p></li>
+      <li class="flow-step" data-step><span class="flow-dot">[[i:play-circle]]</span><p class="fs-title">Published</p><p>A GitHub Action checks it and adds it to the catalog</p></li>
+      <li class="flow-step" data-step><span class="flow-dot">[[i:download]]</span><p class="fs-title">Installed anywhere</p><p>Skill shop page, or ask your AI (after your confirmation)</p></li>
+    </ol>
+    <p class="flow-loop">newer versions reach every app through automatic updates; skills you edited are left alone</p>
+    <figcaption id="shop-cap">Sharing needs a free GitHub account; without one, export the skill to a zip file. Reading the catalog needs no account.</figcaption>
+  </figure>
+</section>
+
+<section class="doc-section" id="reports" aria-labelledby="reports-h">
+  <h2 id="reports-h"><a class="anchor" href="#reports" aria-hidden="true" tabindex="-1">[[i:link]]</a>Reports you can check</h2>
+  <p>Three outputs of the public demo project DEMO-SS225 (a 225/63 kV substation with synthetic data, data date 26 Oct 2026), from real runs of the server; the chat replay is shortened.</p>
+
+  <h3>Weekly update review, in the chat</h3>
+  <p>A replay of a real run of the weekly update review skill: the six calls, then the report filled from their fields.</p>
+  <figure data-reveal aria-labelledby="chat-cap">
+    <div class="chat" data-chat>
+      <div class="chat-bar"><span class="dot" aria-hidden="true"></span><span class="ttl">AI client</span><span>p6mcp connected</span><button class="d-btn" type="button" data-chat-toggle aria-label="Play the replay">[[i:pause|i-pause]][[i:play|i-play]]<span>Pause</span></button></div>
+      <div class="chat-body" tabindex="0" role="region" aria-label="Chat replay">
+        <p class="msg msg-user">Can you run the weekly update review of DEMO-SS225 and compare it with the previous update DEMO-SS225_PREV, with a 3 week critical look-ahead?</p>
+        <p class="msg msg-skill">[[i:sparkles]]Using the skill p6-weekly-update-review</p>
+        <div class="typing" aria-hidden="true"><i></i><i></i><i></i></div>
+        <ol class="msg calls" aria-label="Tool calls">
+          <li class="call"><span class="st">[[tick]]</span><code>p6_project_summary</code><span>Units 49.7% complete, baseline planned 54.1%, SPI 0.85; finish 2027-10-05, 36.0 working days after the must finish date.</span></li>
+          <li class="call"><span class="st">[[tick]]</span><code>p6_progress_check</code><span>0 out of sequence links; the 7 status checks all at 0; retained logic.</span></li>
+          <li class="call"><span class="st">[[tick]]</span><code>p6_critical_path</code><span>40 critical open activities, 37 with negative float; first page of 15.</span></li>
+          <li class="call"><span class="st">[[tick]]</span><code>p6_lookahead</code><span>26 Oct to 16 Nov 2026: 2 critical activities, both in progress.</span></li>
+          <li class="call"><span class="st">[[tick]]</span><code>p6_compare_projects</code><span>Against DEMO-SS225_BL: 199 activities finish later, 10 earlier.</span></li>
+          <li class="call"><span class="st">[[tick]]</span><code>p6_compare_projects</code><span>Against DEMO-SS225_PREV: 1 activity removed, 5 no longer critical.</span></li>
+        </ol>
+        <div class="typing" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="msg msg-report">
+          <p class="r-h3">Weekly update review of DEMO-SS225</p>
+          <p>Data date 2026-10-26, last schedule run (F9) 2026-10-26 17:30. Read only: nothing was written to the database.</p>
+          <p class="r-h4">Progress</p>
+          <ul>
+            <li>Units % complete (actual / at completion units, labor and nonlabor): 49.7%.</li>
+            <li>Physical % complete (weighted by budget units): 45.7%; duration % complete: 66.4%; activities completed: 65.0%.</li>
+            <li>Baseline planned units % at the data date: 54.1%; SPI (units, earned / baseline planned): 0.85.</li>
+          </ul>
+          <p class="r-h4">Finish</p>
+          <ul>
+            <li>Scheduled finish 2027-10-05, must finish by 2027-08-16: 50.0 calendar days, 36.0 working days of the project calendar (positive = later).</li>
+            <li>Baseline used: DEMO-SS225_BL. Scheduled finish against the baseline's: 50.0 calendar days, 36.0 working days.</li>
+          </ul>
+          <p class="r-h4">Critical path</p>
+          <p>Critical open activities: 40; open activities with negative float: 37.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th scope="col">Activity</th><th scope="col">Early finish</th><th scope="col" class="num">Remaining (d)</th><th scope="col" class="num">Total float (d)</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">PRC-TR-1040 - Power transformers 225/63 kV - manufacturing</th><td>2027-04-02</td><td class="num">106.0</td><td class="num">-36.0</td></tr>
+              <tr><th scope="row">PRC-TR-1050 - Power transformers 225/63 kV - factory acceptance test</th><td>2027-04-09</td><td class="num">5.0</td><td class="num">-36.0</td></tr>
+              <tr><th scope="row">PRC-TR-1060 - Power transformers 225/63 kV - shipping and delivery to site</th><td>2027-06-01</td><td class="num">35.0</td><td class="num">-36.0</td></tr>
+              <tr><th scope="row">MS-1040 - Power transformers delivered to site</th><td>2027-06-01</td><td class="num">0.0</td><td class="num">-36.0</td></tr>
+            </tbody>
+          </table></div>
+          <p>Showing the first 4 of 40 critical activities.</p>
+          <p class="r-h4">Slipped against the baseline</p>
+          <p>Matched activities finishing later: 199; earlier: 10. Causes: late start 144, late start and longer duration 45, longer duration 10, on time 5, earlier 10.</p>
+          <p class="r-h4">Since the previous update</p>
+          <p>Compared with DEMO-SS225_PREV (data date 2026-10-19): open activities with less total float 1; became critical 0; no longer critical 5. CON-SITE-1050 - Temporary site facilities was removed; MS-1100 - Project completion finishes 10.0 working days earlier, its float from -56.0 to -36.0 days.</p>
+          <p class="r-h4">Critical look-ahead (3 weeks)</p>
+          <ul>
+            <li>PRC-GIS225-1040 - 225 kV GIS - manufacturing: in progress, total float -5.0 d.</li>
+            <li>PRC-TR-1040 - Power transformers 225/63 kV - manufacturing: in progress, total float -36.0 d.</li>
+          </ul>
+          <p class="r-h4">Actions</p>
+          <ul>
+            <li>Open activities with negative float: 37. Recover them: the schedule misses the must finish date or a constraint.</li>
+            <li>Activities whose physical % and units % differ: 4. Check them.</li>
+            <li>Critical activities in the look-ahead window: 2. Follow them up.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <figcaption id="chat-cap">Real tool results and report text from the demo project; shortened here (the skill shows 15 rows per table, plus the tables of slips, progress checks and changes). Any MCP client shows the same exchange in its own chat.</figcaption>
+  </figure>
+
+  <h3>Excel dashboard</h3>
+  <p><code>p6_export_dashboard</code> writes a finished workbook from the last F9: values and native Excel charts, no formulas. One A3 page, then three detail sheets. Select an image to see it at full size.</p>
+  <figure data-reveal aria-labelledby="xl-cap">
+    <div class="window" data-tabs>
+      <div class="window-bar"><svg class="app-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="3" fill="#107c41"/><path d="M8 8l8 8M16 8l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg><span class="ttl">DEMO-SS225-dashboard.xlsx</span><span class="win-btns" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="cls"></i></span></div>
+      <div class="tab-panels">
+        <div class="tab-panel" id="xl-p1" role="tabpanel" aria-labelledby="xl-t1">
+          <button class="zoom shot" type="button" data-zoom="/assets/img/dashboard-2600.webp"><img src="/assets/img/dashboard-1300.webp" srcset="/assets/img/dashboard-1300.webp 1300w, /assets/img/dashboard-2600.webp 2600w" sizes="(min-width: 64rem) 48rem, 100vw" width="1300" height="878" alt="Dashboard sheet: 7 cards (progress 49.67%, 40 critical, 72 delayed, schedule variance -15.5%, forecast completion 05-Oct-27, 235 d remaining, 8 milestones late), the S-curve, finish variance by WBS, WBS and level 2 progress, milestones and the critical and delayed activities" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button>
+        </div>
+        <div class="tab-panel" id="xl-p2" role="tabpanel" aria-labelledby="xl-t2" hidden>
+          <button class="zoom shot" type="button" data-zoom="/assets/img/sheet-overview-2000.webp"><img src="/assets/img/sheet-overview-1000.webp" srcset="/assets/img/sheet-overview-1000.webp 1000w, /assets/img/sheet-overview-2000.webp 2000w" sizes="(min-width: 64rem) 48rem, 100vw" width="1000" height="296" alt="Schedule Overview sheet folded to WBS level 2: baseline, current and actual dates, percent complete and labor units per WBS band" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button>
+        </div>
+        <div class="tab-panel" id="xl-p3" role="tabpanel" aria-labelledby="xl-t3" hidden>
+          <button class="zoom shot" type="button" data-zoom="/assets/img/sheet-critical-2000.webp"><img src="/assets/img/sheet-critical-1000.webp" srcset="/assets/img/sheet-critical-1000.webp 1000w, /assets/img/sheet-critical-2000.webp 2000w" sizes="(min-width: 64rem) 48rem, 100vw" width="1000" height="526" alt="Critical Path sheet: the float paths 1 to 5 of the last F9, one block per path" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button>
+        </div>
+        <div class="tab-panel" id="xl-p4" role="tabpanel" aria-labelledby="xl-t4" hidden>
+          <button class="zoom shot" type="button" data-zoom="/assets/img/sheet-reports-2000.webp"><img src="/assets/img/sheet-reports-1000.webp" srcset="/assets/img/sheet-reports-1000.webp 1000w, /assets/img/sheet-reports-2000.webp 2000w" sizes="(min-width: 64rem) 48rem, 100vw" width="1000" height="530" alt="Reports sheet: the DCMA 14 table with pass and fail results, counts, values and thresholds" loading="lazy" decoding="async"><span class="visually-hidden">, open at full size</span></button>
+        </div>
+      </div>
+      <div class="sheet-tabs" role="tablist" aria-label="Sheets">
+        <button type="button" role="tab" id="xl-t1" aria-controls="xl-p1" aria-selected="true">Dashboard</button>
+        <button type="button" role="tab" id="xl-t2" aria-controls="xl-p2" aria-selected="false" tabindex="-1">Schedule Overview</button>
+        <button type="button" role="tab" id="xl-t3" aria-controls="xl-p3" aria-selected="false" tabindex="-1">Critical Path</button>
+        <button type="button" role="tab" id="xl-t4" aria-controls="xl-p4" aria-selected="false" tabindex="-1">Reports</button>
+      </div>
+    </div>
+    <figcaption id="xl-cap">Exported from DEMO-SS225 with <code>company="Demo Contractor"</code> and the default colors. On the demo, 7 DCMA checks fail: lags, finish to start links, high float, negative float, missed tasks, CPLI and BEI.</figcaption>
+  </figure>
+  <ul class="kpi-row" data-reveal aria-label="Dashboard cards as the export returns them">
+    <li><b>49.67%</b>Overall progress, 54.06% planned</li>
+    <li><b>40</b>Critical activities</li>
+    <li><b>72</b>Delayed activities, 3 at risk</li>
+    <li><b>-15.5%</b>Schedule variance, SPI 0.85</li>
+    <li><b>05-Oct-27</b>Forecast completion, +36.0 wd</li>
+    <li><b>235 d</b>Remaining duration</li>
+    <li><b>8 of 8</b>Open milestones late</li>
+  </ul>
+
+  <h3>Driving path and what-if, recorded</h3>
+  <p>A 30 second replay of a real run: the assistant traces the driving path of MS-1100 - Project completion, then tests a change on PRC-TR-1040 - Power transformers 225/63 kV - manufacturing.</p>
+  <figure data-reveal aria-labelledby="gif-cap">
+    <div class="window player" data-player>
+      <div class="window-bar"><svg class="app-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor" opacity=".25"/><path d="M10 8l6 4-6 4z" fill="currentColor"/></svg><span class="ttl">Recorded run on DEMO-SS225</span><span class="win-btns" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="cls"></i></span></div>
+      <div class="shot player-stage">
+        <img src="/assets/img/demo-poster.webp" data-anim-src="/assets/img/demo.gif" width="1280" height="720" alt="Replay of a run on the demo project: the assistant traces the driving path of MS-1100 - Project completion, then runs a what-if on PRC-TR-1040 - Power transformers 225/63 kV - manufacturing" loading="lazy" decoding="async">
+        <button class="player-btn" type="button">[[i:play|i-play]][[i:pause|i-pause]]<span>Play the recording</span></button>
+      </div>
+    </div>
+    <figcaption id="gif-cap">Rendered from the real tool results of the installed server on the demo database (30 s, 0.5 MB, loads when you press play).</figcaption>
+  </figure>
+  <details class="transcript">
+    <summary>Transcript of the recording</summary>
+    <div>
+      <p><strong>You:</strong> What drives MS-1100 - Project completion in DEMO-SS225?</p>
+      <p><strong>Tools:</strong> <code>p6_driving_path(project="DEMO-SS225", target="MS-1100")</code> returns 24 activities, root PRC-TR-1040 - Power transformers 225/63 kV - manufacturing at the data date. <code>p6_float_origin(project="DEMO-SS225", task_code="MS-1100")</code>: the float comes from the project must finish by date, 16 Aug 2027.</p>
+      <p><strong>Assistant:</strong> MS-1100 - Project completion is forecast for 5 Oct 2027. Its driving path has 24 activities and starts at the data date with PRC-TR-1040 - Power transformers 225/63 kV - manufacturing, still in progress, then the factory test, delivery, installation of TR1 and TR2, tests and energization. Total float is -36 days: the project must finish by 16 Aug 2027.</p>
+      <p><strong>You:</strong> What if PRC-TR-1040 - Power transformers 225/63 kV - manufacturing finishes 15 working days earlier?</p>
+      <p><strong>Tool:</strong> <code>p6_schedule_whatif(project="DEMO-SS225", edits=[{"op": "duration", "task_code": "PRC-TR-1040", "add_remaining_days": -15}])</code>, in memory: finish 14 Sep 2027, 15 working days earlier.</p>
+      <p><strong>Assistant:</strong> Nothing is written: in memory, the finish moves from 5 Oct to 14 Sep 2027, 15 working days (21 calendar days) earlier. Total float on the path improves from -36 to -21 days, and 27 activities move. The engine matches P6's last F9 on 100 % of the open activities.</p>
+    </div>
+  </details>
+</section>
+
+<section class="doc-section" id="app" aria-labelledby="app-h">
+  <h2 id="app-h"><a class="anchor" href="#app" aria-hidden="true" tabindex="-1">[[i:link]]</a>The Settings app</h2>
+  <p>Installed with the server, it holds every setting the server reads: the database, the MCP clients, the tool profile and the write switch, the instructions every client receives, the skills and the shop. It follows the Windows light or dark mode, like these captures follow this page's theme.</p>
+  [[gallery]]
+</section>
+
+<section class="doc-section" id="writes" aria-labelledby="writes-h">
+  <h2 id="writes-h"><a class="anchor" href="#writes" aria-hidden="true" tabindex="-1">[[i:link]]</a>Safe writes</h2>
+  <p>XER-file servers read a file, and some edit an XER that you import again. This one writes to the P6 Professional database itself: durations, logic, constraints, actual dates, units, UDFs. The server enforces this sequence on every call, whatever the client.</p>
+  <figure class="diagram has-controls" data-reveal data-anim aria-labelledby="wr-cap">
+    <p class="d-title">Every write</p>
+    <div class="d-controls"><button class="d-btn" type="button" data-seq-toggle aria-label="Pause the animation">[[i:pause|i-pause]][[i:play|i-play]]<span>Pause</span></button></div>
+    <ol class="flow" style="--n:6" data-seq data-interval="1400" data-hold="2">
+      <li class="flow-step" data-step><span class="flow-dot">[[i:power]]</span><p class="fs-title">Off by default</p><p>Full profile and Allow write operations, in Settings</p></li>
+      <li class="flow-step" data-step><span class="flow-dot">[[i:eye]]</span><p class="fs-title">Dry run</p><p>The plan of every change and a single-use token</p></li>
+      <li class="flow-step" data-step><span class="flow-dot">[[i:check]]</span><p class="fs-title">Your explicit yes</p><p>The same call with the token, P6 closed</p></li>
+      <li class="flow-step" data-step><span class="flow-dot">[[i:archive]]</span><p class="fs-title">Backup</p><p>A copy of the database first (on by default)</p></li>
+      <li class="flow-step" data-step><span class="flow-dot">[[i:database]]</span><p class="fs-title">One transaction</p><p>A batch succeeds or fails as a whole</p></li>
+      <li class="flow-step" data-step><span class="flow-dot">[[i:history]]</span><p class="fs-title">Edit log</p><p>Before and after values; any backup can be restored</p></li>
+    </ol>
+    <div class="refusals">[[i:x-circle]]<div><strong>Refused, with nothing written, when:</strong><ul><li>P6 (PM.exe) is running (on by default)</li><li>the P6 schema is untested and not trusted</li><li>the database changed since the dry run</li><li>a delete or restore lacks its typed confirmation</li></ul></div></div>
+    <figcaption id="wr-cap">These rules live in the server, not in the Settings window: every client gets the same two-step flow.</figcaption>
+  </figure>
+  <div class="callout" data-reveal>[[i:refresh]]<div><strong>Then press F9 in P6</strong><p>Planned, early and late dates and float are never written: the server updates the audit fields the way P6 does, and P6 computes the dates when you schedule.</p></div></div>
+</section>
+
+<section class="doc-section" id="repository" aria-labelledby="repository-h">
+  <h2 id="repository-h"><a class="anchor" href="#repository" aria-hidden="true" tabindex="-1">[[i:link]]</a>What is in the repository</h2>
+  <p>Two public repositories: the server and app, and the skill catalog. Everything you install is built from them by GitHub Actions.</p>
+  <figure class="diagram" data-reveal data-anim aria-labelledby="repo-cap">
+    <div class="repo">
+      <div class="repo-card">
+        <p class="repo-name">[[i:git-branch]]<a href="https://github.com/nizarhamza/p6-mcp">nizarhamza/p6-mcp</a></p>
+        <p>The server, the Settings app, the installer and this site. Python 3.10 or later (the installer bundles 3.13), Apache 2.0.</p>
+        <ul class="tree">
+          <li class="hot">[[i:file-code]]<code>p6mcp/server.py</code><span>The 58 tools, the CPM engine, XER read and write</span></li>
+          <li>[[i:shield]]<code>policy.py, confirm.py</code><span>Tool profiles, the gate and the two-step writes</span></li>
+          <li>[[i:zap]]<code>http_server.py</code><span>Local HTTP on 127.0.0.1 with a bearer token</span></li>
+          <li>[[i:folder]]<code>p6mcp/clients/</code><span>One adapter per MCP client: register, repair, remove</span></li>
+          <li>[[i:sparkles]]<code>skills.py, shop.py</code><span>P6 skills, the core set and the skill shop</span></li>
+          <li>[[i:folder]]<code>p6mcp/settings_app/</code><span>Settings window and tray app (PySide6), updates</span></li>
+          <li>[[i:package]]<code>packaging/</code><span>PyInstaller build, Inno Setup installer, .mcpb</span></li>
+          <li>[[i:test-tube]]<code>tests/</code><span>pytest on a synthetic P6 database and the demo project</span></li>
+          <li>[[i:globe]]<code>site/</code><span>This site</span></li>
+        </ul>
+      </div>
+      <div class="repo-mid vwire-s" aria-hidden="true"><span aria-hidden="true" class="wire wire-h"></span></div>
+      <div class="repo-out">
+        <div class="out">[[i:package]]<div><strong>GitHub Releases</strong>Windows installer, portable zip, .mcpb bundle and SHA256SUMS, built by the release workflow</div></div>
+        <div class="out">[[i:badge-check]]<div><strong>MCP Registry</strong><code>io.github.nizarhamza/p6-mcp</code>, published with each release</div></div>
+        <div class="out">[[i:globe]]<div><strong>This site</strong>Deployed from <code>site/</code> on every push</div></div>
+      </div>
+    </div>
+    <div class="repo-join vwire"><span aria-hidden="true" class="wire wire-h rev" style="--wd:.9s"></span><span>core skills bundled with each release</span></div>
+    <div class="repo">
+      <div class="repo-card">
+        <p class="repo-name">[[i:git-branch]]<a href="https://github.com/nizarhamza/p6-mcp-shop">nizarhamza/p6-mcp-shop</a></p>
+        <p>The skill catalog: the core set and the skills users share.</p>
+        <ul class="tree">
+          <li class="hot">[[i:folder]]<code>src/&lt;skill&gt;/</code><span>Template, reference files and call spec of each skill</span></li>
+          <li>[[i:file-code]]<code>tools/catalog.py</code><span>Builds and checks the catalog</span></li>
+          <li>[[i:test-tube]]<code>tools/golden.py</code><span>Runs each core skill on the demo project</span></li>
+          <li>[[i:play-circle]]<code>.github/workflows/</code><span>Check every change, publish approved skills</span></li>
+        </ul>
+      </div>
+      <div class="repo-mid vwire-s" aria-hidden="true"><span aria-hidden="true" class="wire wire-h" style="--wd:.5s"></span></div>
+      <div class="repo-out">
+        <div class="out">[[i:store]]<div><strong>Catalog index</strong>Read by the Skill shop page and the <code>p6_shop_*</code> tools; no account needed</div></div>
+      </div>
+    </div>
+    <figcaption id="repo-cap">The app's only network calls go to GitHub: release updates and the skill catalog. Both can be turned off in Settings.</figcaption>
+  </figure>
+</section>
+
+<section class="doc-section" id="install" aria-labelledby="install-h">
+  <h2 id="install-h"><a class="anchor" href="#install" aria-hidden="true" tabindex="-1">[[i:link]]</a>Install in five minutes</h2>
+  <p>Windows 10 or 11, next to P6 Professional. Python is bundled: nothing else to install.</p>
+  <ol class="steps">
+    <li data-reveal><h3>Download</h3><p><code>P6MCP-Setup-2.0.0.exe</code> from the latest release; check it against <code>SHA256SUMS.txt</code>.</p></li>
+    <li data-reveal><h3>Run the installer</h3><p>Per-user install, no administrator rights. Its last page offers to register the server with the MCP clients it finds.</p></li>
+    <li data-reveal><h3>Pick your database</h3><p>In the Settings window: your P6 database, <strong>Test connection</strong> (read only), <strong>Use this database</strong>, <strong>Save</strong>.</p></li>
+    <li data-reveal><h3>Ask</h3><p>Restart your MCP client and ask: "List my P6 projects".</p></li>
+  </ol>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="https://github.com/nizarhamza/p6-mcp/releases/latest">[[i:download]]Download for Windows</a>
+    <a class="btn btn-secondary" href="https://github.com/nizarhamza/p6-mcp#connect-your-mcp-client">Manual setup per client</a>
+  </div>
+  <h3>MCP clients</h3>
+  <ul class="client-list">
+    <li>Claude Desktop <span>installer or .mcpb bundle</span></li>
+    <li>Claude Code <span>installer</span></li>
+    <li>Cursor <span>installer</span></li>
+    <li>VS Code (Copilot agent mode) <span>installer</span></li>
+    <li>LM Studio <span>installer</span></li>
+    <li>Cline <span>installer</span></li>
+    <li>ChatGPT <span>Codex or Secure MCP Tunnel, not tested yet</span></li>
+    <li>Any other MCP client <span>stdio or local HTTP</span></li>
+  </ul>
+</section>
+
+<section class="doc-section" id="compare" aria-labelledby="compare-h">
+  <h2 id="compare-h"><a class="anchor" href="#compare" aria-hidden="true" tabindex="-1">[[i:link]]</a>Compared with XER-only servers</h2>
+  <p>Several MCP servers parse P6 XER files. This one works on the P6 database itself and reads XER files too.</p>
+  <div class="table-wrap">
+    <table class="compare">
+      <caption>"Varies": some XER servers do it, others do not.</caption>
+      <thead><tr><th scope="col">Capability</th><th scope="col" class="ours">MCP for Primavera P6</th><th scope="col">Typical XER-file MCP server</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Reads the P6 Professional database directly</th><td class="ours">Yes, every project, baseline, code, UDF and schedule option</td><td>No: export an XER first</td></tr>
+        <tr><th scope="row">Writes changes back to P6</th><td class="ours">Yes, into the database; then F9 in P6</td><td>No, or edits an XER you import again</td></tr>
+        <tr><th scope="row">Dry run, confirmation token, backup, edit log, restore</th><td class="ours">Yes, enforced by the server</td><td>Not applicable, or varies</td></tr>
+        <tr><th scope="row">Reads, imports and exports XER files</th><td class="ours">Yes, plus an XER-only mode</td><td>Reads them</td></tr>
+        <tr><th scope="row">CPM engine checked against P6's F9 dates</th><td class="ours">Yes, for what-if and Monte Carlo risk</td><td>Varies</td></tr>
+        <tr><th scope="row">DCMA thresholds taken from the P6 project</th><td class="ours">Yes, DCMA defaults when none are set</td><td>Varies</td></tr>
+        <tr><th scope="row">Excel dashboard and P6 skills</th><td class="ours">Yes</td><td>Varies</td></tr>
+        <tr><th scope="row">Installation</th><td class="ours">Windows installer and Settings window; registers your MCP clients</td><td>Usually a Python package</td></tr>
+        <tr><th scope="row">Runs on macOS or Linux</th><td class="ours">No</td><td>Usually yes</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="doc-section" id="faq" aria-labelledby="faq-h">
+  <h2 id="faq-h"><a class="anchor" href="#faq" aria-hidden="true" tabindex="-1">[[i:link]]</a>FAQ</h2>
+  <div class="faq">
+    <details><summary>What is an MCP server for Primavera P6?</summary><div><p>MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant 58 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model.</p></div></details>
+    <details><summary>Can the AI change my P6 schedule?</summary><div><p>Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9.</p></div></details>
+    <details><summary>Does my schedule leave my PC?</summary><div><p>The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio.</p></div></details>
+    <details><summary>Are the dates computed by the AI?</summary><div><p>No. Dates and float come from P6's last schedule run. What-if and risk use the server's CPM engine, and <code>p6_cpm_validate</code> shows how closely it matches P6's own dates on your project before you rely on it.</p></div></details>
+    <details><summary>Which P6 versions and databases are supported?</summary><div><p>P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM and P6 Professional on SQL Server or Oracle are not supported.</p></div></details>
+    <details><summary>Do I need P6 installed?</summary><div><p>Not for XER files: XER-only mode analyses them without P6 or a P6 database.</p></div></details>
+    <details><summary>Does it work with ChatGPT?</summary><div><p>Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented in the <a href="https://github.com/nizarhamza/p6-mcp#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer.</p></div></details>
+    <details><summary>Does it run on macOS or Linux?</summary><div><p>No. P6 Professional is a Windows program and the server is built for Windows 10 and 11.</p></div></details>
+  </div>
+</section>

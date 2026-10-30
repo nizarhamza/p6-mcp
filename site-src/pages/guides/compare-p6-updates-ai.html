@@ -1,0 +1,113 @@
+<!--page
+{
+  "url": "/guides/compare-p6-updates-ai/",
+  "title": "Compare Two Primavera P6 Updates with AI: slips, float, logic changes",
+  "description": "Compare two Primavera P6 schedule updates with an AI assistant: activity and link changes, slip causes, float erosion, and an integrity review of what changed and why.",
+  "canonical": "https://mcp-for-primavera-p6.pages.dev/guides/compare-p6-updates-ai/",
+  "toc": [
+    ["load", "Load both updates"],
+    ["what", "What changed"],
+    ["why", "Why the finish moved"],
+    ["baseline", "Against the baseline"],
+    ["prompts", "Prompts that work well"]
+  ],
+  "cta": "guide"
+}
+-->
+<!--head-->
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="MCP for Primavera P6">
+<meta property="og:title" content="Compare two Primavera P6 updates with AI">
+<meta property="og:description" content="What changed between two P6 updates, why the finish moved, and the questions to ask about it.">
+<meta property="og:url" content="https://mcp-for-primavera-p6.pages.dev/guides/compare-p6-updates-ai/">
+<meta property="og:image" content="https://mcp-for-primavera-p6.pages.dev/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Compare two Primavera P6 updates with AI",
+      "description": "Compare two Primavera P6 schedule updates with an AI assistant and an MCP server: activity and link changes, slip causes, float erosion, and an integrity review.",
+      "url": "https://mcp-for-primavera-p6.pages.dev/guides/compare-p6-updates-ai/",
+      "datePublished": "2026-10-29",
+      "dateModified": "2026-10-29",
+      "inLanguage": "en",
+      "proficiencyLevel": "Expert",
+      "author": { "@type": "Person", "name": "Nizar Hamza", "url": "https://github.com/nizarhamza" },
+      "about": [ { "@type": "Thing", "name": "Schedule update review" }, { "@type": "SoftwareApplication", "name": "Primavera P6 Professional" } ],
+      "mentions": { "@id": "https://mcp-for-primavera-p6.pages.dev/#app" },
+      "image": "https://mcp-for-primavera-p6.pages.dev/assets/og.png",
+      "isPartOf": { "@id": "https://mcp-for-primavera-p6.pages.dev/#site" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://mcp-for-primavera-p6.pages.dev/" },
+        { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://mcp-for-primavera-p6.pages.dev/guides/" },
+        { "@type": "ListItem", "position": 3, "name": "Comparing two P6 updates with AI", "item": "https://mcp-for-primavera-p6.pages.dev/guides/compare-p6-updates-ai/" }
+      ]
+    }
+  ]
+}
+</script>
+<!--/head-->
+<header class="doc-head"><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">Guides</a></li><li aria-current="page">Comparing updates</li></ol></nav><h1 class="page-title" id="page-title">Compare two Primavera P6 updates with AI</h1><p class="lede">Put this month's update next to last month's and ask what changed: activities and links compared one by one, the cause of each slip, float that eroded, and the changes a reviewer should question before accepting a better finish date.</p><p class="doc-meta">Tools: <code>p6_compare_projects</code>, <code>p6_update_integrity</code>, <code>p6_health_check_compare</code> &middot; Profile: Full</p><p class="doc-note">[[i:info]]<span>Every result on this page comes from DEMO-SS225, a public demo project with synthetic data.</span></p></header>
+<article class="prose">
+      <h2 id="load"><a class="anchor" href="#load" aria-hidden="true" tabindex="-1">[[i:link]]</a>Load both updates</h2>
+      <p>The server compares two projects matched by Activity ID, so it needs both updates in front of it. Two ways:</p>
+      <ul>
+        <li><strong>In the P6 database</strong>: keep the previous update as a baseline or a copy of the project (DEMO-SS225_PREV on the demo), next to the current one (DEMO-SS225).</li>
+        <li><strong>From XER files, without P6</strong>: in the Settings window choose <strong>Database &gt; Data source &gt; XER files only</strong>, add both XER files and click <strong>Load and check</strong>. When both carry the same Project ID, the second one gets a <code>~2</code> suffix (DEMO-SS225~2).</li>
+      </ul>
+
+      <h2 id="what"><a class="anchor" href="#what" aria-hidden="true" tabindex="-1">[[i:link]]</a>What changed</h2>
+      <pre class="prompt" data-copy="prompt">Compare DEMO-SS225 with the previous update DEMO-SS225_PREV. Summarize the finish date change, the slips and their causes, float erosion and logic changes.</pre>
+      <p>The assistant calls <code>p6_compare_projects(project="DEMO-SS225", other="DEMO-SS225_PREV")</code>. Activities are matched by Activity ID and links by predecessor, successor and type. The summary covers the whole project, then the rows page the activities by largest variance.</p>
+      <div class="table-wrap">
+        <table>
+          <caption>DEMO-SS225 against DEMO-SS225_PREV, synthetic data.</caption>
+          <thead><tr><th scope="col">Item</th><th scope="col" class="num">Result</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">MS-1100 - Project completion</th><td class="num">19 Oct 2027 to 5 Oct 2027 (14 calendar days, 10 working days earlier)</td></tr>
+            <tr><th scope="row">Activities matched / added / removed</th><td class="num">214 / 0 / 1</td></tr>
+            <tr><th scope="row">Finishing later / earlier</th><td class="num">2 / 5</td></tr>
+            <tr><th scope="row">Slip causes of the later ones</th><td class="num">longer duration: 2, late start: 0</td></tr>
+            <tr><th scope="row">Float eroded / no longer critical</th><td class="num">1 / 5</td></tr>
+            <tr><th scope="row">Links added / removed / lag changed</th><td class="num">2 / 4 / 1</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The slip cause is computed per activity on its own calendar: a late start, a longer duration, or both, so start variance plus duration change equals finish variance exactly. Variances come in calendar days and in working days.</p>
+
+      <h2 id="why"><a class="anchor" href="#why" aria-hidden="true" tabindex="-1">[[i:link]]</a>Why the finish moved</h2>
+      <p>A finish two weeks earlier in a project with negative float is good news only if the work behind it changed. That is what <code>p6_update_integrity</code> checks.</p>
+      <pre class="prompt" data-copy="prompt">Run an integrity review of DEMO-SS225 against DEMO-SS225_PREV. For each flag, give the activities as Activity ID - name with before and after values.</pre>
+      <div class="table-wrap">
+        <table>
+          <caption>Flags raised on the demo update. Each one is a question, not proof.</caption>
+          <thead><tr><th scope="col">Flag</th><th scope="col">What the server found</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Duration cut</th><td>COM-ENR-1050 - Trial operation: 30 to 20 days while critical; CON-SEC-1060 - Perimeter lighting and CCTV: 20 to 15 days</td></tr>
+            <tr><th scope="row">Must finish by moved</th><td>2 Aug 2027 to 16 Aug 2027 (14 calendar days later)</td></tr>
+            <tr><th scope="row">Negative float cleared</th><td>6 activities, for example COM-PRE-1040 - 225 kV cable sheath and high-voltage tests: -14 to +6 days, because the must finish by date moved</td></tr>
+            <tr><th scope="row">Link removed on critical work</th><td>COM-PRE-1090 - Auxiliary systems tests to COM-ENR-1000 - Energization procedure approval, FS</td></tr>
+            <tr><th scope="row">Type or lag changed</th><td>CON-HV-1060 - 225 kV cable laying to CON-HV-1070 - 225 kV cable terminations: SS 10 d became FS; a foundations link lag went from 3 to 5 days</td></tr>
+            <tr><th scope="row">Actual dates rewritten</th><td>PRC-GIS225-1040 - 225 kV GIS - manufacturing: actual start moved 7 days earlier</td></tr>
+            <tr><th scope="row">Activity deleted</th><td>CON-SITE-1050 - Temporary site facilities, in progress in the previous update</td></tr>
+            <tr><th scope="row">Schedule options and calendars</th><td>"Make open-ended activities critical" turned off; one activity moved from a 6-day to a 5-day calendar; a holiday added</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Read together: the 10 working days gained at the finish match the 10 days cut from Trial operation, a critical activity, while the must finish by date moved 14 days later and cleared negative float on six activities. Neither change is wrong in itself; both need a reason and evidence from whoever submitted the update. The server says so in every result: the flags are questions to raise, not proof of manipulation.</p>
+      <div class="callout">[[i:info]]<div><strong>Health trend between the two</strong><p>Run the DCMA check on each update and ask the assistant to compare them, or, when the same project was checked before and after, use <code>p6_health_check_compare</code> for the checks that got worse and the activities that entered them.</p></div></div>
+
+      <h2 id="baseline"><a class="anchor" href="#baseline" aria-hidden="true" tabindex="-1">[[i:link]]</a>Against the baseline</h2>
+      <p>Without <code>other=</code>, <code>p6_compare_projects</code> compares the project with its P6 baseline. Add <code>dates="planned"</code> to compare against the baseline's planned dates instead of its current ones. For milestones only, <code>p6_milestones</code> gives each milestone's variance against the baseline in working and calendar days.</p>
+
+      <h2 id="prompts"><a class="anchor" href="#prompts" aria-hidden="true" tabindex="-1">[[i:link]]</a>Prompts that work well</h2>
+      <pre class="prompt" data-copy="prompt">List the 10 activities that slipped most since DEMO-SS225_PREV, with the slip cause and the change in total float.</pre>
+      <pre class="prompt" data-copy="prompt">Which relationships were removed or changed since the previous update, and was the successor critical?</pre>
+      <pre class="prompt" data-copy="prompt">Write a one-page update review for the client: finish date change, what drove it, open questions from the integrity review.</pre></article>
+<div class="next-guides"><h2 id="next-guides">Next</h2><ul class="cards"><li><a class="card" href="/guides/review-xer-before-submission/"><h3>AI review of an XER before submission</h3><p>Run the same review on an XER before it goes out.</p><span class="card-more">Read the guide[[i:arrow-right]]</span></a></li><li><a class="card" href="/guides/driving-path-p6-claude/"><h3>Driving path in P6 with Claude</h3><p>Trace what now drives the finish.</p><span class="card-more">Read the guide[[i:arrow-right]]</span></a></li></ul></div>

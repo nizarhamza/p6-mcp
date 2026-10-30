@@ -504,11 +504,15 @@ python -m venv .venv
 .venv\Scripts\python -m pytest -q
 .venv\Scripts\python -m p6mcp.settings_app      # Settings window
 .venv\Scripts\python tools\gen_docs.py          # tool tables of README.md and site/llms.txt
+.venv\Scripts\python tools\build_site.py        # landing site pages from site-src/pages
+.venv\Scripts\python tools\serve_site.py        # preview site/ with its headers on http://127.0.0.1:8642
 ```
 
 Tests run on a synthetic P6 database and synthetic XER files built by the tests (`tests/fixtures/make_db.py`).
 Never commit a real schedule, database, XER file or log. Building the installer and releasing:
-[docs/RELEASING.md](docs/RELEASING.md). The landing site is in [site/](site/).
+[docs/RELEASING.md](docs/RELEASING.md). The landing site in [site/](site/) is generated from
+[site-src/pages](site-src/pages) by `tools/build_site.py` (a test fails when the two are out of step): edit the
+sources, never the generated pages.
 
 To contribute, start with an issue: see [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [code of conduct](CODE_OF_CONDUCT.md). Accessibility: [ACCESSIBILITY.md](ACCESSIBILITY.md).

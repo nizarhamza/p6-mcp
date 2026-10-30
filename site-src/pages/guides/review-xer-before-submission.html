@@ -1,0 +1,106 @@
+<!--page
+{
+  "url": "/guides/review-xer-before-submission/",
+  "title": "AI Review of a P6 XER File Before Submission: a checklist",
+  "description": "Check a Primavera P6 XER update with an AI assistant before you submit it, or when you receive one: file checks, logic, progress, integrity against the previous update.",
+  "canonical": "https://mcp-for-primavera-p6.pages.dev/guides/review-xer-before-submission/",
+  "toc": [
+    ["load", "Open the XER without importing it"],
+    ["file", "1. The file"],
+    ["logic", "2. Logic and quality"],
+    ["progress", "3. Progress"],
+    ["changes", "4. Changes since the last submission"],
+    ["options", "5. Schedule options"],
+    ["checklist", "Checklist"],
+    ["privacy", "Confidential projects"]
+  ],
+  "cta": "guide"
+}
+-->
+<!--head-->
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="MCP for Primavera P6">
+<meta property="og:title" content="AI review of a P6 XER file before submission">
+<meta property="og:description" content="File checks, logic, progress and integrity of an update XER, without importing it.">
+<meta property="og:url" content="https://mcp-for-primavera-p6.pages.dev/guides/review-xer-before-submission/">
+<meta property="og:image" content="https://mcp-for-primavera-p6.pages.dev/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "AI review of a P6 XER file before submission",
+      "description": "Check a Primavera P6 XER update with an AI assistant and an MCP server before you submit it, or when you receive one: file checks, logic, progress, integrity against the previous update.",
+      "url": "https://mcp-for-primavera-p6.pages.dev/guides/review-xer-before-submission/",
+      "datePublished": "2026-10-29",
+      "dateModified": "2026-10-29",
+      "inLanguage": "en",
+      "proficiencyLevel": "Expert",
+      "author": { "@type": "Person", "name": "Nizar Hamza", "url": "https://github.com/nizarhamza" },
+      "about": [ { "@type": "Thing", "name": "XER file" }, { "@type": "Thing", "name": "Schedule submission review" }, { "@type": "SoftwareApplication", "name": "Primavera P6 Professional" } ],
+      "mentions": { "@id": "https://mcp-for-primavera-p6.pages.dev/#app" },
+      "image": "https://mcp-for-primavera-p6.pages.dev/assets/og.png",
+      "isPartOf": { "@id": "https://mcp-for-primavera-p6.pages.dev/#site" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://mcp-for-primavera-p6.pages.dev/" },
+        { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://mcp-for-primavera-p6.pages.dev/guides/" },
+        { "@type": "ListItem", "position": 3, "name": "AI review of an XER before submission", "item": "https://mcp-for-primavera-p6.pages.dev/guides/review-xer-before-submission/" }
+      ]
+    }
+  ]
+}
+</script>
+<!--/head-->
+<header class="doc-head"><nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li><a href="/guides/">Guides</a></li><li aria-current="page">XER review</li></ol></nav><h1 class="page-title" id="page-title">AI review of a P6 XER file before submission</h1><p class="lede">The monthly update XER is what the client sees. Check it the way their reviewer will, before it leaves: the file itself, the logic, the progress and what changed since the last submission. The same steps work when you are the reviewer.</p><p class="doc-meta">Tools: <code>p6_inspect_xer</code>, <code>p6_health_check</code>, <code>p6_dangling</code>, <code>p6_redundant_links</code>, <code>p6_progress_check</code>, <code>p6_update_integrity</code>, <code>p6_schedule_options</code> &middot; Profile: Full</p><p class="doc-note">[[i:info]]<span>Every result on this page comes from DEMO-SS225, a public demo project with synthetic data.</span></p></header>
+<article class="prose">
+      <h2 id="load"><a class="anchor" href="#load" aria-hidden="true" tabindex="-1">[[i:link]]</a>Open the XER without importing it</h2>
+      <p>Nothing here writes to a P6 database. In the Settings window choose <strong>Database &gt; Data source &gt; XER files only</strong>, add the XER you are about to send, and the previous submission if you have it, then click <strong>Load and check</strong>. The files are read into a private read-only copy and every read tool works on it. P6 does not need to be installed.</p>
+
+      <h2 id="file"><a class="anchor" href="#file" aria-hidden="true" tabindex="-1">[[i:link]]</a>1. The file</h2>
+      <pre class="prompt" data-copy="prompt">Inspect D:\Submissions\DEMO-SS225_2026-10.xer and tell me if anything would fail or be lost on import.</pre>
+      <p><code>p6_inspect_xer</code> reads the file without importing it: header and P6 version, encoding (UTF-8, or cp1252 with the offset of the first non UTF-8 byte), the end marker, rows per table, projects with their data dates, and the import pre-flight. The pre-flight reports errors that would stop an import (an activity without WBS or calendar, a duplicate Activity ID, an assignment of an activity missing from the file, a row whose field count does not match its table) and warnings.</p>
+      <p>On the demo update: exported by P6 24.12, UTF-8 without byte order mark, end marker present, one project (DEMO-SS225, data date 26 Oct 2026) with 214 activities, 332 relationships and 257 resource assignments, no errors and no warnings.</p>
+
+      <h2 id="logic"><a class="anchor" href="#logic" aria-hidden="true" tabindex="-1">[[i:link]]</a>2. Logic and quality</h2>
+      <pre class="prompt" data-copy="prompt">Run the DCMA 14-point check on the XER project, then list its open starts and open finishes and the links that are candidates for removal.</pre>
+      <ul>
+        <li><code>p6_health_check</code>: the DCMA 14 checks (see the <a href="/guides/dcma-14-point-check-ai/">DCMA guide</a>). An XER carries no P6 schedule check settings, so the DCMA defaults apply unless you give thresholds.</li>
+        <li><code>p6_dangling</code>: activities whose start or finish is not driven by logic, with a suggested link for each. The demo update has none.</li>
+        <li><code>p6_redundant_links</code>: links implied by another chain of finish-to-start links, duplicates, and links from completed predecessors to open work, each with what removing it would change.</li>
+      </ul>
+
+      <h2 id="progress"><a class="anchor" href="#progress" aria-hidden="true" tabindex="-1">[[i:link]]</a>3. Progress</h2>
+      <pre class="prompt" data-copy="prompt">Check the progress of the XER project: out-of-sequence links and status inconsistencies.</pre>
+      <p><code>p6_progress_check</code> lists the links whose successor progressed before its predecessor allowed it (by link type) and the status inconsistencies: in progress without an actual start, completed with remaining work, 100 % but not completed, not started with actual dates. The demo update has no out-of-sequence link and no inconsistency.</p>
+
+      <h2 id="changes"><a class="anchor" href="#changes" aria-hidden="true" tabindex="-1">[[i:link]]</a>4. Changes since the last submission</h2>
+      <pre class="prompt" data-copy="prompt">Run an integrity review of DEMO-SS225 against the previous submission DEMO-SS225~2 and list the flags.</pre>
+      <p>When the previous submission is loaded too, <code>p6_update_integrity</code> raises what a client's reviewer will ask about: open ends tied to the finish, negative float cleared by a constraint or a moved must finish by date, actual dates rewritten, durations cut, links to critical work removed, link types and lags changed, schedule options and calendars changed, in-progress or critical activities deleted, a data date that did not move. On the demo update it raises ten flags, detailed in the <a href="/guides/compare-p6-updates-ai/">comparison guide</a>. Every flag is a question to answer before submission, not a verdict.</p>
+
+      <h2 id="options"><a class="anchor" href="#options" aria-hidden="true" tabindex="-1">[[i:link]]</a>5. Schedule options</h2>
+      <pre class="prompt" data-copy="prompt">Compare the schedule options in the XER with the ones of project DEMO-SS225 in my database.</pre>
+      <p><code>p6_schedule_options(project="DEMO-SS225", xer_path="...")</code> shows the options stored in P6 and the ones in the XER side by side, differences first: retained logic or progress override, the lag calendar, open-ended activities critical, the critical definition. A change of options between submissions moves dates without a single activity changing.</p>
+
+      <h2 id="checklist"><a class="anchor" href="#checklist" aria-hidden="true" tabindex="-1">[[i:link]]</a>Checklist</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Check</th><th scope="col">Tool</th><th scope="col">Ready to submit when</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">File integrity</th><td><code>p6_inspect_xer</code></td><td>No pre-flight error; the data date is the one you reported</td></tr>
+            <tr><th scope="row">Logic</th><td><code>p6_health_check</code>, <code>p6_dangling</code></td><td>No open ends except the start and finish milestones</td></tr>
+            <tr><th scope="row">Leads, lags, constraints</th><td><code>p6_health_check</code></td><td>Every exception has a reason you can state</td></tr>
+            <tr><th scope="row">Progress</th><td><code>p6_progress_check</code></td><td>No status inconsistency; out-of-sequence links explained</td></tr>
+            <tr><th scope="row">Changes since last month</th><td><code>p6_update_integrity</code></td><td>Each flag has an answer and its evidence</td></tr>
+            <tr><th scope="row">Schedule options</th><td><code>p6_schedule_options</code></td><td>Same options as the accepted baseline, or a documented change</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="privacy"><a class="anchor" href="#privacy" aria-hidden="true" tabindex="-1">[[i:link]]</a>Confidential projects</h2>
+      <p>The server reads the XER on your PC and sends nothing anywhere. The results of each tool go to the AI model your MCP client uses: with a cloud model, they reach its provider, like any message you type. If the submission is confidential, run the review with a local model, for example in LM Studio; pick one that handles many tools, since this review uses the Full profile.</p></article>
+<div class="next-guides"><h2 id="next-guides">Next</h2><ul class="cards"><li><a class="card" href="/guides/compare-p6-updates-ai/"><h3>Comparing two P6 updates with AI</h3><p>The integrity flags of the demo update, one by one.</p><span class="card-more">Read the guide[[i:arrow-right]]</span></a></li><li><a class="card" href="/guides/dcma-14-point-check-ai/"><h3>DCMA 14-point check with AI</h3><p>Read each check and drill into it.</p><span class="card-more">Read the guide[[i:arrow-right]]</span></a></li></ul></div>
