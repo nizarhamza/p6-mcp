@@ -27,7 +27,9 @@ SITE = os.path.join(ROOT, "site")
 PAGES = os.path.join(ROOT, "site-src", "pages")
 CORE = os.path.join(ROOT, "p6mcp", "data", "core_skills")
 REL = "https://github.com/nizarhamza/p6-mcp/releases/latest"
-GH = "https://github.com/nizarhamza/p6-mcp"
+with open(os.path.join(ROOT, "p6mcp", "__init__.py"), encoding="utf-8") as _fh:  # the release the buttons offer
+    VERSION = re.search(r'__version__ = "([^"]+)"', _fh.read()).group(1)
+GH ="https://github.com/nizarhamza/p6-mcp"
 AUTHOR = "Nizar Hamza"  # as in the JSON-LD and NOTICE; link previews (LinkedIn) read it from <meta name="author">
 FORBIDDEN = ("—", "–", " -- ")  # writing rule of the site: no em dash, en dash or double hyphen
 
@@ -336,9 +338,9 @@ def toc(items, cta):
 
 CTA = {
     "home": (f'<div class="toc-cta"><strong>Free Windows installer</strong><p>Registers the server with the MCP clients it finds.</p>'
-             f'<a class="btn btn-primary btn-s" href="{REL}">{icon("download")}Download 2.0.0</a></div>'),
+             f'<a class="btn btn-primary btn-s" href="{REL}">{icon("download")}Download {VERSION}</a></div>'),
     "guide": (f'<div class="toc-cta"><strong>Try it on your own schedule</strong><p>Free Windows installer. Works on your P6 database or on an XER file.</p>'
-              f'<a class="btn btn-primary btn-s" href="{REL}">{icon("download")}Download 2.0.0</a></div>'),
+              f'<a class="btn btn-primary btn-s" href="{REL}">{icon("download")}Download {VERSION}</a></div>'),
 }
 
 FOOTER = f'''<footer class="site-foot">
