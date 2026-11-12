@@ -1,0 +1,70 @@
+ERMHDR	25.10	2026-11-02	Project	UBPQN43AI	Person AOZWZX7B	Database YHF3EDGX	Project Management	USD
+%T	CURRTYPE
+%F	curr_id	decimal_digit_cnt	curr_symbol	decimal_symbol	digit_group_symbol	pos_curr_fmt_type	neg_curr_fmt_type	curr_type	curr_short_name	group_digit_cnt	base_exch_rate	create_date	create_user	update_date	update_user
+%R	1	2	$	.	,	#1.1	(#1.1)	US Dollar	USD	3	1	2026-04-29 09:33	URXUIS55Q	2026-04-29 09:33	URXUIS55Q
+%R	13	2	£	.	,	#1.1	(#1.1)	Pound Sterling	GBP	3	0.618603			2010-01-13 11:07	U55KP2TDA
+%R	14	2	¥	.	,	#1.1	(#1.1)	Japanese Yen	JPY	3	91.2708	2010-01-12 10:07	U7WL6AQI7	2010-01-13 11:23	U55KP2TDA
+%R	15	2	€	.	,	#1.1	(#1.1)	Euro	EUR	3	0.689711	2010-01-12 10:07	U7WL6AQI7	2010-01-13 11:28	U55KP2TDA
+%R	16	2	¥	.	,	#1.1	(#1.1)	Chinese Yuan Renminbi	CNY	3	6.82502	2010-01-12 10:07	U7WL6AQI7	2010-01-13 11:31	U55KP2TDA
+%R	17	2	$	.	,	#1.1	(#1.1)	Canadian Dollar	CAD	3	1.03757	2010-01-12 10:07	U7WL6AQI7	2010-01-13 11:32	U55KP2TDA
+%R	18	2	RUB	.	,	#1.1	(#1.1)	Russian Ruble	RUB	3	0.033948	2010-01-12 10:07	U7WL6AQI7	2010-01-13 11:51	U55KP2TDA
+%R	19	2	$	.	,	#1.1	(#1.1)	Argentine Peso	ARS	3	3.79109	2010-01-15 13:55	U55KP2TDA	2010-01-15 13:58	U55KP2TDA
+%R	20	2	$b	.	,	#1.1	(#1.1)	Bolivian Boliviano	BOB	3	7.5708	2010-01-15 13:55	U55KP2TDA	2010-01-15 14:01	U55KP2TDA
+%R	21	2	R$	.	,	#1.1	(#1.1)	Brazilian Real	BRL	3	1.7665	2010-01-15 13:55	U55KP2TDA	2010-01-15 14:03	U55KP2TDA
+%R	22	2	$	.	,	#1.1	(#1.1)	Chilean Peso	CLP	3	507.58	2010-01-15 13:55	U55KP2TDA	2010-01-15 14:04	U55KP2TDA
+%R	23	2	$	.	,	#1.1	(#1.1)	Columbian Peso	COP	3	1957.74	2010-01-15 13:55	U55KP2TDA	2010-01-15 14:05	U55KP2TDA
+%R	24	2	$	.	,	#1.1	(#1.1)	Guyanese Dollar	GYD	3	202.95	2010-01-15 13:55	U55KP2TDA	2010-01-15 14:06	U55KP2TDA
+%R	25	2	Gs	.	,	#1.1	(#1.1)	Paraguayan Guarani	PYG	3	4640	2010-01-15 14:06	U55KP2TDA	2010-01-15 14:07	U55KP2TDA
+%R	26	2	S/.	.	,	#1.1	(#1.1)	Peruvian Nuevo Sol	PEN	3	2.7244	2010-01-15 14:06	U55KP2TDA	2010-01-15 14:08	U55KP2TDA
+%R	27	2	$	.	,	#1.1	(#1.1)	Surinamese Dollar	SRD	3	2.8	2010-01-15 14:06	U55KP2TDA	2010-01-15 14:09	U55KP2TDA
+%R	28	2	Bs	.	,	#1.1	(#1.1)	Venezuelan Bolivar Fuerto	VEF	3	2.1446	2010-01-15 14:06	U55KP2TDA	2010-01-15 14:35	U55KP2TDA
+%R	29	2	$U	.	,	#1.1	(#1.1)	Uruguayan Peso	UYU	3	21.247	2010-01-15 14:06	U55KP2TDA	2010-01-15 14:11	U55KP2TDA
+%T	FINTMPL
+%F	fintmpl_id	default_flag	fintmpl_name	create_date	create_user	update_date	update_user
+%R	87	N	Template G7LYIMWO	2026-11-02 15:09	UBPQN43AI	2026-11-02 15:09	UBPQN43AI
+%T	OBS
+%F	obs_id	parent_obs_id	guid	seq_num	obs_name	obs_descr	create_date	create_user	update_date	update_user
+%R	1575		lxZA84fNIqCq78CK6TRabQ		OBS MNO4KTYO		2026-11-02 15:04	UBPQN43AI	2026-11-02 15:04	UBPQN43AI
+%T	UDFTYPE
+%F	udf_type_id	table_name	udf_type_name	udf_type_label	logical_data_type	super_flag	indicator_expression	summary_indicator_expression	formula	create_date	create_user	update_date	update_user
+%T	PROJECT
+%F	proj_id	fy_start_month_num	rsrc_self_add_flag	allow_complete_flag	rsrc_multi_assign_flag	checkout_flag	project_flag	step_complete_flag	cost_qty_recalc_flag	batch_sum_flag	name_sep_char	def_complete_pct_type	proj_short_name	acct_id	orig_proj_id	source_proj_id	base_type_id	clndr_id	sum_base_proj_id	task_code_base	task_code_step	priority_num	wbs_max_sum_level	strgy_priority_num	last_checksum	critical_drtn_hr_cnt	def_cost_per_qty	last_recalc_date	plan_start_date	plan_end_date	scd_end_date	add_date	last_tasksum_date	fcst_start_date	def_duration_type	task_code_prefix	guid	def_qty_type	add_by_name	web_local_root_path	proj_url	def_rate_type	add_act_remain_flag	act_this_per_link_flag	def_task_type	act_pct_link_flag	critical_path_type	task_code_prefix_flag	def_rollup_dates_flag	use_project_baseline_flag	rem_target_link_flag	reset_planned_flag	allow_neg_act_flag	checkout_date	checkout_user_id	sum_assign_level	last_fin_dates_id	last_baseline_update_date	cr_external_key	apply_actuals_date	location_id	fintmpl_id	last_schedule_date	control_updates_flag	hist_interval	hist_level	create_date	create_user	update_date	update_user
+%R	4670	1	Y	Y	Y	N	Y	N	N	Y	.	CP_Phys	QC-rel-sf-pos					8279		1000	10	10	2	500		0	0	2026-03-02 08:00	2026-03-02 08:00		2026-03-10 17:00	2026-03-02 08:00			DT_FixedDUR2	A	rDvhy9FqT8W1/vRyh0JGpw	QT_Hour	UQXHKPTUF			COST_PER_QTY	N	Y	TT_Task	Y	CT_TotFloat	Y	Y	Y	Y	N	N			SL_Taskrsrc						87	2026-11-02 17:10	N	Month	HL_None	2026-11-02 16:16	UBPQN43AI	2026-11-02 17:10	UBPQN43AI
+%T	CALENDAR
+%F	clndr_id	default_flag	clndr_name	proj_id	base_clndr_id	last_chng_date	clndr_type	day_hr_cnt	week_hr_cnt	month_hr_cnt	year_hr_cnt	rsrc_private	clndr_data	create_date	create_user	update_date	update_user
+%R	8279	N	QC-rel-sf-pos b1 Five day				CA_Base	8	40	172	2000	N	(0||CalendarData()(  (0||DaysOfWeek()(    (0||1()())    (0||2()(      (0||0(s|08:00|f|12:00)())      (0||1(s|13:00|f|17:00)())))    (0||3()(      (0||0(s|08:00|f|12:00)())      (0||1(s|13:00|f|17:00)())))    (0||4()(      (0||0(s|08:00|f|12:00)())      (0||1(s|13:00|f|17:00)())))    (0||5()(      (0||0(s|08:00|f|12:00)())      (0||1(s|13:00|f|17:00)())))    (0||6()(      (0||0(s|08:00|f|12:00)())      (0||1(s|13:00|f|17:00)())))    (0||7()())))  (0||VIEW(ShowTotal|Y)())  (0||Exceptions()())))	2026-11-02 16:16	UBPQN43AI	2026-11-02 16:16	UBPQN43AI
+%T	SCHEDOPTIONS
+%F	schedoptions_id	proj_id	sched_outer_depend_type	sched_open_critical_flag	sched_lag_early_start_flag	sched_retained_logic	sched_setplantoforecast	sched_float_type	sched_calendar_on_relationship_lag	sched_use_expect_end_flag	sched_progress_override	level_float_thrs_cnt	level_outer_assign_flag	level_outer_assign_priority	level_over_alloc_pct	level_within_float_flag	level_keep_sched_date_flag	level_all_rsrc_flag	sched_use_project_end_date_for_float	enable_multiple_longest_path_calc	limit_multiple_longest_path_calc	max_multiple_longest_path	use_total_float_multiple_longest_paths	key_activity_for_multiple_longest_paths	LevelPriorityList
+%R	1	4670	SD_Both	N	Y	Y	N	FT_FF	rcal_Predecessor	Y	N	0	N	5	25	N	Y	Y	Y	N	Y	10	Y		
+%T	PROJWBS
+%F	wbs_id	proj_id	obs_id	seq_num	est_wt	proj_node_flag	sum_data_flag	status_code	wbs_short_name	wbs_name	phase_id	parent_wbs_id	ev_user_pct	ev_etc_user_value	orig_cost	indep_remain_total_cost	ann_dscnt_rate_pct	dscnt_period_type	indep_remain_work_qty	anticip_start_date	anticip_end_date	ev_compute_type	ev_etc_compute_type	guid	tmpl_guid	create_date	create_user	update_date	update_user
+%R	102221	4670	1575	0		Y	N	WS_Open	QC-rel-sf-pos	QC-rel-sf-pos		99894	6									EC_Cmp_pct	EE_Rem_hr	uhE2bnVNRLWw98SeJr6k7Q		2026-11-02 16:16	UBPQN43AI	2026-11-02 16:16	UBPQN43AI
+%T	RSRC
+%F	rsrc_id	parent_rsrc_id	clndr_id	role_id	shift_id	user_id	pobs_id	guid	rsrc_seq_num	email_addr	employee_code	office_phone	other_phone	rsrc_name	rsrc_short_name	rsrc_title_name	def_qty_per_hr	cost_qty_type	ot_factor	active_flag	auto_compute_act_flag	def_cost_qty_link_flag	ot_flag	curr_id	unit_id	rsrc_type	location_id	rsrc_notes	ts_approve_user_id	timesheet_flag	create_date	create_user	update_date	update_user
+%T	ACTVTYPE
+%F	actv_code_type_id	actv_short_len	seq_num	actv_code_type	proj_id	super_flag	actv_code_type_scope	create_date	create_user	update_date	update_user
+%T	RSRCRATE
+%F	rsrc_rate_id	rsrc_id	max_qty_per_hr	cost_per_qty	start_date	shift_period_id	cost_per_qty2	cost_per_qty3	cost_per_qty4	cost_per_qty5	create_date	create_user	update_date	update_user
+%T	TASK
+%F	task_id	proj_id	wbs_id	clndr_id	phys_complete_pct	rev_fdbk_flag	est_wt	lock_plan_flag	auto_compute_act_flag	complete_pct_type	task_type	duration_type	status_code	task_code	task_name	rsrc_id	total_float_hr_cnt	free_float_hr_cnt	remain_drtn_hr_cnt	act_work_qty	remain_work_qty	target_work_qty	target_drtn_hr_cnt	target_equip_qty	act_equip_qty	remain_equip_qty	cstr_date	act_start_date	act_end_date	late_start_date	late_end_date	expect_end_date	early_start_date	early_end_date	restart_date	reend_date	target_start_date	target_end_date	rem_late_start_date	rem_late_end_date	cstr_type	priority_type	suspend_date	resume_date	float_path	float_path_order	guid	tmpl_guid	cstr_date2	cstr_type2	driving_path_flag	act_this_per_work_qty	act_this_per_equip_qty	external_early_start_date	external_late_end_date	create_date	update_date	create_user	update_user	location_id	scp_pct_complete	control_updates_flag
+%R	415741	4670	102221	8279	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	D1	D1		0	0	20	0	0	0	20	0	0	0				2026-03-02 08:00	2026-03-04 12:00		2026-03-02 08:00	2026-03-04 12:00	2026-03-02 08:00	2026-03-04 12:00	2026-03-02 08:00	2026-03-04 12:00	2026-03-02 08:00	2026-03-04 12:00		PT_Normal					RTx3HLtaT5C3L+E5cLGOsQ				Y					2026-11-02 16:16	2026-11-02 17:10	UBPQN43AI	UBPQN43AI		0	N
+%R	415742	4670	102221	8279	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	A1	A1		20	0	16	0	0	0	16	0	0	0				2026-03-09 08:00	2026-03-10 17:00		2026-03-04 13:00	2026-03-06 12:00	2026-03-04 13:00	2026-03-06 12:00	2026-03-04 13:00	2026-03-06 12:00	2026-03-09 08:00	2026-03-10 17:00		PT_Normal					oQ4fcdB5Rciqpe73kxiHsQ				N					2026-11-02 16:16	2026-11-02 17:10	UBPQN43AI	UBPQN43AI		0	N
+%R	415743	4670	102221	8279	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	B1	B1		30	30	10	0	0	0	10	0	0	0				2026-03-09 15:00	2026-03-10 17:00		2026-03-04 08:00	2026-03-05 10:00	2026-03-04 08:00	2026-03-05 10:00	2026-03-04 08:00	2026-03-05 10:00	2026-03-09 15:00	2026-03-10 17:00		PT_Normal					oaGZLMEHSfG57FI+VF9lVg				N					2026-11-02 16:16	2026-11-02 17:10	UBPQN43AI	UBPQN43AI		0	N
+%R	415744	4670	102221	8279	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	A2	A2		30	30	6	0	0	0	6	0	0	0				2026-03-10 10:00	2026-03-10 17:00		2026-03-04 13:00	2026-03-05 10:00	2026-03-04 13:00	2026-03-05 10:00	2026-03-04 13:00	2026-03-05 10:00	2026-03-10 10:00	2026-03-10 17:00		PT_Normal					vxAnq2GCQG6j7fBMOw13pg				N					2026-11-02 16:16	2026-11-02 17:10	UBPQN43AI	UBPQN43AI		0	N
+%R	415745	4670	102221	8279	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	B2	B2		0	0	20	0	0	0	20	0	0	0				2026-03-06 13:00	2026-03-10 17:00		2026-03-06 13:00	2026-03-10 17:00	2026-03-06 13:00	2026-03-10 17:00	2026-03-06 13:00	2026-03-10 17:00	2026-03-06 13:00	2026-03-10 17:00		PT_Normal					OMHxxf9lTSeHusX9mOmDXg				Y					2026-11-02 16:16	2026-11-02 17:10	UBPQN43AI	UBPQN43AI		0	N
+%T	ACTVCODE
+%F	actv_code_id	parent_actv_code_id	actv_code_type_id	actv_code_name	short_name	seq_num	color	create_date	create_user	update_date	update_user
+%T	TASKPRED
+%F	task_pred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt	comments	create_date	create_user	update_date	update_user
+%R	709161	415742	415741	4670	4670	PR_FS	0		2026-11-02 16:16	UBPQN43AI	2026-11-02 16:16	UBPQN43AI
+%R	709163	415744	415741	4670	4670	PR_FS	0		2026-11-02 16:16	UBPQN43AI	2026-11-02 16:16	UBPQN43AI
+%R	709165	415745	415741	4670	4670	PR_SS	36		2026-11-02 16:16	UBPQN43AI	2026-11-02 16:16	UBPQN43AI
+%R	709162	415743	415742	4670	4670	PR_SF	6		2026-11-02 16:16	UBPQN43AI	2026-11-02 16:16	UBPQN43AI
+%R	709164	415745	415744	4670	4670	PR_SF	6		2026-11-02 16:16	UBPQN43AI	2026-11-02 16:16	UBPQN43AI
+%T	TASKRSRC
+%F	taskrsrc_id	task_id	proj_id	cost_qty_link_flag	role_id	acct_id	rsrc_id	pobs_id	skill_level	remain_qty	target_qty	remain_qty_per_hr	target_lag_drtn_hr_cnt	target_qty_per_hr	act_ot_qty	act_reg_qty	relag_drtn_hr_cnt	ot_factor	cost_per_qty	target_cost	act_reg_cost	act_ot_cost	remain_cost	act_start_date	act_end_date	restart_date	reend_date	target_start_date	target_end_date	rem_late_start_date	rem_late_end_date	rollup_dates_flag	target_crv	remain_crv	actual_crv	ts_pend_act_end_flag	guid	rate_type	act_this_per_cost	act_this_per_qty	curv_id	rsrc_type	cost_per_qty_source_type	create_user	create_date	pend_remain_qty	pend_complete_pct	update_date	update_user
+%T	TASKACTV
+%F	task_id	actv_code_type_id	actv_code_id	proj_id	create_date	create_user	update_date	update_user
+%T	UDFVALUE
+%F	udf_type_id	fk_id	proj_id	udf_date	udf_number	udf_text	udf_code_id	table_name	create_date	create_user	update_date	update_user
+%E

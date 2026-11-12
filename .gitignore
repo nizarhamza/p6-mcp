@@ -7,6 +7,8 @@
 *.sqlite
 *.sqlite3
 !tests/fixtures/*.py
+# synthetic P6 parity cases, no project data (tests/test_engine_parity.py)
+!tests/fixtures/parity/**/*.xer
 
 # Runtime output
 logs/

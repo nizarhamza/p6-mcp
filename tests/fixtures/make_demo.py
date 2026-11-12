@@ -411,7 +411,9 @@ def engine(dd, must, rem_h, status=None, actual=None, cstr=None, net=None):
     cpm = object.__new__(s._Cpm)
     cpm.pid, cpm.dd, cpm.must, cpm.opts = 1, dd, must, dict(net["opts"])
     cpm.prj = {"proj_short_name": PROJ, "last_recalc_date": dd, "plan_end_date": must, "scd_end_date": None,
-               "clndr_id": CAL_ID, "critical_drtn_hr_cnt": 0}
+               "clndr_id": CAL_ID, "critical_drtn_hr_cnt": 0, "plan_start_date": None, "critical_path_type": None}
+    cpm.pstart, cpm.wbs_parent, cpm.asg = None, {}, []
+    cpm._derive()
     cpm.rule, cpm.pcal = net["opts"]["sched_calendar_on_relationship_lag"], cl
     cpm.cals = {CAL_ID: cl, **{c.clndr_id: c for c in net.get("task_cals", {}).values()}}
     cpm.t = {}
@@ -423,7 +425,8 @@ def engine(dd, must, rem_h, status=None, actual=None, cstr=None, net=None):
         ct = ("CS_MSOA", ct) if isinstance(ct, datetime) else ct or (None, None)
         tc = net.get("task_cals", {}).get(c, cl)
         cpm.t[tid[c]] = {"task_id": tid[c], "task_code": c, "task_name": a["name"], "proj_id": 1, "wbs_id": a["wbs"],
-                         "task_type": a["type"], "status_code": st, "clndr_id": tc.clndr_id, "cal": tc, "hpd": HPD,
+                         "wbs": None, "task_type": a["type"], "status_code": st, "clndr_id": tc.clndr_id,
+                         "cal": tc, "hpd": HPD,
                          "rem": rem_h.get(c, 0.0), "act_start_date": ad[0], "act_end_date": ad[1],
                          "cstr_type": ct[0], "cstr_date": ct[1], "cstr_type2": None, "cstr_date2": None,
                          "expect_end_date": None, "suspend_date": None, "resume_date": None,

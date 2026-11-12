@@ -3,6 +3,29 @@
 All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The CPM engine behind `p6_cpm_validate`, `p6_schedule_whatif`, `p6_schedule_risk` and the DCMA critical path
+  test now follows the rules P6 25.12 applies, measured on 107 parity cases (engine version 23, was 1): level of
+  effort and WBS summary activities, as late as possible, suspend and resume dates, resource dependent
+  activities on their resources' calendars, assignment lag, the four out-of-sequence modes, constraint pairs and
+  constraints on started activities, the project planned start, open ends, ignored links to other projects, a
+  calendar without a work week (Monday to Friday 08:00 to 16:00). It also computes free float, the longest path,
+  multiple float paths and the remaining and planned dates F9 writes.
+- `p6_cpm_validate` compares free float, the longest path flag and float paths with the last F9
+  (`other_fields`); `p6_schedule_whatif` uses the engine's longest path on longest-path projects and reports
+  the activities that join or leave it (`longest_path_change`).
+- `p6_driving_path`, `p6_float_origin` and `p6_redundant_links`: late gaps follow the backward pass (no false
+  gaps when lags use the project calendar), out-of-sequence options and resource calendars apply, a new root
+  driver `as_late_as_possible`, and the lag from a progressed predecessor follows P6.
+
+### Fixed
+
+- `p6_set_schedule_options` and `p6_import_xer`: the float type codes are P6's (`FT_FF`, `FT_SS`, `FT_Min`),
+  and retained logic with progress override (both Y, a P6 state) is accepted.
+
 ## [2.0.0] - 2026-10-29
 
 Version 1.10.0 was never released: its changes ship in 2.0.0.

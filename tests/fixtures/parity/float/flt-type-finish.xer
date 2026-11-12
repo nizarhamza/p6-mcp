@@ -1,0 +1,62 @@
+ERMHDR	25.12	2026-11-03	Project	UBPQN43AI	Person I67T5DET	Database YHF3EDGX	Project Management	USD
+%T	CURRTYPE
+%F	curr_id	decimal_digit_cnt	curr_symbol	decimal_symbol	digit_group_symbol	pos_curr_fmt_type	neg_curr_fmt_type	curr_type	curr_short_name	group_digit_cnt	base_exch_rate
+%R	1	2	$	.	,	#1.1	(#1.1)	US Dollar	USD	3	1
+%R	13	2	£	.	,	#1.1	(#1.1)	Pound Sterling	GBP	3	0.618603
+%R	14	2	¥	.	,	#1.1	(#1.1)	Japanese Yen	JPY	3	91.2708
+%R	15	2	€	.	,	#1.1	(#1.1)	Euro	EUR	3	0.689711
+%R	16	2	¥	.	,	#1.1	(#1.1)	Chinese Yuan Renminbi	CNY	3	6.82502
+%R	17	2	$	.	,	#1.1	(#1.1)	Canadian Dollar	CAD	3	1.03757
+%R	18	2	RUB	.	,	#1.1	(#1.1)	Russian Ruble	RUB	3	0.033948
+%R	19	2	$	.	,	#1.1	(#1.1)	Argentine Peso	ARS	3	3.79109
+%R	20	2	$b	.	,	#1.1	(#1.1)	Bolivian Boliviano	BOB	3	7.5708
+%R	21	2	R$	.	,	#1.1	(#1.1)	Brazilian Real	BRL	3	1.7665
+%R	22	2	$	.	,	#1.1	(#1.1)	Chilean Peso	CLP	3	507.58
+%R	23	2	$	.	,	#1.1	(#1.1)	Columbian Peso	COP	3	1957.74
+%R	24	2	$	.	,	#1.1	(#1.1)	Guyanese Dollar	GYD	3	202.95
+%R	25	2	Gs	.	,	#1.1	(#1.1)	Paraguayan Guarani	PYG	3	4640
+%R	26	2	S/.	.	,	#1.1	(#1.1)	Peruvian Nuevo Sol	PEN	3	2.7244
+%R	27	2	$	.	,	#1.1	(#1.1)	Surinamese Dollar	SRD	3	2.8
+%R	28	2	Bs	.	,	#1.1	(#1.1)	Venezuelan Bolivar Fuerto	VEF	3	2.1446
+%R	29	2	$U	.	,	#1.1	(#1.1)	Uruguayan Peso	UYU	3	21.247
+%T	FINTMPL
+%F	fintmpl_id	fintmpl_name	default_flag
+%R	87	Template G7LYIMWO	N
+%T	OBS
+%F	obs_id	parent_obs_id	guid	seq_num	obs_name	obs_descr
+%R	1575		lxZA84fNIqCq78CK6TRabQ		OBS MNO4KTYO	
+%T	PROJECT
+%F	proj_id	fy_start_month_num	rsrc_self_add_flag	allow_complete_flag	rsrc_multi_assign_flag	checkout_flag	project_flag	step_complete_flag	cost_qty_recalc_flag	batch_sum_flag	name_sep_char	def_complete_pct_type	proj_short_name	acct_id	orig_proj_id	source_proj_id	base_type_id	clndr_id	sum_base_proj_id	task_code_base	task_code_step	priority_num	wbs_max_sum_level	strgy_priority_num	last_checksum	critical_drtn_hr_cnt	def_cost_per_qty	last_recalc_date	plan_start_date	plan_end_date	scd_end_date	add_date	last_tasksum_date	fcst_start_date	def_duration_type	task_code_prefix	guid	def_qty_type	add_by_name	web_local_root_path	proj_url	def_rate_type	add_act_remain_flag	act_this_per_link_flag	def_task_type	act_pct_link_flag	critical_path_type	task_code_prefix_flag	def_rollup_dates_flag	use_project_baseline_flag	rem_target_link_flag	reset_planned_flag	allow_neg_act_flag	sum_assign_level	last_fin_dates_id	fintmpl_id	last_baseline_update_date	cr_external_key	apply_actuals_date	location_id	last_schedule_date	loaded_scope_level	export_flag	new_fin_dates_id	baselines_to_export	baseline_names_to_export	next_data_date	base_proj_id	base_proj_id1	base_proj_id2	close_period_flag	sum_refresh_date	trsrcsum_loaded	sumtask_loaded
+%R	4726	1	Y	Y	Y	N	Y	N	N	Y	.	CP_Phys	QC-flt-type-finish					8333		1000	10	10	2	500		0	0.0000	2026-03-02 08:00	2026-03-02 08:00		2026-03-26 17:00	2026-03-02 08:00			DT_FixedDUR2	A	HRqMmaEET+u+MnjoYciCgQ	QT_Hour	UQXHKPTUF			COST_PER_QTY	N	Y	TT_Task	Y	CT_TotFloat	Y	Y	Y	Y	N	N	SL_Taskrsrc		87					2026-11-03 09:12	7	Y											
+%T	CALENDAR
+%F	clndr_id	default_flag	clndr_name	proj_id	base_clndr_id	last_chng_date	clndr_type	day_hr_cnt	week_hr_cnt	month_hr_cnt	year_hr_cnt	rsrc_private	clndr_data
+%R	8333	N	QC-flt-type-finish b2 Five day				CA_Base	8	40	172	2000	N	(0||CalendarData()(  (0||DaysOfWeek()(    (0||1()())    (0||2()(      (0||0(s|08:00|f|12:00)())      (0||1(s|13:00|f|17:00)())))    (0||3()(      (0||0(s|08:00|f|12:00)())      (0||1(s|13:00|f|17:00)())))    (0||4()(      (0||0(s|08:00|f|12:00)())      (0||1(s|13:00|f|17:00)())))    (0||5()(      (0||0(s|08:00|f|12:00)())      (0||1(s|13:00|f|17:00)())))    (0||6()(      (0||0(s|08:00|f|12:00)())      (0||1(s|13:00|f|17:00)())))    (0||7()())))  (0||VIEW(ShowTotal|Y)())  (0||Exceptions()())))
+%R	8334	N	QC-flt-type-finish b2 Long day				CA_Base	12	60	258	3000	N	(0||CalendarData()(  (0||DaysOfWeek()(    (0||1()())    (0||2()(      (0||0(s|06:00|f|18:00)())))    (0||3()(      (0||0(s|06:00|f|18:00)())))    (0||4()(      (0||0(s|06:00|f|18:00)())))    (0||5()(      (0||0(s|06:00|f|18:00)())))    (0||6()(      (0||0(s|06:00|f|18:00)())))    (0||7()())))  (0||VIEW(ShowTotal|Y)())  (0||Exceptions()())))
+%T	SCHEDOPTIONS
+%F	schedoptions_id	proj_id	sched_outer_depend_type	sched_open_critical_flag	sched_lag_early_start_flag	sched_retained_logic	sched_setplantoforecast	sched_float_type	sched_calendar_on_relationship_lag	sched_use_expect_end_flag	sched_progress_override	level_float_thrs_cnt	level_outer_assign_flag	level_outer_assign_priority	level_over_alloc_pct	level_within_float_flag	level_keep_sched_date_flag	level_all_rsrc_flag	sched_use_project_end_date_for_float	enable_multiple_longest_path_calc	limit_multiple_longest_path_calc	max_multiple_longest_path	use_total_float_multiple_longest_paths	key_activity_for_multiple_longest_paths	LevelPriorityList
+%R	1	4726	SD_Both	N	Y	Y	N	FT_FF	rcal_Predecessor	Y	N	0	N	5	25	N	Y	Y	Y	N	Y	10	Y		priority_type,ASC_BY_FIELD/ASC
+%T	PROJWBS
+%F	wbs_id	proj_id	obs_id	seq_num	est_wt	proj_node_flag	sum_data_flag	status_code	wbs_short_name	wbs_name	phase_id	parent_wbs_id	ev_user_pct	ev_etc_user_value	orig_cost	indep_remain_total_cost	ann_dscnt_rate_pct	dscnt_period_type	indep_remain_work_qty	anticip_start_date	anticip_end_date	ev_compute_type	ev_etc_compute_type	guid	tmpl_guid	plan_open_state
+%R	102284	4726	1575	0		Y	N	WS_Open	QC-flt-type-finish	QC-flt-type-finish		99894	6		0.0000	0.0000						EC_Cmp_pct	EE_Rem_hr	tq9pXXl3RWO9ZVjyotoBwg		
+%T	TASK
+%F	task_id	proj_id	wbs_id	clndr_id	phys_complete_pct	rev_fdbk_flag	est_wt	lock_plan_flag	auto_compute_act_flag	complete_pct_type	task_type	duration_type	status_code	task_code	task_name	rsrc_id	total_float_hr_cnt	free_float_hr_cnt	remain_drtn_hr_cnt	act_work_qty	remain_work_qty	target_work_qty	target_drtn_hr_cnt	target_equip_qty	act_equip_qty	remain_equip_qty	cstr_date	act_start_date	act_end_date	late_start_date	late_end_date	expect_end_date	early_start_date	early_end_date	restart_date	reend_date	target_start_date	target_end_date	rem_late_start_date	rem_late_end_date	cstr_type	priority_type	suspend_date	resume_date	float_path	float_path_order	guid	tmpl_guid	cstr_date2	cstr_type2	driving_path_flag	act_this_per_work_qty	act_this_per_equip_qty	external_early_start_date	external_late_end_date	create_date	update_date	create_user	update_user	location_id	crt_path_num
+%R	416145	4726	102284	8333	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	D1	D1		0	0	24	0	0	0	24	0	0	0				2026-03-02 08:00	2026-03-04 17:00		2026-03-02 08:00	2026-03-04 17:00	2026-03-02 08:00	2026-03-04 17:00	2026-03-02 08:00	2026-03-04 17:00	2026-03-02 08:00	2026-03-04 17:00		PT_Normal					jxZpqP8rQwuCsGiYmLY9YA				Y					2026-11-03 09:08	2026-11-03 09:12	UBPQN43AI	UBPQN43AI		
+%R	416146	4726	102284	8333	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	L1	L1		0	0	120	0	0	0	120	0	0	0				2026-03-05 08:00	2026-03-25 17:00		2026-03-05 08:00	2026-03-25 17:00	2026-03-05 08:00	2026-03-25 17:00	2026-03-05 08:00	2026-03-25 17:00	2026-03-05 08:00	2026-03-25 17:00		PT_Normal					Ea1kUxBLRB6GrgscucInnw				Y					2026-11-03 09:08	2026-11-03 09:12	UBPQN43AI	UBPQN43AI		
+%R	416147	4726	102284	8333	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	X1	X1		72	0	48	0	0	0	48	0	0	0	2026-03-16 17:00			2026-03-18 08:00	2026-03-25 17:00	2026-03-12 17:00	2026-03-05 08:00	2026-03-12 17:00	2026-03-05 08:00	2026-03-12 17:00	2026-03-05 08:00	2026-03-12 17:00	2026-03-18 08:00	2026-03-25 17:00	CS_MEOA	PT_Normal					+j0MTGjJR0WHP4uxbGs6QQ				N					2026-11-03 09:08	2026-11-03 09:12	UBPQN43AI	UBPQN43AI		
+%R	416148	4726	102284	8333	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	M1	M1		0	0	16	0	0	0	16	0	0	0	2026-03-09 08:00			2026-03-09 08:00	2026-03-10 17:00		2026-03-09 08:00	2026-03-10 17:00	2026-03-09 08:00	2026-03-10 17:00	2026-03-09 08:00	2026-03-10 17:00	2026-03-09 08:00	2026-03-10 17:00	CS_MANDSTART	PT_Normal					shtlH83wTz6NqqKEfSjktw				N					2026-11-03 09:08	2026-11-03 09:12	UBPQN43AI	UBPQN43AI		
+%R	416149	4726	102284	8333	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	M2	M2		0	0	16	0	0	0	16	0	0	0	2026-03-11 17:00			2026-03-10 08:00	2026-03-11 17:00		2026-03-10 08:00	2026-03-11 17:00	2026-03-10 08:00	2026-03-11 17:00	2026-03-10 08:00	2026-03-11 17:00	2026-03-10 08:00	2026-03-11 17:00	CS_MANDFIN	PT_Normal					Wa1TuV9VSVeNIOcjZBPxwA				N					2026-11-03 09:08	2026-11-03 09:12	UBPQN43AI	UBPQN43AI		
+%R	416150	4726	102284	8334	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	P1	P1		167	167	16	0	0	0	16	0	0	0				2026-03-24 16:00	2026-03-26 08:00		2026-03-04 17:00	2026-03-06 09:00	2026-03-04 17:00	2026-03-06 09:00	2026-03-04 17:00	2026-03-06 09:00	2026-03-24 16:00	2026-03-26 08:00		PT_Normal					T26YHW/qQECYKwB8JtIH9A				N					2026-11-03 09:08	2026-11-03 09:12	UBPQN43AI	UBPQN43AI		
+%R	416151	4726	102284	8333	0	N	1	N	N	CP_Phys	TT_Task	DT_FixedDUR2	TK_NotStart	E1	E1		0	0	8	0	0	0	8	0	0	0				2026-03-26 08:00	2026-03-26 17:00		2026-03-26 08:00	2026-03-26 17:00	2026-03-26 08:00	2026-03-26 17:00	2026-03-26 08:00	2026-03-26 17:00	2026-03-26 08:00	2026-03-26 17:00		PT_Normal					MG/nHzniT/WjQlQLMUZJgA				Y					2026-11-03 09:08	2026-11-03 09:12	UBPQN43AI	UBPQN43AI		
+%T	TASKPRED
+%F	task_pred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt	comments	float_path	aref	arls
+%R	709643	416146	416145	4726	4726	PR_FS	0			2026-03-04 17:00	2026-03-05 08:00
+%R	709644	416151	416146	4726	4726	PR_FS	0			2026-03-25 17:00	2026-03-26 08:00
+%R	709645	416147	416145	4726	4726	PR_FS	0			2026-03-04 17:00	2026-03-18 08:00
+%R	709646	416151	416147	4726	4726	PR_FS	0			2026-03-12 17:00	2026-03-26 08:00
+%R	709647	416148	416145	4726	4726	PR_FS	0			2026-03-04 17:00	2026-03-09 08:00
+%R	709648	416151	416148	4726	4726	PR_FS	0			2026-03-10 17:00	2026-03-26 08:00
+%R	709649	416149	416145	4726	4726	PR_FS	0			2026-03-04 17:00	2026-03-10 08:00
+%R	709650	416151	416149	4726	4726	PR_FS	0			2026-03-11 17:00	2026-03-26 08:00
+%R	709651	416150	416145	4726	4726	PR_FS	0			2026-03-04 17:00	2026-03-24 16:00
+%R	709652	416151	416150	4726	4726	PR_FS	0			2026-03-06 09:00	2026-03-26 08:00
+%E

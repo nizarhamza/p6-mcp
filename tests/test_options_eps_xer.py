@@ -54,8 +54,9 @@ def test_set_schedule_options(p6):
     assert "logic_target|5" in prop(p6, "schedule_check")
     assert db_options(p6) == {**FIXTURE_OPTIONS, "sched_float_type": "FT_FF"}
 
-    with pytest.raises(ValueError, match="cannot both be Y"):
-        p6.call("p6_set_schedule_options", project="DEMO-A", options={"sched_progress_override": "Y"})
+    # retained logic and progress override both Y is a P6 25.12 state (parity case prg-oos-both): accepted
+    both = p6.call("p6_set_schedule_options", project="DEMO-A", options={"sched_progress_override": "Y"})
+    assert both["dry_run"] and p6.hash() == p6.hash()
     with pytest.raises(ValueError, match="Unknown schedule option"):
         p6.call("p6_set_schedule_options", project="DEMO-A", options={"no_such_option": "Y"})
 

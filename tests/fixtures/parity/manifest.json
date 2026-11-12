@@ -1,0 +1,1586 @@
+{
+ "files": {
+  "activity-types/typ-loe-cal.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.levelOfEffort",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "calendar.several"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-loe-cal"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-loe-min.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.levelOfEffort",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "option.totalFloat.smallest"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-loe-min"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-loe-progress.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.levelOfEffort",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "status.inProgress",
+    "status.notStarted"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-loe-progress"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-loe-ss.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.levelOfEffort",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "option.totalFloat.startFloat"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-loe-ss"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-loe.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.levelOfEffort",
+    "relationshipType.SS",
+    "relationshipType.FF"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-loe"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-milestones.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.startMilestone",
+    "activityType.finishMilestone",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "relationshipType.SF"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-milestones"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-rd-lag-min.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.resourceDependent",
+    "resourceDependent.severalAssignments.differentCalendars",
+    "resourceDependent.assignmentLag",
+    "calendar.several",
+    "option.totalFloat.smallest"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-rd-lag-min"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-rd-lag-ss.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.resourceDependent",
+    "resourceDependent.severalAssignments.differentCalendars",
+    "resourceDependent.assignmentLag",
+    "calendar.several",
+    "option.totalFloat.startFloat"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-rd-lag-ss"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-rd-lag.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.resourceDependent",
+    "resourceDependent.severalAssignments.differentCalendars",
+    "resourceDependent.assignmentLag",
+    "calendar.several"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-rd-lag"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-rd-none.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.resourceDependent",
+    "resourceDependent.withoutAssignment"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-rd-none"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-rd-other.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.resourceDependent",
+    "resourceDependent.oneAssignment.otherCalendar",
+    "calendar.several"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-rd-other"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-rd-own.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.resourceDependent",
+    "resourceDependent.oneAssignment.activityCalendar"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-rd-own"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-rd-progress.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.resourceDependent",
+    "resourceDependent.oneAssignment.otherCalendar",
+    "calendar.several",
+    "status.completed",
+    "status.inProgress",
+    "status.notStarted"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-rd-progress"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-rd-two.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.resourceDependent",
+    "resourceDependent.severalAssignments.differentCalendars",
+    "calendar.several"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-rd-two"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-tdlag-cp.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "taskDependent.assignmentLag",
+    "status.completed",
+    "status.notStarted"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-tdlag-cp"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-tdlag-ip.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "taskDependent.assignmentLag",
+    "status.inProgress",
+    "status.notStarted"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-tdlag-ip"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-tdlag-ns.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "taskDependent.assignmentLag",
+    "status.notStarted"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-tdlag-ns"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-wbs-progress.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.wbsSummary",
+    "calendar.several",
+    "status.completed",
+    "status.inProgress",
+    "status.notStarted"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-wbs-progress"
+   ],
+   "p6_version": "25.12"
+  },
+  "activity-types/typ-wbs.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "activityType.wbsSummary",
+    "calendar.several"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-typ-wbs"
+   ],
+   "p6_version": "25.12"
+  },
+  "basics/float-type-min.xer": {
+   "exported_by": "p6",
+   "features": [
+    "calendar.several"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-float-type-min"
+   ],
+   "p6_version": "25.12"
+  },
+  "basics/float-type-start.xer": {
+   "exported_by": "p6",
+   "features": [
+    "calendar.several"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-float-type-start"
+   ],
+   "p6_version": "25.12"
+  },
+  "basics/fs-chain.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "lag.positive",
+    "status.notStarted",
+    "option.lagCalendar.successor"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-fs-chain"
+   ],
+   "p6_version": "25.12"
+  },
+  "calendars/cal-24h.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "lag.positive"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cal-24h"
+   ],
+   "p6_version": "25.12"
+  },
+  "calendars/cal-base.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "calendar.baseInheritance"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cal-base"
+   ],
+   "p6_version": "25.12"
+  },
+  "calendars/cal-dd-evening.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cal-dd-evening"
+   ],
+   "p6_version": "25.12"
+  },
+  "calendars/cal-dd-weekend.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cal-dd-weekend"
+   ],
+   "p6_version": "25.12"
+  },
+  "calendars/cal-exceptions.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cal-exceptions"
+   ],
+   "p6_version": "25.12"
+  },
+  "calendars/cal-fraction.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "lag.positive"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cal-fraction"
+   ],
+   "p6_version": "25.12"
+  },
+  "calendars/cal-holiday.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cal-holiday"
+   ],
+   "p6_version": "25.12"
+  },
+  "calendars/cal-lunch.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "lag.positive"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cal-lunch"
+   ],
+   "p6_version": "25.12"
+  },
+  "calendars/cal-mixed.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "calendar.several",
+    "lag.positive"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cal-mixed"
+   ],
+   "p6_version": "25.12"
+  },
+  "calendars/cal-night.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "lag.positive"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cal-night"
+   ],
+   "p6_version": "25.12"
+  },
+  "calendars/cal-zero-rem.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "status.inProgress"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cal-zero-rem"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-alap-float.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.asLateAsPossible"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-alap-float"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-alap.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.asLateAsPossible"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-alap"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-finish-after.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.finishOnOrAfter"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-finish-after"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-finish-before.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.finishOnOrBefore"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-finish-before"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-finish-on.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.finishOn"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-finish-on"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-mand-conflict.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.mandatoryStart",
+    "primaryConstraint.mandatoryFinish",
+    "primaryConstraint.finishOnOrBefore"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-mand-conflict"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-mand-finish.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.mandatoryFinish"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-mand-finish"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-mand-start.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.mandatoryStart"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-mand-start"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-offwork.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.startOn",
+    "primaryConstraint.startOnOrAfter",
+    "primaryConstraint.finishOnOrAfter",
+    "primaryConstraint.finishOnOrBefore",
+    "primaryConstraint.mandatoryStart",
+    "primaryConstraint.mandatoryFinish"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-offwork"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-pairs.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.startOn",
+    "primaryConstraint.startOnOrAfter",
+    "primaryConstraint.startOnOrBefore",
+    "primaryConstraint.finishOn",
+    "primaryConstraint.finishOnOrAfter",
+    "primaryConstraint.finishOnOrBefore",
+    "primaryConstraint.mandatoryStart",
+    "primaryConstraint.mandatoryFinish",
+    "primaryConstraint.asLateAsPossible",
+    "secondaryConstraint.startOn",
+    "secondaryConstraint.startOnOrAfter",
+    "secondaryConstraint.startOnOrBefore",
+    "secondaryConstraint.finishOn",
+    "secondaryConstraint.finishOnOrAfter",
+    "secondaryConstraint.finishOnOrBefore",
+    "secondaryConstraint.mandatoryStart",
+    "secondaryConstraint.mandatoryFinish",
+    "secondaryConstraint.asLateAsPossible"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-pairs"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-progress.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "status.completed",
+    "status.inProgress",
+    "status.notStarted",
+    "primaryConstraint.startOnOrAfter",
+    "primaryConstraint.finishOnOrAfter",
+    "primaryConstraint.finishOnOrBefore",
+    "primaryConstraint.mandatoryStart",
+    "primaryConstraint.mandatoryFinish"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-progress"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-start-after.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.startOnOrAfter"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-start-after"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-start-before.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.startOnOrBefore"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-start-before"
+   ],
+   "p6_version": "25.12"
+  },
+  "constraints/cst-start-on.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "primaryConstraint.startOn"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-cst-start-on"
+   ],
+   "p6_version": "25.12"
+  },
+  "external/ext-ignore-off.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "link.otherProject.predecessor",
+    "link.otherProject.successor",
+    "option.ignoreOtherProjectRelationships.false"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-ext-ignore-off"
+   ],
+   "p6_version": "25.12"
+  },
+  "external/ext-ignore-on.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "link.otherProject.predecessor",
+    "link.otherProject.successor",
+    "option.ignoreOtherProjectRelationships.true"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-ext-ignore-on"
+   ],
+   "p6_version": "25.12"
+  },
+  "external/ext-links.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "relationshipType.SF",
+    "lag.positive",
+    "lag.negative",
+    "link.otherProject.predecessor",
+    "link.otherProject.successor",
+    "option.ignoreOtherProjectRelationships.false"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-ext-links"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-crit-lp.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "option.critical.longestPath",
+    "calendar.several",
+    "primaryConstraint.finishOnOrBefore"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-crit-lp"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-crit-tf8.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "option.critical.totalFloat"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-crit-tf8"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-free.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "relationshipType.SF",
+    "lag.positive",
+    "lag.negative"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-free"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-open-off.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "option.makeOpenEndedActivitiesCritical.false"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-open-off"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-open-on.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "option.makeOpenEndedActivitiesCritical.true"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-open-on"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-paths-end.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "option.multipleFloatPaths.on",
+    "option.multipleFloatPaths.endingActivity.with"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-paths-end"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-paths-ff.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "option.multipleFloatPaths.on",
+    "option.multipleFloatPaths.useTotalFloat.false"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-paths-ff"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-paths-max3-nl.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "option.multipleFloatPaths.on",
+    "option.multipleFloatPaths.limitToMaximum.false"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-paths-max3-nl"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-paths-max3.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "option.multipleFloatPaths.on",
+    "option.multipleFloatPaths.limitToMaximum.true"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-paths-max3"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-paths-off.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "option.multipleFloatPaths.off"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-paths-off"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-paths-tf.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "option.multipleFloatPaths.on",
+    "option.multipleFloatPaths.useTotalFloat.true",
+    "option.multipleFloatPaths.endingActivity.without",
+    "option.multipleFloatPaths.limitToMaximum.true"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-paths-tf"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-prec-mcp.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "lag.positive"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-prec-mcp"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-prec-p6.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "lag.positive"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-prec-p6"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-type-finish.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "calendar.several",
+    "expectedFinish",
+    "primaryConstraint.finishOnOrAfter",
+    "primaryConstraint.mandatoryStart",
+    "primaryConstraint.mandatoryFinish",
+    "option.totalFloat.finishFloat"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-type-finish"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-type-min.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "calendar.several",
+    "expectedFinish",
+    "primaryConstraint.finishOnOrAfter",
+    "primaryConstraint.mandatoryStart",
+    "primaryConstraint.mandatoryFinish",
+    "option.totalFloat.smallest"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-type-min"
+   ],
+   "p6_version": "25.12"
+  },
+  "float/flt-type-start.xer": {
+   "exported_by": "p6",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "calendar.several",
+    "expectedFinish",
+    "primaryConstraint.finishOnOrAfter",
+    "primaryConstraint.mandatoryStart",
+    "primaryConstraint.mandatoryFinish",
+    "option.totalFloat.startFloat"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-flt-type-start"
+   ],
+   "p6_version": "25.12"
+  },
+  "options/opts-plan-fc-off.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "status.inProgress",
+    "status.notStarted",
+    "option.setPlannedDatesToForecast.false"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-opts-plan-fc-off"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-act-offwork.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "lag.positive",
+    "status.inProgress"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-act-offwork"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-completed.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "status.completed"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-completed"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-dd-before-ps.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "dataDate.beforePlannedStart"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-dd-before-ps"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-dd-end.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "lag.positive",
+    "status.inProgress",
+    "status.completed"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-dd-end"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-dd-mid.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "lag.positive",
+    "status.inProgress",
+    "status.completed"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-dd-mid"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-done-chain.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "lag.positive",
+    "status.completed"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-done-chain"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-expect-off.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "status.inProgress",
+    "expectedFinish",
+    "option.useExpectedFinishDates.false"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-expect-off"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-expect-on.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "status.inProgress",
+    "expectedFinish",
+    "option.useExpectedFinishDates.true"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-expect-on"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-in-progress.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "status.inProgress"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-in-progress"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-lagprog-off.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "relationshipType.SF",
+    "lag.positive",
+    "status.inProgress",
+    "option.lagFromProgressedPredecessor.false"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-lagprog-off"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-lagprog-on.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "relationshipType.SF",
+    "lag.positive",
+    "status.inProgress",
+    "option.lagFromProgressedPredecessor.true"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-lagprog-on"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-oos-actual.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "status.inProgress",
+    "progress.outOfSequence",
+    "option.outOfSequence.actualDates"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-oos-actual"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-oos-both.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "status.inProgress",
+    "progress.outOfSequence",
+    "option.outOfSequence.progressOverrideAndRetainedLogic"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-oos-both"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-oos-override.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "status.inProgress",
+    "progress.outOfSequence",
+    "option.outOfSequence.progressOverride"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-oos-override"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-oos-retained.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "status.inProgress",
+    "progress.outOfSequence",
+    "option.outOfSequence.retainedLogic"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-oos-retained"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-remaining.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "status.inProgress"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-remaining"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-start-bound.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.SS",
+    "calendar.several",
+    "status.inProgress"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-start-bound"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-susp-open.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "status.inProgress",
+    "suspend.withoutResume"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-susp-open"
+   ],
+   "p6_version": "25.12"
+  },
+  "progress/prg-susp-resume.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "status.inProgress",
+    "suspend.withResume"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-prg-susp-resume"
+   ],
+   "p6_version": "25.12"
+  },
+  "project-finish/pf-must-earlier.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "project.mustFinishBy"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-pf-must-earlier"
+   ],
+   "p6_version": "25.12"
+  },
+  "project-finish/pf-must-later.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "project.mustFinishBy"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-pf-must-later"
+   ],
+   "p6_version": "25.12"
+  },
+  "project-finish/pf-open-ends.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-pf-open-ends"
+   ],
+   "p6_version": "25.12"
+  },
+  "project-finish/pf-own-finish-off.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "project.mustFinishBy",
+    "option.floatFromProjectFinish.false"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-pf-own-finish-off"
+   ],
+   "p6_version": "25.12"
+  },
+  "project-finish/pf-own-finish-on.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "project.mustFinishBy",
+    "option.floatFromProjectFinish.true"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-pf-own-finish-on"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-ff-neg.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FF",
+    "relationshipType.FS",
+    "lag.negative"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-ff-neg"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-ff-pos.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FF",
+    "relationshipType.FS",
+    "lag.positive"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-ff-pos"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-ff.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FF",
+    "relationshipType.FS"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-ff"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-fs-neg.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "lag.negative"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-fs-neg"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-fs-pos.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "lag.positive"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-fs-pos"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-lagcal-24h.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "relationshipType.SF",
+    "lag.positive",
+    "calendar.several",
+    "option.lagCalendar.twentyFourHour"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-lagcal-24h"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-lagcal-pred.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "relationshipType.SF",
+    "lag.positive",
+    "calendar.several",
+    "option.lagCalendar.predecessor"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-lagcal-pred"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-lagcal-proj.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "relationshipType.SF",
+    "lag.positive",
+    "calendar.several",
+    "option.lagCalendar.projectDefault"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-lagcal-proj"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-lagcal-succ.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "relationshipType.SF",
+    "lag.positive",
+    "calendar.several",
+    "option.lagCalendar.successor"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-lagcal-succ"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-multi.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.FS",
+    "relationshipType.SS",
+    "relationshipType.FF",
+    "relationshipType.SF",
+    "lag.positive",
+    "lag.negative"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-multi"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-sf-neg.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.SF",
+    "relationshipType.FS",
+    "lag.negative"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-sf-neg"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-sf-pos.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.SF",
+    "relationshipType.FS",
+    "lag.positive"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-sf-pos"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-sf.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.SF",
+    "relationshipType.FS"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-sf"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-ss-neg.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.SS",
+    "relationshipType.FS",
+    "lag.negative"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-ss-neg"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-ss-pos.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.SS",
+    "relationshipType.FS",
+    "lag.positive"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-ss-pos"
+   ],
+   "p6_version": "25.12"
+  },
+  "relationships/rel-ss.xer": {
+   "exported_by": "mcp",
+   "features": [
+    "activityType.taskDependent",
+    "relationshipType.SS",
+    "relationshipType.FS"
+   ],
+   "oracle": true,
+   "oracle_projects": [
+    "QC-rel-ss"
+   ],
+   "p6_version": "25.12"
+  }
+ },
+ "note": "P6 25.12 F9 results of synthetic parity cases (one behaviour each); oracle of tests/test_engine_parity.py"
+}
