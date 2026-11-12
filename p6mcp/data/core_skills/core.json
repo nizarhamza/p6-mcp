@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "catalog": "nizarhamza/p6-mcp-shop",
-  "commit": "6bc742bf12a79b6517898088a0b5510e2bd6556a",
+  "commit": "09ca541c263f4daf59e78c544903919753a7a4bf",
   "skills": [
     {
       "name": "baseline-variance",
@@ -30,8 +30,8 @@
     },
     {
       "name": "logic-date-integrity",
-      "version": 1,
-      "sha256": "9c4659d7ea23e8a1fda1a4dbfa008f3d5d4fc321724ff7c749c880f1c4247f99"
+      "version": 2,
+      "sha256": "56b122c3373f0a0ffc042f09534442c7edc2fd7c1006419ae5ea568ed54fc206"
     },
     {
       "name": "lookahead-brief",
@@ -60,8 +60,8 @@
     },
     {
       "name": "schedule-risk",
-      "version": 1,
-      "sha256": "840cd108f806175568acda11e79640dc53e05b6c2b4f267baa26324d3cdbb064"
+      "version": 2,
+      "sha256": "6236cf4045502f7d74d0a12fd589b4895f3e83f84e6b63243409b10896cec67f"
     },
     {
       "name": "update-import-safely",
