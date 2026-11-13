@@ -3,6 +3,19 @@
 All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- The clients' skills folders (Claude Code, Cursor, VS Code, Cline) now follow the saved skills: Save in the
+  Settings app rewrites the files that differ after a skill is turned on or off, installed or updated from the
+  Shop page, edited, restored, or the tool settings change. Before, only the first start, the automatic shop
+  update and Update skills on the Clients page wrote them, so the 2.0 core skills (logic-date-integrity,
+  schedule-risk, update-integrity-audit) could be missing from those clients. Each start of the Settings app
+  also brings folders left behind in line.
+- XER-only mode offers no write skill in the clients' folders, the Clients page and `p6_shop_install`, as the
+  server and the Skills page already did (XER-only mode never writes).
+
 ## [2.1.0] - 2026-11-12
 
 ### Changed

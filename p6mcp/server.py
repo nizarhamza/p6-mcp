@@ -11782,7 +11782,7 @@ def p6_shop_install(name: str, install_as: Optional[str] = None, confirm: bool =
     refreshed, errors = [], []
     for ad in ads:
         try:
-            ad.install_skills(new.get("tool_profile", "basic"), bool(new.get("allow_writes")))
+            ad.install_skills(*_skills.tool_settings(new))
             refreshed.append(ad.skills_dir())
         except (OSError, ValueError, RuntimeError) as e:
             errors.append(f"{ad.name}: {e}")

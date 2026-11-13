@@ -271,6 +271,13 @@ def saved_config() -> dict:
         return config.DEFAULTS
 
 
+def tool_settings(cfg: Optional[dict]) -> tuple[str, bool]:
+    """(tool profile, writes) the server offers its tools under for these settings: XER-only mode never
+    writes (config.load), so its clients are offered no write skill."""
+    cfg = cfg or {}
+    return cfg.get("tool_profile", "basic"), bool(cfg.get("allow_writes")) and cfg.get("data_source") != "xer"
+
+
 def missing_tools(skill: Skill, profile: str, allow_writes: bool) -> list[str]:
     """Tools the skill names that are not offered under these settings (an unknown name, from a typo or a
     newer MCP for Primavera P6, is never offered)."""

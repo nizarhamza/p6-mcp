@@ -76,10 +76,10 @@ def convert_legacy_commands(data: Optional[dict] = None) -> list[dict]:
     older version, write the skills offered under the saved tool settings (install_skills, which removes
     those files) or, without a skills folder, only remove them. Nothing to do once converted (run at every
     start of the Settings app). Returns [{client, written, legacy_removed}] or [{client, error}]."""
+    from p6mcp import skills
     if data is None:
-        from p6mcp import skills
         data = skills.saved_config()
-    profile, writes = data.get("tool_profile", "basic"), bool(data.get("allow_writes"))
+    profile, writes = skills.tool_settings(data)
     done = []
     for ad in ADAPTERS:
         try:

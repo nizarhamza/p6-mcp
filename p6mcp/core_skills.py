@@ -202,11 +202,11 @@ def updates(data: dict, opener=urllib.request.urlopen, index: Optional[dict] = N
 
 def refresh_clients(data: dict) -> list[dict]:
     """Rewrite the P6 skills of every client whose skills folder already holds some (one write per folder:
-    Claude Code, Cursor and VS Code share ~/.claude/skills), under the saved tool settings of data. Returns
-    [{client, folder, written, removed}] or [{client, error}]."""
+    Claude Code, Cursor and VS Code share ~/.claude/skills), under the saved tool settings of data. data must
+    be the saved settings: the skills written are read from the settings file. Only the files that differ are
+    written. Returns [{client, folder, written, removed}] or [{client, error}]."""
     from p6mcp import clients
-    profile, writes = data.get("tool_profile", "basic"), bool(data.get("allow_writes")) and \
-        data.get("data_source") != "xer"
+    profile, writes = skills.tool_settings(data)
     seen, out = set(), []
     for ad in clients.ADAPTERS:
         folder = ad.skills_dir()
@@ -237,6 +237,18 @@ def run_first_start(opener=urllib.request.urlopen) -> Optional[dict]:
     config.save(new)
     rep["clients"] = refresh_clients(new)
     return rep
+
+
+def run_refresh() -> list[dict]:
+    """At every start of the Settings app, after run_first_start: bring the clients' P6 skills in line with the
+    saved settings (a version before 2.1.1 changed the skills on Save without rewriting the folders). Returns
+    the clients whose folder changed or failed; nothing when the settings are unreadable."""
+    from p6mcp import config
+    try:
+        data = config.read_file()[0]
+    except config.ConfigError:
+        return []
+    return [r for r in refresh_clients(data or config.DEFAULTS) if r.get("error") or r["written"] or r["removed"]]
 
 
 def run_updates(opener=urllib.request.urlopen) -> dict:

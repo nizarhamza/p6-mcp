@@ -251,7 +251,7 @@ class Adapter:
         if profile is None or allow_writes is None:
             from p6mcp import skills
             data = skills.saved_config()  # unreadable settings: the defaults, as the server
-            profile, allow_writes = data.get("tool_profile", "basic"), bool(data.get("allow_writes"))
+            profile, allow_writes = skills.tool_settings(data)
         return SKILLS_INSTALLED if ours == self._skill_folders(profile, allow_writes) else SKILLS_OUTDATED
 
     @staticmethod

@@ -347,7 +347,9 @@ the client's AI uses a skill when your request matches its description, and Clau
 | Claude Code, Cursor, VS Code / VS Code Insiders | `%USERPROFILE%\.claude\skills` (one folder read by all three) |
 | Cline | `%USERPROFILE%\.cline\skills` |
 
-Update skills refreshes them after an update or a change of the tool settings; Remove skills (and uninstalling)
+The app keeps them in line with the saved settings: every Save (skills turned on or off, installed from the
+shop, edited, or a change of the tool settings) and every start rewrite the files that differ, in the folders
+that already hold P6 skills. Update skills does the same for one client; Remove skills (and uninstalling)
 deletes only the files the app wrote. From the command line:
 
 ```powershell
@@ -365,8 +367,8 @@ my skills** to start from a shop skill): a name, a title, a description that say
 text reference files (checklists, thresholds, examples; never scripts). The P6 rules are appended to your
 instructions. The **Instructions** page shows the instructions every client receives when it connects; turn
 built-in lines off (the two-step write rule stays on) or add your own, such as "When you show an activity, write
-it as Activity ID - Activity name". Click Save, then Update skills on the MCP clients page, and restart the MCP
-client for the prompts.
+it as Activity ID - Activity name". Click Save (the clients' skills folders follow) and restart the MCP client for
+the prompts.
 
 ### Skill shop
 

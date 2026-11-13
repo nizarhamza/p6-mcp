@@ -40,6 +40,7 @@ def main(argv=None) -> int:
     runtime.setup_logging("tray")
     _install_core_skills()
     _convert_commands()
+    _refresh_skills()
     i18n.set_language((config.read_file()[0] or {}).get("language", "auto") if _readable() else "auto")
     tray = TrayApp(app)
     asked_during_setup = runtime.take_window_request()
@@ -73,6 +74,18 @@ def _convert_commands() -> None:
             log.info("P6 commands converted to skills: %s", done)
     except Exception:  # never a reason not to start
         log.exception("converting the P6 commands to skills failed")
+
+
+def _refresh_skills() -> None:
+    """Rewrite the P6 skills of the clients that have some when they no longer match the saved settings."""
+    import logging
+    from p6mcp import core_skills
+    log = logging.getLogger("p6mcp.settings")
+    try:
+        for done in core_skills.run_refresh():
+            log.info("clients' P6 skills refreshed: %s", done)
+    except Exception:  # never a reason not to start
+        log.exception("refreshing the clients' P6 skills failed")
 
 
 def _readable() -> bool:

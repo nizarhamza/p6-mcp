@@ -222,7 +222,7 @@ class ClientsPage(QWidget):
             data = config.read_file()[0] or config.DEFAULTS
         except config.ConfigError:
             data = config.DEFAULTS
-        return data.get("tool_profile", "basic"), bool(data.get("allow_writes"))
+        return skills.tool_settings(data)
 
     def _show_skills(self, st, installed: bool) -> None:
         ad = clients.get(st.client) if st else None

@@ -408,6 +408,33 @@ def test_run_updates_saves_and_respects_the_switches(profile):
     assert os.stat(os.environ["P6MCP_CONFIG"]).st_mtime_ns == stamp  # nothing new: the file is not rewritten
 
 
+def test_run_refresh_brings_the_clients_in_line_and_xer_mode_offers_no_write_skill(profile):
+    from p6mcp import clients
+    read = {"name": "float-watch", "title": "Float watch", "description": "Float. Use when asked.", "args": [],
+            "template": "Run p6_float_analysis.", "enabled": True}
+    write = dict(read, name="bulk-update", description="Updates. Use when asked.", template="Run p6_update_activity.")
+    data = config.validate({"tool_profile": "full", "allow_writes": True, "core_skills_installed": True,
+                            "custom_skills": [read]})
+    config.save(data)
+    ad = clients.get("claude_code")
+    ad.install_skills(*skills.tool_settings(data))
+    folder = profile / "User" / ".claude" / "skills"
+    assert core_skills.run_refresh() == []  # in line: nothing written
+    config.save(dict(data, custom_skills=[read, write]))  # a skill added by a Save of 2.1.0 (folders not rewritten)
+    assert ad.skills_state() == clients.SKILLS_OUTDATED
+    rep = core_skills.run_refresh()
+    assert [(r["client"], r["written"], r["removed"]) for r in rep] == [("claude_code", ["p6-bulk-update"], [])]
+    assert sorted(os.listdir(folder)) == ["p6-bulk-update", "p6-float-watch"]
+    assert ad.skills_state() == clients.SKILLS_INSTALLED and core_skills.run_refresh() == []
+    xer = dict(config.read_file()[0], data_source="xer")
+    assert skills.tool_settings(xer) == ("full", False)  # XER-only mode never writes (config.load)
+    config.save(xer)
+    assert core_skills.run_refresh()[0]["removed"] == ["p6-bulk-update"]
+    assert os.listdir(folder) == ["p6-float-watch"] and ad.skills_state() == clients.SKILLS_INSTALLED
+    (profile / "config.json").write_text("{broken", encoding="utf-8")
+    assert core_skills.run_refresh() == []  # unreadable: the window reports it, the folders are left alone
+
+
 # ----------------------------------------------------------------- p6_shop_* tools
 
 @pytest.fixture

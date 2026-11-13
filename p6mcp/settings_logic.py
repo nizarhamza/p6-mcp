@@ -262,8 +262,7 @@ def skill_rows(data: dict) -> list[dict]:
     """Every skill of the config (shop skills, the core set included, and the user's own) with whether clients
     get it under the saved tool settings of data: {name, title, description, custom, enabled, offered,
     missing_tools, skill, source, edited (a shop skill changed here)}."""
-    profile, writes = data.get("tool_profile", "basic"), bool(data.get("allow_writes")) and \
-        data.get("data_source") != "xer"
+    profile, writes = skills.tool_settings(data)
     rows = []
     for it in data.get("custom_skills") or []:
         skill, on = skills.from_config(it), bool(it.get("enabled", True))

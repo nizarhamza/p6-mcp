@@ -10,7 +10,7 @@ from PySide6.QtGui import QCloseEvent, QPalette
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton,
                                QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
-from p6mcp import __version__, config, i18n, settings_logic, startup
+from p6mcp import __version__, config, core_skills, i18n, settings_logic, startup
 from p6mcp.i18n import tr
 from p6mcp.settings_app.common import brand_pixmap, muted, pill
 from p6mcp.settings_app.about_pages import AboutPage, LogsPage
@@ -229,6 +229,14 @@ class SettingsWindow(QMainWindow):
             startup.sync(self.data)
         except OSError as e:  # the settings are saved; only the startup entry failed
             self.error(tr("st.sync_failed", err=e))
+        # skills turned on or off, installed from the shop, edited, or the tools changed: the clients that read a
+        # skills folder get the skills the server now offers (only the files that differ are written)
+        refreshed = core_skills.refresh_clients(self.data)
+        failed = [r for r in refreshed if r.get("error")]
+        if any(r.get("error") or r["written"] or r["removed"] for r in refreshed):
+            self.page(ClientsPage).rescan()  # its skills state was read before the folders changed
+        if failed:
+            self.error(tr("app.skills_refresh_failed", err="; ".join(f"{r['client']}: {r['error']}" for r in failed)))
         before = self.saved or {}
         self.restart_keys = sorted(set(self.restart_keys) | set(settings_logic.restart_needed(before, self.data)),
                                    key=settings_logic.RESTART_KEYS.index)

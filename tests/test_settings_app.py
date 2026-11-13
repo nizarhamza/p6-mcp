@@ -260,6 +260,28 @@ def test_clients_page_installs_skills(qtbot, env, tmp_path):
     assert page.skill_btn.isHidden() and "nothing to install" in page.skill_state.text()
 
 
+def test_save_rewrites_the_clients_skills(qtbot, env, tmp_path):
+    from p6mcp import clients, settings_logic
+    os.makedirs(tmp_path / "User" / ".cursor")
+    two = [{"name": n, "title": n, "description": f"{n} check. Use when asked.", "args": [],
+            "template": f"Run {t}.", "enabled": True}
+           for n, t in (("variance-check", "p6_compare_projects"), ("driving-check", "p6_driving_path"))]
+    w = make(qtbot, {"language": "en", "tool_profile": "full", "core_skills_installed": True, "custom_skills": two})
+    clients.get("claude_code").install_skills("full", False)
+    folder = tmp_path / "User" / ".claude" / "skills"
+    assert sorted(os.listdir(folder)) == ["p6-driving-check", "p6-variance-check"]
+    w.set_data(settings_logic.set_skill_enabled(w.data, "driving-check", False))  # Skills page, then Save
+    assert w.save()
+    assert os.listdir(folder) == ["p6-variance-check"] and not env["warnings"]
+    qtbot.waitUntil(lambda: w.page(ClientsPage).job is None, timeout=15000)  # rescanned after the folders changed
+    page = w.page(ClientsPage)
+    page.select("cursor")
+    assert page.status().skills == "installed"
+    w.set_data(settings_logic.set_skill_enabled(w.data, "driving-check", True))
+    assert w.save() and sorted(os.listdir(folder)) == ["p6-driving-check", "p6-variance-check"]
+    qtbot.waitUntil(lambda: w.page(ClientsPage).job is None, timeout=15000)
+
+
 def test_clients_page_legacy_entry_and_snippet(qtbot, env, tmp_path):
     claude = tmp_path / "Roaming" / "Claude"
     claude.mkdir()
