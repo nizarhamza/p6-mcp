@@ -3,7 +3,7 @@
   "name": "io.github.nizarhamza/p6-mcp",
   "title": "MCP for Primavera P6",
   "description": "Primavera P6 MCP server: critical path, DCMA checks, what-if and safe write-back to the P6 database",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "websiteUrl": "https://mcp-for-primavera-p6.pages.dev/",
   "repository": {
     "url": "https://github.com/nizarhamza/p6-mcp",
@@ -19,8 +19,8 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/nizarhamza/p6-mcp/releases/download/v2.1.0/p6mcp-2.1.0.mcpb",
-      "version": "2.1.0",
+      "identifier": "https://github.com/nizarhamza/p6-mcp/releases/download/v2.1.1/p6mcp-2.1.1.mcpb",
+      "version": "2.1.1",
       "transport": {
         "type": "stdio"
       }

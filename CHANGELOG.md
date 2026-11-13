@@ -3,7 +3,7 @@
 All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.1.1] - 2026-11-13
 
 ### Fixed
 
@@ -394,6 +394,8 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[2.1.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v2.1.1
+[2.1.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v2.1.0
 [2.0.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v2.0.0
 [1.9.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.9.0
 [1.8.2]: https://github.com/nizarhamza/p6-mcp/releases/tag/v1.8.2

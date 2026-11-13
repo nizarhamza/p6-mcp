@@ -56,7 +56,7 @@ bundled.
 
 1. Download `P6MCP-Setup-<version>.exe` from
    [Releases](https://github.com/nizarhamza/p6-mcp/releases/latest) and check it against
-   `SHA256SUMS.txt` (`certutil -hashfile P6MCP-Setup-2.1.0.exe SHA256`).
+   `SHA256SUMS.txt` (`certutil -hashfile P6MCP-Setup-2.1.1.exe SHA256`).
 2. Run it. It installs for your Windows user only (no administrator rights) and, on its last page, offers to
    register the server with every MCP client it finds (Claude Desktop, Claude Code, Cursor, VS Code, LM Studio,
    Cline). Untick the ones you do not want.
