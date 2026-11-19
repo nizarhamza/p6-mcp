@@ -8,7 +8,8 @@ external cases first, then their cross-project links by test SQL (the import ski
 The engine's results must equal the XER rows: dates to the minute, float rounded to the precision of the
 export route (p6: 1/60 hour, mcp: 6 decimals), on early and late dates, total and free float, the longest
 path flag, float paths, remaining and planned dates. On the stored F9 dates, every not started activity has
-a driving explanation and a late date origin."""
+a driving explanation and a late date origin. A fresh single-project import is never stale for
+p6_cpm_validate (_stale_f9 measures update dates from the end of the import)."""
 
 import json
 import os
@@ -132,6 +133,9 @@ def compare(s, path: str, entry: dict, oracle: list[str]) -> tuple[Counter, list
             cpm = s._Cpm(con, pid)
             res = cpm.run()
             net = s._net_snapshot(con, pid)
+            if len(x.get("PROJECT", [])) == 1 and s._stale_f9(con, pid, cpm)["stale"]:
+                diff["stale_f9"] += 1
+                ex.append(f"{name}: stale_f9 on a fresh import")
         finally:
             con.close()
         for i, d in cpm.t.items():

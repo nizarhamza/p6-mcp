@@ -223,8 +223,8 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 |---|---|---|---|
 | `p6_compare_projects` | Two updates or a baseline compared activity by activity and link by link, with slip causes and float erosion | Read |  |
 | `p6_update_integrity` | Review of an update against the previous one: changes a reviewer should question | Read |  |
-| `p6_cpm_validate` | Runs the built-in CPM engine and compares it with P6's last F9, activity by activity | Read |  |
-| `p6_schedule_whatif` | What-if in memory: add or remove links, change durations or constraints, see the new finish | Read |  |
+| `p6_cpm_validate` | Runs the built-in CPM engine against P6's last F9 and explains each difference: changed since the F9, bad input, an engine rule or unknown | Read |  |
+| `p6_schedule_whatif` | What-if in memory: add or remove links, change durations or constraints, see the new finish and what a reviewer would question | Read |  |
 | `p6_schedule_risk` | Monte Carlo schedule risk in memory: finish percentiles, on-time probability, criticality index | Read |  |
 
 **XER files**
@@ -453,7 +453,12 @@ server's CPM engine and runs only when that engine matches P6's dates. See the
 
 **Are the dates computed by the AI?**
 No. Dates and float come from P6's last schedule run. What-if and risk use the server's CPM engine, and
-`p6_cpm_validate` shows how closely it matches P6's own dates on your project before you rely on it.
+`p6_cpm_validate` shows how closely it matches P6's own dates on your project before you rely on it. It
+explains every difference, with the calendar, constraints, links and schedule options both sides used: the
+schedule changed after its last F9 (press F9 first, or check a frozen copy), invalid input, an engine rule, or
+unknown. Matching P6 does not make a plan achievable: `p6_schedule_whatif` flags what a reviewer would question
+in the edits (deep duration cuts, open ends, hard constraints, negative lags, SS links with no lag, new
+near-critical work, DCMA checks before and after) and says that it checks logic, not crews, materials or access.
 
 **Which AI clients work?**
 Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered automatically; any MCP client

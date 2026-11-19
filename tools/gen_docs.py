@@ -79,9 +79,10 @@ SUMMARY = {
     "p6_compare_projects": "Two updates or a baseline compared activity by activity and link by link, with slip "
                            "causes and float erosion",
     "p6_update_integrity": "Review of an update against the previous one: changes a reviewer should question",
-    "p6_cpm_validate": "Runs the built-in CPM engine and compares it with P6's last F9, activity by activity",
+    "p6_cpm_validate": "Runs the built-in CPM engine against P6's last F9 and explains each difference: changed "
+                       "since the F9, bad input, an engine rule or unknown",
     "p6_schedule_whatif": "What-if in memory: add or remove links, change durations or constraints, see the new "
-                          "finish",
+                          "finish and what a reviewer would question",
     "p6_schedule_risk": "Monte Carlo schedule risk in memory: finish percentiles, on-time probability, "
                         "criticality index",
     "p6_inspect_xer": "Reads an XER file without importing it and runs the import pre-flight checks",

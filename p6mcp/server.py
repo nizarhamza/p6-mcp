@@ -43,6 +43,7 @@ from __future__ import annotations
 import base64
 import bisect
 import contextvars
+import copy
 import dataclasses
 import difflib
 import functools
@@ -4358,15 +4359,17 @@ class _Cpm:
                 "early_start_date", "early_end_date", "late_start_date", "late_end_date", "act_start_date", "act_end_date",
                 "total_float_hr_cnt", "remain_drtn_hr_cnt", "cstr_type", "cstr_date", "cstr_type2", "cstr_date2",
                 "expect_end_date", "suspend_date", "resume_date", "free_float_hr_cnt", "driving_path_flag",
-                "float_path", "float_path_order")
+                "float_path", "float_path_order", "target_drtn_hr_cnt", "update_date")
         dts = ("early_start_date", "early_end_date", "late_start_date", "late_end_date", "act_start_date",
-               "act_end_date", "cstr_date", "cstr_date2", "expect_end_date", "suspend_date", "resume_date")
+               "act_end_date", "cstr_date", "cstr_date2", "expect_end_date", "suspend_date", "resume_date", "update_date")
         sel = ", ".join(f"t.{c}" if c in tcols else f"NULL AS {c}" for c in cols)
         al = functools.partial(_alive, con)
         self.t: dict[int, dict] = {}
         for r in con.execute(f"SELECT {sel}, {HPD_SQL} AS hpd FROM TASK t LEFT JOIN CALENDAR c ON c.clndr_id = t.clndr_id "
                              "WHERE t.proj_id = ?" + al("TASK", "t") + " ORDER BY t.task_id", (pid,)):
             d = _dict(r)
+            # stored dates that do not read as a date (p6_cpm_validate reports them as data issues)
+            d["bad_dates"] = [k for k in dts if d[k] not in (None, "") and _db_dt(d[k]) is None]
             for k in dts:
                 d[k] = _db_dt(d[k])
             d["cal"] = self.cals.get(d["clndr_id"])
@@ -4549,12 +4552,12 @@ class _Cpm:
         return out, by_s, by_p
 
     # ------------------------------------------------------------------ passes
-    def run(self) -> dict[int, dict]:
+    def run(self, drivers: Optional[dict] = None) -> dict[int, dict]:
         """{task_id: {es, ef, ls, lf, tf_h, ff_h, rs, rf, rls, rlf, ps, pf, longest, critical, float_path,
         float_path_order[, rem_h]}} of every activity of the project (rem_h: the remaining duration F9
-        rewrites, only where it does)."""
+        rewrites, only where it does). drivers: filled by the forward pass (ties() reads it)."""
         plan = self.plan()
-        res = self.forward(plan)
+        res = self.forward(plan, drivers=drivers)
         self.backward(plan, res)
         self._fields(plan, res)
         return res
@@ -5209,8 +5212,482 @@ CPM_DIFF_LABELS = {"es": "early start", "ef": "early finish", "ls": "late start"
                    "tf_d": "total float (d)"}  # differences_text of p6_cpm_validate rows
 
 
-def _cpm_compare(cpm: _Cpm, res: dict, stale: bool, never: bool = False) -> dict:
-    """Engine results against the stored F9: rows of mismatches with a probable cause, match rates."""
+# ----------------------------------------------------------------- p6_cpm_validate: why a date differs
+
+F9_SAVE_TOL = timedelta(minutes=5)  # rows stamped this long after last_schedule_date count as the F9 save
+IMPORT_WINDOW = timedelta(minutes=10)  # no import entry in the edit log: rows this long after the project's creation
+STALE_SAMPLE = 10  # Activity IDs listed per kind of change in stale_f9_detail
+CAUSE_CLASSES = ("stale_f9", "data", "engine", "unknown")  # precedence of p6_cpm_validate cause_class
+CTX_LINKS = 10  # relationships listed per side in a context block
+CTX_WINDOW_WD = 10  # working days each side of the differing date for the non-work days of a context block
+OOS_TEXT = {"retained": "retained logic", "override": "progress override", "actual": "actual dates",
+            "both": "retained logic and progress override both on (P6 25.12 runs retained logic)"}
+FLOAT_TEXT = {"finish": "finish float (late finish - early finish)", "start": "start float (late start - early start)",
+              "min": "smallest of start and finish float"}
+LAG_CAL_TEXT = {"rcal_Predecessor": "predecessor calendar", "rcal_Successor": "successor calendar",
+                "rcal_24Hour": "24-hour calendar", "rcal_ProjDefault": "project default calendar"}
+
+
+def _stale_f9(con, pid: int, cpm: _Cpm) -> dict:
+    """Inputs of the project's schedule changed after its last F9, from update dates (run in the snapshot that
+    loaded cpm). Reference time: last_schedule_date + F9_SAVE_TOL, or the end of the project's last XER import
+    into this database when later (edit log; without an entry, PROJECT.create_date + IMPORT_WINDOW when the
+    project was created after its last F9): an import writes every row after the F9 the XER carries. Changed:
+    activities (TASK), links touching the project (TASKPRED), assignments (TASKRSRC), calendars used (activity,
+    project and resource calendars, with their bases), the scheduling options (PROJPROP 'scheduling'), activities
+    of other projects linked to it, deletions (REFRDEL), and this server's writes (edit log, _edit_state)."""
+    pcols = _cols(con, "PROJECT")
+    prj = con.execute("SELECT " + ", ".join(c if c in pcols else f"NULL AS {c}" for c in ("last_schedule_date", "create_date"))
+                      + " FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()
+    lsd_raw = prj["last_schedule_date"]
+    lsd = _db_dt(lsd_raw)
+    out = {"stale": False, "last_schedule_date": lsd_raw, "reference": None, "basis": None, "acts": {}, "links": {},
+           "asg": {}, "cals": {}, "options": None, "deleted": Counter(), "deleted_latest": None, "ext": {},
+           "server_edits": _edit_state(pid, lsd_raw), "project_level": []}
+    if out["server_edits"]:
+        out["project_level"].append(f"this server changed the schedule after the F9 (edit log, last at "
+                                    f"{out['server_edits']['at']})")
+    if lsd is None:
+        out["stale"] = bool(out["project_level"])
+        return out
+    ref, basis = lsd + F9_SAVE_TOL, f"last F9 + {int(F9_SAVE_TOL.total_seconds() // 60)} min (rows P6 writes when it saves the F9)"
+    entries = _log_entries()
+    undone = _undone_fn(entries)
+    imp = [_db_dt(e["ts"]) for e in entries if str(e.get("operation", "")).startswith("import_xer")
+           and e.get("proj_id") == pid and not undone(e)]
+    imp = [t for t in imp if t is not None]
+    created = _db_dt(prj["create_date"])
+    if imp and max(imp) > ref:  # update dates have whole seconds: a row stamped in a later second is a change
+        ref, basis = max(imp), "end of the XER import into this database (edit log)"
+    elif not imp and created is not None and created > lsd and created + IMPORT_WINDOW > ref:
+        ref, basis = created + IMPORT_WINDOW, (f"project created after its last F9 (an XER import): rows within "
+                                               f"{int(IMPORT_WINDOW.total_seconds() // 60)} min of its creation count as the import")
+    out["reference"], out["basis"] = _fmt_dt(ref), basis
+    refs = _fmt_dt(ref)
+    al = functools.partial(_alive, con)
+    later = lambda v: (lambda x: x is not None and x > ref)(_db_dt(v))  # noqa: E731
+    for n, d in cpm.t.items():
+        if d.get("update_date") is not None and d["update_date"] > ref:
+            out["acts"][n] = d["update_date"]
+    if "update_date" in _cols(con, "TASKPRED"):
+        for r in con.execute("SELECT r.task_pred_id, r.task_id, r.pred_task_id, r.update_date FROM TASKPRED r "
+                             "JOIN TASK s ON s.task_id = r.task_id JOIN TASK p ON p.task_id = r.pred_task_id "
+                             "WHERE (s.proj_id = ? OR p.proj_id = ?) AND r.update_date > ?" + al("TASKPRED", "r")
+                             + al("TASK", "s") + al("TASK", "p"), (pid, pid, refs)):
+            if later(r[3]):
+                out["links"][r[0]] = (r[1], r[2], _db_dt(r[3]))
+    if "update_date" in _cols(con, "TASKRSRC"):
+        for r in con.execute("SELECT a.task_id, MAX(a.update_date) FROM TASKRSRC a JOIN TASK t ON t.task_id = a.task_id "
+                             "WHERE t.proj_id = ? AND a.update_date > ?" + al("TASKRSRC", "a") + al("TASK", "t")
+                             + " GROUP BY a.task_id", (pid, refs)):
+            if later(r[1]):
+                out["asg"][r[0]] = _db_dt(r[1])
+    ccols = _cols(con, "CALENDAR")
+    if {"update_date", "base_clndr_id"} <= ccols:
+        rows = {r[0]: (r[1], r[2], _db_dt(r[3])) for r in con.execute(
+            "SELECT clndr_id, clndr_name, base_clndr_id, update_date FROM CALENDAR WHERE 1 = 1" + al("CALENDAR"))}
+        used = {d["clndr_id"] for d in cpm.t.values()} | {cpm.prj["clndr_id"]} | {a["rsrc_clndr_id"] for a in cpm.asg}
+        for lk in cpm.ext_pred + cpm.ext_succ:
+            if lk.get("cal") is not None:
+                used.add(lk["cal"].clndr_id)
+        for cid in used:
+            k, seen = cid, set()
+            while k in rows and k not in seen and len(seen) <= 10:
+                seen.add(k)
+                if rows[k][2] is not None and rows[k][2] > ref:
+                    out["cals"][k] = (rows[k][0], rows[k][2])
+                k = rows[k][1]
+        out["cal_chain"] = {}
+        for cid in used:
+            k, chain = cid, []
+            while k in rows and k not in chain and len(chain) <= 10:
+                chain.append(k)
+                k = rows[k][1]
+            out["cal_chain"][cid] = [c for c in chain if c in out["cals"]]
+    pp = _cols(con, "PROJPROP")
+    if "update_date" in pp:
+        r = con.execute("SELECT update_date FROM PROJPROP WHERE proj_id = ? AND prop_name = 'scheduling'" + al("PROJPROP"),
+                        (pid,)).fetchone()
+        if r and later(r[0]):
+            out["options"] = _db_dt(r[0])
+            out["project_level"].append(f"the scheduling options were changed at {_fmt_dt(out['options'])}")
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'REFRDEL'").fetchone():
+        for tbl, n, last in con.execute("SELECT table_name, COUNT(*), MAX(delete_date) FROM REFRDEL WHERE proj_id = ? "
+                                        "AND table_name IN ('TASK', 'TASKPRED', 'TASKRSRC') AND delete_date > ? "
+                                        "GROUP BY table_name", (pid, refs)):
+            out["deleted"][tbl] = n
+            out["deleted_latest"] = _mx(out["deleted_latest"], _db_dt(last))
+        if out["deleted"]:
+            out["project_level"].append("rows deleted after the F9: " + ", ".join(
+                f"{n} {LABEL_OF_TABLE.get(t, t)}" for t, n in sorted(out["deleted"].items())))
+    other = {}
+    for lk in cpm.ext_pred:
+        other.setdefault(lk["pred"], set()).add(lk["succ"])
+    for lk in cpm.ext_succ:
+        other.setdefault(lk["succ"], set()).add(lk["pred"])
+    if other:
+        ids = sorted(other)
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            for tid, code, upd in con.execute(f"SELECT task_id, task_code, update_date FROM TASK WHERE task_id IN "
+                                              f"({','.join('?' * len(chunk))})", chunk):
+                if later(upd):
+                    for own in other[tid]:
+                        out["ext"].setdefault(own, []).append((code, _db_dt(upd)))
+    if cpm.rule == "rcal_ProjDefault" and out.get("cal_chain", {}).get(cpm.prj["clndr_id"]):
+        out["project_level"].append("the project calendar (lag calendar of every link) was changed after the F9")
+    out["stale"] = bool(out["project_level"] or out["acts"] or out["links"] or out["asg"] or out["cals"] or out["ext"])
+    return out
+
+
+LABEL_OF_TABLE = {"TASK": "activities", "TASKPRED": "relationships", "TASKRSRC": "assignments"}
+
+
+def _stale_view(ev: dict, cpm: _Cpm) -> dict:
+    """stale_f9_detail of p6_cpm_validate (counts, latest change, samples of Activity IDs)."""
+    T = cpm.t
+    code = lambda n: T[n]["task_code"] if n in T else str(n)  # noqa: E731
+    link_acts = sorted({code(x) for s, p, _ in ev["links"].values() for x in (s, p) if x in T})
+    dts = ([*ev["acts"].values(), *(x[2] for x in ev["links"].values()), *ev["asg"].values(),
+            *(x[1] for x in ev["cals"].values()), *(dt for v in ev["ext"].values() for _, dt in v)]
+           + [x for x in (ev["options"], ev["deleted_latest"]) if x is not None])
+    se = ev["server_edits"]
+    return {"stale": ev["stale"], "last_schedule_date": ev["last_schedule_date"], "changed_after": ev["reference"],
+            "basis": ev["basis"],
+            "activities_changed": {"count": len(ev["acts"]), "sample": sorted(code(n) for n in ev["acts"])[:STALE_SAMPLE]},
+            "relationships_changed": {"count": len(ev["links"]), "activities": link_acts[:STALE_SAMPLE]},
+            "assignments_changed": {"count": len(ev["asg"]), "sample": sorted(code(n) for n in ev["asg"])[:STALE_SAMPLE]},
+            "calendars_changed": sorted(name for name, _ in ev["cals"].values()),
+            "schedule_options_changed": ev["options"] and _fmt_dt(ev["options"]),
+            "rows_deleted": {LABEL_OF_TABLE[t]: n for t, n in sorted(ev["deleted"].items())},
+            "other_projects_changed": sorted({c for v in ev["ext"].values() for c, _ in v})[:STALE_SAMPLE],
+            "server_edits": se, "latest_change": _fmt_dt(max(dts)) if dts else (se and se["at"]),
+            "note": ("Inputs changed after the last F9: the stored dates are out of date, not wrong. Press F9 in P6, "
+                     "or compare on a frozen copy of the database, before trusting this comparison." if ev["stale"] else
+                     "Nothing changed after the last F9 (update dates of activities, relationships, assignments, "
+                     "calendars, schedule options and linked activities of other projects; deletions; this server's "
+                     "edit log)." if ev["reference"] else
+                     "No last F9 recorded (last_schedule_date empty): changes after it cannot be dated.")}
+
+
+def _stale_min(stale: bool) -> dict:
+    """Evidence when only the edit log flag is known (what-if, risk, critical path test: rows unused)."""
+    return {"stale": stale, "acts": {}, "links": {}, "asg": {}, "cals": {}, "cal_chain": {}, "ext": {},
+            "project_level": ["this server changed the schedule after the F9 (edit log)"] if stale else []}
+
+
+def _data_issues(cpm: _Cpm, n: int, by_s: dict) -> list[str]:
+    """Invalid or contradictory inputs of one activity (cause_class data)."""
+    T, dd, d = cpm.t, cpm.dd, cpm.t[n]
+    st, as_, af = d["status_code"], d["act_start_date"], d["act_end_date"]
+    out = []
+    if d.get("bad_dates"):
+        out.append("unreadable stored date(s): " + ", ".join(d["bad_dates"]))
+    if dd is not None and as_ is not None and as_ > dd + CPM_TOL:
+        out.append(f"actual start {_fmt_dt(as_)} after the data date {_fmt_dt(dd)}")
+    if dd is not None and af is not None and af > dd + CPM_TOL:
+        out.append(f"actual finish {_fmt_dt(af)} after the data date {_fmt_dt(dd)}")
+    if as_ is not None and af is not None and af < as_:
+        out.append("actual finish before the actual start")
+    if st == "TK_Complete" and af is None:
+        out.append("completed without an actual finish")
+    if st in ("TK_Active", "TK_Complete") and as_ is None:
+        out.append("started without an actual start")
+    if st == "TK_NotStart" and (as_ is not None or af is not None):
+        out.append("not started but carries actual dates")
+    if st == "TK_Active" and af is not None:
+        out.append("in progress with an actual finish")
+    if d["cal"] is None:
+        out.append(f"calendar {d['clndr_id']} missing")
+    elif d["cal"].error:
+        out.append(f"calendar {d['cal'].name!r} unreadable ({d['cal'].error})")
+    for c, dt, which in ((d["cstr_type"], d["cstr_date"], "primary"), (d["cstr_type2"], d["cstr_date2"], "secondary")):
+        if c and c != "CS_ALAP" and dt is None:
+            out.append(f"{which} constraint {_cstr_label(c) or c} without a date")
+    if d["suspend_date"] is not None and d["resume_date"] is not None and d["resume_date"] < d["suspend_date"]:
+        out.append("resume date before the suspend date")
+    if d["rem"] < 0:
+        out.append("negative remaining duration")
+    if st != "TK_Complete" and (d["early_start_date"] is None or d["early_end_date"] is None) and not d.get("bad_dates"):
+        out.append("no stored early dates")
+    if as_ is not None:  # out of sequence progress: started or finished before its predecessors allow
+        for lk in by_s.get(n, ()):
+            p = T.get(lk["pred"])
+            if p is None:
+                continue
+            ty, pas, paf = lk["type"], p["act_start_date"], p["act_end_date"]
+            if ty == "PR_FS" and (paf is None or paf > as_ + CPM_TOL):
+                out.append(f"out of sequence: started {_fmt_dt(as_)} before its FS predecessor {p['task_code']} "
+                           + ("finished" if paf is None else f"finished ({_fmt_dt(paf)})"))
+            elif ty == "PR_SS" and (pas is None or pas > as_ + CPM_TOL):
+                out.append(f"out of sequence: started before its SS predecessor {p['task_code']} started")
+            elif ty == "PR_FF" and af is not None and (paf is None or paf > af + CPM_TOL):
+                out.append(f"out of sequence: finished before its FF predecessor {p['task_code']} finished")
+    return out
+
+
+def _engine_rules(cpm: _Cpm, n: int, bad: Mapping, plan: dict, by_p: dict) -> list[str]:
+    """Engine rules that act on this activity's own dates (named when same inputs give another result)."""
+    d, out = cpm.t[n], []
+    st, ty = d["status_code"], d["task_type"]
+    if ty == "TT_Rsrc" and plan["drv"].get(n):
+        out.append("resource dependent activity laid on its resources' calendars (assignment units, rates, lags)")
+    if ty == "TT_LOE":
+        out.append("level of effort spans the dates of its links")
+    if ty == "TT_WBS":
+        out.append("WBS summary spans the activities of its WBS node")
+    if cpm._from_expect(d):
+        out.append("expected finish sets the remaining duration (sched_use_expect_end_flag)")
+    for c, dt in ((d["cstr_type"], d["cstr_date"]), (d["cstr_type2"], d["cstr_date2"])):
+        if c == "CS_ALAP":
+            out.append("as late as possible (moved by its free float)")
+        elif c:
+            out.append(f"{_cstr_label(c) or c} constraint" + (f" on {_fmt_dt(dt)}" if dt else ""))
+    if st == "TK_Active" and d["resume_date"] is not None:
+        out.append("resume date bounds the remaining work")
+    if plan["alag"].get(n):
+        out.append("assignment lag on the activity's links")
+    if st == "TK_NotStart" and cpm.pstart is not None and cpm.dd is not None and cpm.pstart > cpm.dd:
+        out.append("project planned start after the data date bounds the start")
+    for e in plan["by_s"].get(n, ()):
+        if e[0]["lag"] != 0 and e[2] != e[0]["lag"]:
+            out.append(f"lag from the progressed predecessor {cpm.t[e[0]['pred']]['task_code']} reduced by the time "
+                       "elapsed since its actual date")
+            break
+    if set(bad) <= {"ls", "lf", "tf_d"}:
+        if not by_p.get(n) and not any(lk["pred"] == n for lk in cpm.ext_succ):
+            out.append("open end: its late finish is the must finish by date or the project finish")
+        if cpm.ft != "finish" and "tf_d" in bad:
+            out.append(f"total float as {FLOAT_TEXT[cpm.ft]} (sched_float_type)")
+    return out
+
+
+def _cpm_classify(cpm: _Cpm, mism: dict, ev: dict, never: bool) -> dict[int, dict]:
+    """{task_id: {cause_class, probable_cause, evidence, inherited_from}} of each mismatched activity.
+    Precedence: stale_f9 (own inputs, or the project's, changed after the F9), data (invalid input), the class
+    of the mismatched neighbour it inherits the difference from, engine (a rule of its own named), unknown."""
+    T = cpm.t
+    plan = cpm._plan_cache()
+    by_s, by_p = {}, {}
+    for lk in cpm.links:
+        by_s.setdefault(lk["succ"], []).append(lk)
+        by_p.setdefault(lk["pred"], []).append(lk["succ"])
+    link_upd: dict[int, list] = {}
+    for lid, (s, p, dt) in ev["links"].items():
+        for own, other in ((s, p), (p, s)):
+            if own in T:
+                link_upd.setdefault(own, []).append((T[other]["task_code"] if other in T else str(other), dt))
+    ext = {lk["succ"] for lk in cpm.ext_pred} | {lk["pred"] for lk in cpm.ext_succ}
+    own: dict[int, dict] = {}
+    for n in mism:
+        d = T[n]
+        stale = list(ev["project_level"])
+        if n in ev["acts"]:
+            stale.append(f"the activity was changed at {_fmt_dt(ev['acts'][n])}")
+        for other, dt in sorted(link_upd.get(n, []), key=lambda x: x[1])[-2:]:
+            stale.append(f"its relationship with {other} was changed at {_fmt_dt(dt)}")
+        if n in ev["asg"]:
+            stale.append(f"its assignments were changed at {_fmt_dt(ev['asg'][n])}")
+        for cid in ev.get("cal_chain", {}).get(d["clndr_id"], []):
+            stale.append(f"its calendar {ev['cals'][cid][0]!r} was changed at {_fmt_dt(ev['cals'][cid][1])}")
+        for code, dt in ev["ext"].get(n, []):
+            stale.append(f"the linked activity {code} of another project was changed at {_fmt_dt(dt)}")
+        data = ["no F9 recorded (last_schedule_date empty): the stored dates are no oracle"] if never else []
+        data += _data_issues(cpm, n, by_s)
+        own[n] = {"stale": stale, "data": data, "rules": _engine_rules(cpm, n, mism[n], plan, by_p), "ext": n in ext}
+    rank = {c: i for i, c in enumerate(CAUSE_CLASSES)}
+    cands: dict[int, list] = {}  # mismatched neighbours whose difference n can inherit: (task_id, side)
+    for n, bad in mism.items():
+        c = []
+        if set(bad) & {"es", "ef"}:
+            c += [(lk["pred"], "early") for lk in by_s.get(n, ()) if lk["pred"] in mism and lk["pred"] != n
+                  and set(mism[lk["pred"]]) & {"es", "ef"}]
+        if set(bad) & {"ls", "lf", "tf_d"}:
+            c += [(q, "late") for q in by_p.get(n, ()) if q in mism and q != n and set(mism[q]) & {"ls", "lf"}]
+        cands[n] = c
+    out: dict[int, dict] = {}
+    for n, o in own.items():
+        evidence = o["stale"] + o["data"] + o["rules"]
+        if o["ext"]:
+            evidence.append("linked to another project (its stored dates are used)")
+        out[n] = {"cause_class": None, "probable_cause": None, "evidence": evidence, "inherited_from": None}
+        if o["stale"]:
+            out[n].update(cause_class="stale_f9", probable_cause="changed after the last F9: " + "; ".join(o["stale"][:3])
+                          + ". The stored dates are out of date, not wrong: press F9 in P6 first")
+        elif o["data"]:
+            out[n].update(cause_class="data", probable_cause="invalid or contradictory input: " + "; ".join(o["data"][:3]))
+
+    def spread() -> None:
+        """Unresolved rows inherit the best class among their resolved neighbours, until nothing changes."""
+        changed = True
+        while changed:
+            changed = False
+            for n in mism:
+                if out[n]["cause_class"] is not None and out[n]["inherited_from"] is None:
+                    continue  # its own finding
+                got = [(rank[out[q]["cause_class"]], T[q]["task_code"], q, side) for q, side in cands[n]
+                       if out[q]["cause_class"] is not None]
+                if not got:
+                    continue
+                r, _, q, side = min(got)
+                cur = out[n]["cause_class"]
+                if cur is not None and rank[cur] <= r:
+                    continue
+                out[n].update(cause_class=out[q]["cause_class"],
+                              inherited_from={"task_code": T[q]["task_code"], "task_name": T[q]["task_name"]},
+                              probable_cause=f"inherits the {side} date difference of {T[q]['task_code']} - "
+                                             f"{T[q]['task_name']} ({out[q]['cause_class']})")
+                changed = True
+    spread()
+    for n, o in own.items():
+        if out[n]["cause_class"] is None and o["rules"]:
+            out[n].update(cause_class="engine", probable_cause="same inputs, another result: engine rule " + o["rules"][0]
+                          + (f" (also: {'; '.join(o['rules'][1:3])})" if len(o["rules"]) > 1 else ""))
+    spread()
+    for pass_ in (0, 1):  # rows without a resolved neighbour first, then whatever a loop of differences left
+        for n, o in own.items():
+            if out[n]["cause_class"] is None and (pass_ or not cands[n]):
+                out[n].update(cause_class="unknown", probable_cause=(
+                    "unknown: linked to another project whose stored dates did not change after the F9 (schedule that "
+                    "project in P6, then this one)" if o["ext"] else
+                    "unknown: same inputs and no rule of this activity explains it (resource leveling is not modelled "
+                    "and the database does not record it)"))
+        spread()
+    return out
+
+
+def _hhmm(m: int) -> str:
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _week_text(cal) -> Optional[str]:
+    """'Mon-Fri 08:00-16:00; Sat 08:00-12:00' (days without work left out)."""
+    if cal is None or getattr(cal, "error", None) or not hasattr(cal, "week"):
+        return None
+    names = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    parts, i = [], 0
+    while i < 7:
+        j = i
+        while j + 1 < 7 and cal.week[j + 1] == cal.week[i]:
+            j += 1
+        if cal.week[i]:
+            parts.append((names[i] if i == j else f"{names[i]}-{names[j]}") + " "
+                         + ", ".join(f"{_hhmm(s)}-{_hhmm(f)}" for s, f in cal.week[i]))
+        i = j + 1
+    return "; ".join(parts) or "no working day"
+
+
+def _cal_window(cal, at: datetime) -> dict:
+    """Non-work days within CTX_WINDOW_WD working days each side of at (weekly or exception), and the exception
+    days in that window that keep other working hours."""
+    if cal is None or getattr(cal, "error", None) or not hasattr(cal, "week"):
+        return {"from": None, "to": None, "non_work_days": [], "exception_hours": []}
+    lo = hi = at.date()
+    k = 0
+    while k < CTX_WINDOW_WD and (at.date() - lo).days < 120:
+        lo -= timedelta(days=1)
+        k += cal.is_workday(lo)
+    k = 0
+    while k < CTX_WINDOW_WD and (hi - at.date()).days < 120:
+        hi += timedelta(days=1)
+        k += cal.is_workday(hi)
+    off, exc, hours = [], [], []
+    for i in range((hi - lo).days + 1):
+        x = lo + timedelta(days=i)
+        if not cal.is_workday(x):
+            off.append(x.isoformat())
+            if x in cal.exc:
+                exc.append(x.isoformat())
+        elif x in cal.exc and cal.exc[x] != cal.week[x.weekday()]:
+            hours.append({"date": x.isoformat(), "hours": round(cal.day_hours(x), 2)})
+    return {"from": lo.isoformat(), "to": hi.isoformat(), "non_work_days": off, "holidays": exc,
+            "exception_hours": hours}
+
+
+def _cpm_context(cpm: _Cpm, res: dict, net: "_Net", net_e: "_Net", n: int, bad: Mapping) -> dict:
+    """Inputs the engine and P6 both used for one mismatched activity: the activity, its calendar around the
+    differing date, its relationships with the link that drives each date (stored F9 and engine), lag and lag
+    calendar."""
+    d = cpm.t[n]
+    hpd = d["hpd"] or 8.0
+    when = [x for k in ("es", "ef", "ls", "lf") if k in bad for x in (_db_dt(bad[k]["stored"]), _db_dt(bad[k]["engine"]))
+            if x is not None] or [x for x in (res[n]["lf"], res[n]["ef"]) if x is not None]
+    cal = d["cal"]
+    cstr = lambda c, dt: {"type": _cstr_label(c) or c, "date": dt and _fmt_dt(dt)} if c else None  # noqa: E731
+    act = {"task_type": d["task_type"], "status_code": d["status_code"],
+           "calendar": {"name": cal.name if cal is not None else None, "hours_per_day": d["hpd"],
+                        "work_week": _week_text(cal), "error": cal.error if cal is not None else "missing",
+                        "around": when and _fmt_dt(min(when)), **(_cal_window(cal, min(when)) if when else {})},
+           "constraint": cstr(d["cstr_type"], d["cstr_date"]), "constraint2": cstr(d["cstr_type2"], d["cstr_date2"]),
+           "actual_start": d["act_start_date"] and _fmt_dt(d["act_start_date"]),
+           "actual_finish": d["act_end_date"] and _fmt_dt(d["act_end_date"]),
+           "remaining_d": _days(d["rem"], hpd), "original_d": _days(d.get("target_drtn_hr_cnt"), hpd),
+           "suspend": d["suspend_date"] and _fmt_dt(d["suspend_date"]),
+           "resume": d["resume_date"] and _fmt_dt(d["resume_date"]),
+           "expected_finish": d["expect_end_date"] and _fmt_dt(d["expect_end_date"])}
+
+    def links(side: str) -> tuple[list, int]:
+        lks = net.by_succ.get(n, []) if side == "pred" else net.by_pred.get(n, [])
+        rows = []
+        for lk in lks:
+            p, s = net.t.get(lk["pred"]), net.t.get(lk["succ"])
+            if p is None or s is None:
+                continue
+            o = p if side == "pred" else s
+            lc = net.lag_cal(p, s)
+            late = side == "succ"
+            g_s, g_e = net.gap(lk, late), net_e.gap(lk, late)
+            key = "drives" if side == "pred" else "controls"
+            applied = net._lag(lk, p, lc if lc is not None and not lc.error else _ELAPSED)
+            lhpd = net.lag_hpd(p, s)
+            row = {("predecessor" if side == "pred" else "successor"): o["task_code"],
+                   ("predecessor" if side == "pred" else "successor") + "_name": o["task_name"],
+                   **({"other_project": o["project"]} if o["proj_id"] != net.pid else {}),
+                   "type": REL_TYPES_REV.get(lk["type"], lk["type"]), "lag_d": _days(lk["lag"], lhpd),
+                   "lag_calendar": lc.name if lc is not None else "24-hour (elapsed time)",
+                   f"{key}_stored": g_s is not None and abs(g_s) <= GAP_TOL_H,
+                   f"{key}_engine": g_e is not None and abs(g_e) <= GAP_TOL_H}
+            if abs(applied - lk["lag"]) > 1e-9:
+                row["lag_applied_d"] = _days(applied, lhpd)
+            rows.append(row)
+        key = "drives" if side == "pred" else "controls"
+        rows.sort(key=lambda r: (not (r[f"{key}_stored"] or r[f"{key}_engine"]), r.get("predecessor", r.get("successor"))))
+        return rows[:CTX_LINKS], len(rows)
+    out = {"activity": act}
+    out["predecessors"], out["predecessor_count"] = links("pred")
+    if set(bad) & {"ls", "lf", "tf_d"}:
+        out["successors"], out["successor_count"] = links("succ")
+    return out
+
+
+def _project_context(cpm: _Cpm, ev: dict) -> dict:
+    """Project inputs of every comparison row: dates and the scheduling options in force."""
+    o, pc = cpm.opts, cpm.pcal
+    ctype = cpm.prj["critical_path_type"]
+    return {"data_date": cpm.prj["last_recalc_date"], "last_schedule_date": ev.get("last_schedule_date"),
+            "must_finish_by": cpm.prj["plan_end_date"], "planned_start": cpm.prj["plan_start_date"],
+            "calendar": {"name": pc.name if pc is not None else None, "hours_per_day": pc.hpd if pc is not None else None,
+                         "work_week": _week_text(pc)},
+            "scheduling": {"out_of_sequence": OOS_TEXT[cpm.oos],
+                           "total_float": FLOAT_TEXT[cpm.ft],
+                           "sched_use_project_end_date_for_float": o.get("sched_use_project_end_date_for_float"),
+                           "critical": ("longest path" if ctype == "CT_DrivPath" else
+                                        f"total float <= {float(cpm.prj['critical_drtn_hr_cnt'] or 0):g} h"),
+                           "open_ends_critical": cpm.open_crit,
+                           "lag_calendar": LAG_CAL_TEXT.get(cpm.rule, cpm.rule),
+                           "lag_from_progressed_predecessor": "reduced by the time elapsed since its actual date",
+                           "external_dates": "ignored (sched_outer_depend_type SD_None)" if cpm.ignore_ext else
+                                             "used (stored dates of the linked activities of other projects)",
+                           "expected_finish": cpm.use_expect,
+                           "multiple_float_paths": None if cpm.fp is None else {
+                               "paths": cpm.fp["max"], "by": "total float" if cpm.fp["total"] else "free float",
+                               "end_activity": cpm.t[cpm.fp["end"]]["task_code"] if cpm.fp["end"] in cpm.t else None}}}
+
+
+def _cpm_compare(cpm: _Cpm, res: dict, stale: bool, never: bool = False, ev: Optional[dict] = None) -> dict:
+    """Engine results against the stored F9: rows of mismatches with a probable cause and its cause_class
+    (_cpm_classify on the evidence ev of _stale_f9; without it only the edit log flag stale is known), match
+    rates. Rows carry _tid (the task_id) for the caller."""
     fields = (("es", "early_start_date"), ("ef", "early_end_date"), ("ls", "late_start_date"), ("lf", "late_end_date"))
     T, mism, stats = cpm.t, {}, Counter()
     for n, d in T.items():
@@ -5236,41 +5713,23 @@ def _cpm_compare(cpm: _Cpm, res: dict, stale: bool, never: bool = False) -> dict
                 if res[n][k] is not None and d[col] is not None and abs(res[n][k] - d[col]) > CPM_TOL:
                     stats["completed_late_bad"] += 1
                     break
-    by_s, by_p = {}, {}
-    for lk in cpm.links:
-        by_s.setdefault(lk["succ"], []).append(lk["pred"])
-        by_p.setdefault(lk["pred"], []).append(lk["succ"])
-    ext = {lk["succ"] for lk in cpm.ext_pred} | {lk["pred"] for lk in cpm.ext_succ}
+    why = _cpm_classify(cpm, mism, ev if ev is not None else _stale_min(stale), never) if mism else {}
     rows = []
     for n, bad in mism.items():
         d = T[n]
-        if stale:
-            cause = "the project was edited since its last F9: press F9 in P6 first"
-        elif never:
-            cause = "no F9 recorded in this database (last_schedule_date empty): the stored dates are no oracle"
-        elif n in ext:
-            cause = "link to another project (its stored dates are used: schedule that project first)"
-        elif any(p in mism and set(mism[p]) & {"es", "ef"} for p in by_s.get(n, [])) and set(bad) & {"es", "ef"}:
-            cause = "inherits an early date difference from a predecessor"
-        elif any(q in mism and set(mism[q]) & {"ls", "lf"} for q in by_p.get(n, [])) and set(bad) & {"ls", "lf", "tf_d"}:
-            cause = "inherits a late date difference from a successor"
-        elif d["task_type"] == "TT_Rsrc":
-            cause = "resource dependent activity (assignment units, rates or resource calendars)"
-        elif d["cstr_type"] or d["cstr_type2"]:
-            cause = f"constraint {_cstr_label(d['cstr_type'] or d['cstr_type2'])}"
-        else:
-            cause = "unknown (resource leveling, or a P6 rule this engine does not model)"
         rows.append({"task_code": d["task_code"], "task_name": d["task_name"], "task_type": d["task_type"],
                      "status_code": d["status_code"], "differences": bad,
                      "differences_text": "; ".join(f"{CPM_DIFF_LABELS[k]}: stored {v['stored']}, engine {v['engine']}"
                                                    for k, v in bad.items()),
-                     "probable_cause": cause})
+                     **why[n], "_tid": n})
     rows.sort(key=lambda r: (r["status_code"] == "TK_Complete", r["task_code"]))
     rate = lambda g: None if not stats[g] else round(1 - stats[g + "_bad"] / stats[g], 4)  # noqa: E731
+    cc = Counter(r["cause_class"] for r in rows)
     return {"rows": rows, "match_rate": rate("open"), "match_rate_completed": rate("completed"),
             "counts": {"open": stats["open"], "open_mismatched": stats["open_bad"], "completed": stats["completed"],
                        "completed_mismatched": stats["completed_bad"],
                        "completed_late_dates_differing": stats["completed_late_bad"]},
+            "cause_counts": {c: cc[c] for c in CAUSE_CLASSES},
             "other_fields": _cpm_other_fields(cpm, res)}
 
 
@@ -5307,25 +5766,63 @@ def p6_cpm_validate(project: ProjectId, offset: Offset = 0, limit: Limit = 50) -
     early dates; their late dates, unused by float, are counted apart). match_rate = share of open
     activities identical on all five (dates within a minute, float within 3 minutes); trusted when it
     is at least 0.99 (p6_schedule_whatif and the DCMA critical path test rely on it). Page of
-    mismatched activities: differences (stored, engine), differences_text (the same in words) and
-    probable_cause. other_fields: free float, longest path flag and float path (when multiple float paths
-    are on) of open activities, engine against stored, outside match_rate. rules: what the engine models;
-    engine_version: version of its date, calendar and float rules. Read only."""
+    mismatched activities: differences (stored, engine), differences_text (the same in words),
+    probable_cause, cause_class, evidence (every finding on the activity), inherited_from (the mismatched
+    neighbour whose difference it inherits, with its class) and context: the inputs both used (activity
+    type, status, calendar with work week and the non-work days within 10 working days of the differing
+    date, constraints, actual dates, remaining and original duration, suspend, resume, expected finish;
+    predecessors with type, lag, lag calendar, drives_stored and drives_engine; successors with
+    controls_stored / controls_engine when a late date differs). cause_class: stale_f9 (the activity, its
+    links, assignments or calendar, a linked activity of another project, the scheduling options, deleted
+    rows or this server's writes changed after the last F9: the stored dates are out of date, not wrong),
+    data (invalid input: actual dates after the data date or out of order, status against actuals, out of
+    sequence progress, missing or unreadable calendar, unreadable date, constraint without a date, no F9
+    recorded), engine (same inputs, another result: the rule is named), unknown (never guessed);
+    cause_counts per class. stale_f9 / stale_f9_detail: whether anything changed after the last F9 (update
+    dates compared from last_schedule_date + 5 min, or from the end of the project's XER import into this
+    database), with counts and a note: press F9 in P6 or use a frozen copy before trusting the comparison.
+    project_context: data date, last F9, must finish, project calendar and the scheduling options in force.
+    A page ends early (page_note, next_offset) past about 150 KB. other_fields: free float, longest path flag
+    and float path (when multiple float paths are on) of open activities, engine against stored, outside
+    match_rate. rules: what the engine models; engine_version: version of its date, calendar and float
+    rules. Read only."""
+    offset, limit = _check_page(offset, limit)
     con = _connect()
     pid = _project_id(con, project)
-    con.execute("BEGIN")
+    con.execute("BEGIN")  # network, stored F9, update dates and links from one snapshot
     try:
         cpm = _Cpm(con, pid)
+        ev = _stale_f9(con, pid, cpm)
+        net = _Net(con, pid)
     finally:
         con.rollback()
     state = _schedule_state(con, pid)
     t0 = monotonic()
     res = cpm.run()
     secs = round(monotonic() - t0, 2)
-    cmp = _cpm_compare(cpm, res, state["stale"], not state["last_schedule_date"])
+    cmp = _cpm_compare(cpm, res, state["stale"], not state["last_schedule_date"], ev)
     fm, end = cpm.finish(res)
     out = _slice(cmp.pop("rows"), offset, limit)
+    if out["rows"]:
+        net_e = copy.copy(net)  # the same network with the engine's dates: which link drives each engine date
+        net_e.t = dict(net.t)
+        for n in cpm.t:
+            if n in net.t:
+                net_e.t[n] = {**net.t[n], **{k: res[n][k] for k in ("es", "ef", "ls", "lf")}}
+        size = 0
+        for i, r in enumerate(out["rows"]):
+            r["context"] = _cpm_context(cpm, res, net, net_e, r["_tid"], r["differences"])
+            size += len(json.dumps(r, indent=2, default=str)) + 4
+            if size > SQL_PAGE_BYTES and i:  # a page stays under the client budget: the next page continues
+                out.update(rows=out["rows"][:i], returned=i, next_offset=offset + i,
+                           page_note=f"page ended after {i} rows (about {SQL_PAGE_BYTES} bytes with their context): "
+                                     "pass next_offset for the next page")
+                break
+    for r in out["rows"]:
+        r.pop("_tid", None)
+    out.setdefault("page_note", None)
     out.update(project=project, **cmp, trusted=cmp["match_rate"] is not None and cmp["match_rate"] >= CPM_TRUST,
+               stale_f9=ev["stale"], stale_f9_detail=_stale_view(ev, cpm), project_context=_project_context(cpm, ev),
                project_finish={"engine": _fmt_dt(end), "stored": cpm.prj["scd_end_date"],
                                "finish_activity": fm and fm["task_code"]},
                options={k: cpm.opts.get(k) for k in ("sched_retained_logic", "sched_progress_override",
@@ -5369,8 +5866,10 @@ WhatIfEdits = Annotated[list[WhatIfEdit], Field(description="Edits applied in me
 CompareTo = Literal["current", "engine"]
 
 
-def _whatif_apply(cpm: _Cpm, e: Mapping) -> str:
-    """Apply one edit to the in-memory network; returns its description."""
+def _whatif_apply(cpm: _Cpm, e: Mapping, trace: Optional[list] = None) -> str:
+    """Apply one edit to the in-memory network; returns its description. trace: gets one record of what changed
+    (the assumption flags of p6_schedule_whatif read it)."""
+    rec = (lambda **kw: trace.append(kw)) if trace is not None else (lambda **kw: None)  # noqa: E731
     op = e.get("op")
     if op not in get_args(WhatIfOp):
         raise ValueError(f"op must be one of {list(get_args(WhatIfOp))}")
@@ -5394,6 +5893,7 @@ def _whatif_apply(cpm: _Cpm, e: Mapping) -> str:
                     raise ValueError(f"{p['task_code']} -> {s['task_code']} {ty} already exists")
                 lag = _lag_arg(e.get("lag_days") or 0) * cpm.lag_hpd(p, s)
                 cpm.links.append({"id": None, "succ": s["task_id"], "pred": p["task_id"], "type": code, "lag": lag})
+                rec(op="add_link", link=cpm.links[-1], before=None)
                 return f"add {REL_TYPES_REV[code]} {p['task_code']} -> {s['task_code']} lag {e.get('lag_days') or 0:g} d"
             if not hits:
                 raise ValueError(f"No link {p['task_code']} -> {s['task_code']}" + (f" {ty}" if ty else ""))
@@ -5404,8 +5904,9 @@ def _whatif_apply(cpm: _Cpm, e: Mapping) -> str:
         txt = f"{REL_TYPES_REV.get(lk['type'])} {p['task_code']} -> {s['task_code']}"
         if op == "delete_link":
             cpm.links.remove(lk)
+            rec(op="delete_link", link=dict(lk), before=dict(lk))
             return f"delete {txt}"
-        ch = []
+        ch, old = [], dict(lk)
         if e.get("rel_type"):
             new = _rel_code(e["rel_type"], "rel_type")
             if new != lk["type"] and any(x is not lk and x["pred"] == lk["pred"] and x["succ"] == lk["succ"] and x["type"] == new
@@ -5418,10 +5919,11 @@ def _whatif_apply(cpm: _Cpm, e: Mapping) -> str:
             ch.append(f"lag {e['lag_days']:g} d")
         if not ch:
             raise ValueError("update_link: give rel_type and/or lag_days")
+        rec(op="update_link", link=lk, before=old)
         return f"update {txt}: {', '.join(ch)}"
     d = act(e.get("task_code"))
     if op == "duration":
-        ch = []
+        ch, rem0 = [], d["rem"]
         given = [k for k in ("remaining_days", "original_days", "add_remaining_days") if e.get(k) is not None]
         if "add_remaining_days" in given and len(given) > 1:
             raise ValueError("add_remaining_days cannot be combined with remaining_days or original_days")
@@ -5450,6 +5952,9 @@ def _whatif_apply(cpm: _Cpm, e: Mapping) -> str:
         fixed = cpm.duration_fixed(d)
         if fixed:
             ch.append(f"no effect on its dates ({fixed})")
+        rec(op="duration", task_id=d["task_id"], rem_before=rem0, rem_after=d["rem"], fixed=fixed,
+            original=e.get("original_days") is not None and "remaining_days" not in given
+            and "add_remaining_days" not in given)
         return f"{d['task_code']}: " + ", ".join(ch)
     name = e.get("constraint")
     if name not in CSTR_TYPES:
@@ -5461,13 +5966,203 @@ def _whatif_apply(cpm: _Cpm, e: Mapping) -> str:
             raise ValueError("constraint_date is required for this constraint")
         dt = _db_dt(_resolve_dt(d["cal"] if d["cal"] and not d["cal"].error else None, e["constraint_date"], "constraint_date",
                                 "finish" if code in CSTR_FINISH else "start")[0])
+    rec(op="constraint", task_id=d["task_id"], before=(d["cstr_type"], d["cstr_date"]), after=(code, dt))
     d["cstr_type"], d["cstr_date"] = code, dt
     return f"{d['task_code']}: constraint {_cstr_label(code) or 'none'} {_fmt_dt(dt) if dt else ''}".strip()
 
 
+WHATIF_CAVEAT = ("The engine calculates these dates the way P6 would. It does not check that crews, materials or "
+                 "access allow them.")
+WHATIF_CUT_PCT = 30.0  # default max_cut_pct of p6_schedule_whatif
+CutPct = Annotated[float, Field(ge=0, le=100, description="Flag duration cuts above this % of the original or "
+                                                            "remaining duration.")]
+
+
+def _temp_network(con, pid: int, cpm: _Cpm, res: Optional[dict], bid: Optional[int]) -> None:
+    """Shadow TASK, TASKPRED and PROJECT on this read-only connection with temp copies (an unqualified name
+    resolves to the temp schema first) holding cpm's network and the engine results res: what _dcma and _cpt
+    read then is the in-memory network, and the database file is never written. TASK keeps the project, its
+    baseline and the activities linked to it; TASKPRED the links touching the project."""
+    al = functools.partial(_alive, con)
+    con.execute("CREATE TEMP TABLE TASK AS SELECT * FROM main.TASK WHERE proj_id IN (?, ?) OR task_id IN ("
+                "SELECT r.pred_task_id FROM main.TASKPRED r JOIN main.TASK s ON s.task_id = r.task_id WHERE s.proj_id = ?) "
+                "OR task_id IN (SELECT r.task_id FROM main.TASKPRED r JOIN main.TASK p ON p.task_id = r.pred_task_id "
+                "WHERE p.proj_id = ?)", (pid, bid if bid is not None else pid, pid, pid))
+    con.execute("CREATE TEMP TABLE TASKPRED AS SELECT * FROM main.TASKPRED WHERE task_id IN (SELECT task_id FROM temp.TASK "
+                "WHERE proj_id = ?) OR pred_task_id IN (SELECT task_id FROM temp.TASK WHERE proj_id = ?)", (pid, pid))
+    con.execute("CREATE TEMP TABLE PROJECT AS SELECT * FROM main.PROJECT")
+    for i, (t, c) in enumerate((("TASK", "task_id"), ("TASK", "proj_id"), ("TASK", "task_code"), ("TASKPRED", "task_id"),
+                                ("TASKPRED", "pred_task_id"), ("TASKPRED", "task_pred_id"), ("PROJECT", "proj_id"))):
+        con.execute(f"CREATE INDEX temp.wi_{i} ON {t} ({c})")
+    tcols = _cols(con, "TASK")
+    base_ids = {r[0] for r in con.execute("SELECT r.task_pred_id FROM TASKPRED r JOIN TASK s ON s.task_id = r.task_id "
+                                          "JOIN TASK p ON p.task_id = r.pred_task_id WHERE s.proj_id = ? AND p.proj_id = ?"
+                                          + al("TASKPRED", "r"), (pid, pid))}
+    keep = {lk["id"]: lk for lk in cpm.links if lk["id"] is not None}
+    con.executemany("DELETE FROM TASKPRED WHERE task_pred_id = ?", [(i,) for i in base_ids - set(keep)])
+    con.executemany("UPDATE TASKPRED SET pred_type = ?, lag_hr_cnt = ? WHERE task_pred_id = ?",
+                    [(lk["type"], lk["lag"], i) for i, lk in keep.items()])
+    new = [lk for lk in cpm.links if lk["id"] is None]
+    for k, lk in enumerate(new, 1):
+        con.execute("INSERT INTO TASKPRED (task_pred_id, task_id, pred_task_id, proj_id, pred_proj_id, pred_type, lag_hr_cnt) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)", (-k, lk["succ"], lk["pred"], pid, pid, lk["type"], lk["lag"]))
+    sets = ["remain_drtn_hr_cnt", "cstr_type", "cstr_date"] + (["target_drtn_hr_cnt"] if "target_drtn_hr_cnt" in tcols else [])
+    dated = [("early_start_date", "es"), ("early_end_date", "ef"), ("late_start_date", "ls"), ("late_end_date", "lf"),
+             ("total_float_hr_cnt", "tf_h"), ("free_float_hr_cnt", "ff_h"), ("driving_path_flag", "longest"),
+             ("float_path", "float_path"), ("float_path_order", "float_path_order")]
+    dated = [x for x in dated if x[0] in tcols] if res is not None else []
+    plain, full = [], sets + [c for c, _ in dated]
+    rich = []
+    for n, d in cpm.t.items():
+        vals = [d["rem"], d["cstr_type"], d["cstr_date"] and _fmt_dt(d["cstr_date"])]
+        if "target_drtn_hr_cnt" in sets:
+            vals.append(d.get("target_drtn_hr_cnt"))
+        if dated and d["status_code"] != "TK_Complete":
+            r = res[n]
+            if "rem_h" in r:
+                vals[0] = r["rem_h"]
+            for col, k in dated:
+                v = r.get(k)
+                vals.append(_fmt_dt(v) if isinstance(v, datetime) else ("Y" if v else "N") if k == "longest" else v)
+            rich.append((*vals, n))
+        else:
+            plain.append((*vals, n))
+    con.executemany(f"UPDATE TASK SET {', '.join(f'{c} = ?' for c in full)} WHERE task_id = ?", rich)
+    con.executemany(f"UPDATE TASK SET {', '.join(f'{c} = ?' for c in sets)} WHERE task_id = ?", plain)
+    if res is not None:
+        con.execute("UPDATE PROJECT SET scd_end_date = ? WHERE proj_id = ?", (_fmt_dt(cpm.finish(res)[1]), pid))
+
+
+def _dcma_memory(pid: int, cpm: Optional[_Cpm] = None, res: Optional[dict] = None) -> tuple[dict, str]:
+    """(checks, threshold source) of the DCMA assessment as p6_health_check runs it (project settings, the project
+    baseline, current dates, remaining durations; key_dates left out; no snapshot): on the stored database, or
+    with cpm and res on that network with the engine's dates in temp tables (read-only connection)."""
+    con = _connect()
+    con.execute("BEGIN")
+    try:
+        cfg = _dcma_settings(con, pid, {}, None)
+        bid = _baseline_pid(con, pid, None)
+        if cpm is not None:
+            qo = con.execute("PRAGMA query_only").fetchone()[0]
+            con.execute("PRAGMA query_only = OFF")  # temp tables only: mode=ro keeps the database file read only
+            try:
+                _temp_network(con, pid, cpm, res, bid)
+            finally:
+                con.execute(f"PRAGMA query_only = {'ON' if qo else 'OFF'}")
+        checks = _dcma(con, pid, bid, cfg, "current", "remaining")[0]
+        if "critical_path_test" not in cfg["disabled"]:
+            checks["critical_path_test"] = _cpt(con, pid)
+    finally:
+        con.rollback()  # drops the temp tables too
+    return checks, cfg["source"]
+
+
+def _dcma_brief(checks: Mapping) -> dict:
+    return {k: {f: v.get(f) for f in ("count", "pct", "value", "threshold", "pass")} for k, v in checks.items()}
+
+
+def _whatif_assumptions(base: _Cpm, trial: _Cpm, before: dict, r1: dict, trace: list, crit_b: Callable,
+                        crit_a: Callable, opn: list, max_cut_pct: float, near_days: float, near_h0: float,
+                        ties0: tuple, ties1: tuple) -> dict:
+    """What a reviewer would question in the edits (flags only): duration cuts above max_cut_pct of the original
+    or remaining duration, open or dangling ends left by deleted or retyped links, new hard constraints, negative
+    lags, SS links with zero lag, activities that became near critical, links driving the finish."""
+    T, A = base.t, trial.t
+    code = lambda n: {"task_code": T[n]["task_code"], "task_name": T[n]["task_name"]}  # noqa: E731
+    cuts, ends, hard, neg, ss0 = [], [], [], [], []
+    for t in trace:
+        if t["op"] == "duration":
+            d = T[t["task_id"]]
+            hpd = d["hpd"] or 8.0
+            orig = float(d.get("target_drtn_hr_cnt") or 0)
+            old = orig if t["original"] else t["rem_before"]
+            cut = old - t["rem_after"]
+            p_rem = None if t["original"] or t["rem_before"] <= 0 else round(100 * cut / t["rem_before"], 1)
+            p_org = None if orig <= 0 else round(100 * cut / orig, 1)
+            if cut > 0 and max(p_rem or 0, p_org or 0) > max_cut_pct:
+                cuts.append({**code(t["task_id"]), "edit": t["edit"], "remaining_before_d": _days(t["rem_before"], hpd),
+                             "remaining_after_d": _days(t["rem_after"], hpd), "original_d": _days(orig, hpd),
+                             "cut_d": _days(cut, hpd), "cut_pct_of_remaining": p_rem, "cut_pct_of_original": p_org,
+                             "no_effect": t["fixed"]})
+        elif t["op"] == "constraint":
+            (b, bd), (a, ad) = t["before"], t["after"]
+            if a in HARD_CSTR_SET and (a, ad) != (b, bd):
+                hard.append({**code(t["task_id"]), "edit": t["edit"], "constraint": _cstr_label(a),
+                             "constraint_date": ad and _fmt_dt(ad), "before": _cstr_label(b) if b else None})
+        else:
+            lk, old = t["link"], t["before"]
+            p, s = T[lk["pred"]], T[lk["succ"]]
+            view = {"predecessor": p["task_code"], "predecessor_name": p["task_name"], "successor": s["task_code"],
+                    "successor_name": s["task_name"], "edit": t["edit"]}
+            if t["op"] != "delete_link":
+                same = old is not None and (old["type"], old["lag"]) == (lk["type"], lk["lag"])
+                if lk["lag"] < 0 and not same:
+                    neg.append({**view, "type": REL_TYPES_REV[lk["type"]], "lag_d": _days(lk["lag"], trial.lag_hpd(p, s))})
+                if lk["type"] == "PR_SS" and lk["lag"] == 0 and not same:
+                    sa, pa = r1[lk["succ"]], r1[lk["pred"]]
+                    cal = base._time(p)
+                    lo_, hi_ = max(sa["es"], pa["es"]), min(sa["ef"], pa["ef"])  # both at work
+                    ov = cal.work_hours(lo_, hi_) if hi_ > lo_ else 0.0
+                    ss0.append({**view, "starts_together": abs(sa["es"] - pa["es"]) <= CPM_TOL,
+                                "overlap_d": _days(ov, p["hpd"] or 8.0)})
+            if t["op"] == "delete_link" or (old is not None and old["type"] != lk["type"]):
+                ends.append((old, view))
+    has = lambda n, side, kinds=None: any(  # noqa: E731
+        lk[side] == n and (kinds is None or kinds(lk["type"])) for lk in trial.links) or any(
+        lk[side] == n for lk in (trial.ext_succ if side == "pred" else trial.ext_pred) if kinds is None)
+    had = lambda n, side, kinds=None: any(  # noqa: E731
+        lk[side] == n and (kinds is None or kinds(lk["type"])) for lk in base.links)
+    is_open = lambda n: A[n]["status_code"] != "TK_Complete" and A[n]["task_type"] not in ("TT_LOE", "TT_WBS")  # noqa: E731
+    mile = ("TT_Mile", "TT_FinMile")
+    open_ends, seen = [], set()
+    for old, view in ends:
+        for n, side, words, key in ((old["pred"], "pred", ("no successor", "no relationship from its finish"), "f"),
+                                    (old["succ"], "succ", ("no predecessor", "no relationship to its start"), "s")):
+            if not is_open(n):
+                continue
+            kind = (lambda ty: LINK_FROM[ty] == "f") if key == "f" else (lambda ty: LINK_TO[ty] == "s")
+            why = None
+            if had(n, side) and not has(n, side):
+                why = words[0]
+            elif A[n]["task_type"] not in mile and had(n, side, kind) and not has(n, side, kind):
+                why = words[1]
+            if why and (n, why) not in seen:
+                seen.add((n, why))
+                open_ends.append({**code(n), "left_with": why, "edit": view["edit"]})
+    hpd = lambda n: T[n]["hpd"] or 8.0  # noqa: E731
+    near = lambda tf, n: tf is not None and tf <= near_h0 + near_days * hpd(n) + CPM_TF_TOL_H  # noqa: E731
+    rows = sorted(({**code(n), "total_float_d_before": _days(before[n]["tf_h"], hpd(n)),
+                    "total_float_d_after": _days(r1[n]["tf_h"], hpd(n))} for n in opn
+                   if near(r1[n]["tf_h"], n) and not crit_a(n) and not near(before[n]["tf_h"], n) and not crit_b(n)),
+                  key=lambda r: (r["total_float_d_after"] if r["total_float_d_after"] is not None else 0, r["task_code"]))
+    conv = lambda ties: {"driving_links": len(ties), "predecessors": sorted({T[p]["task_code"] for p, _ in ties})[:CTX_LINKS],  # noqa: E731
+                         "finish_activities": sorted({T[f]["task_code"] for _, f in ties})[:CTX_LINKS]}  # those entered
+    flags = {"duration_cuts": cuts, "open_ends": open_ends, "hard_constraints": hard, "negative_lags": neg,
+             "ss_zero_lag": ss0}
+    return {**flags, "near_critical": {"definition": f"total float within {near_days:g} d of the critical limit "
+                                                     "(days of each activity's calendar), not critical",
+                                       "became_near_critical": len(rows), "rows": rows[:ACT_LINKS_CAP]},
+            "finish_convergence": {"before": conv(ties0), "after": conv(ties1),
+                                   "definition": "links from other activities that drive the early finish of the "
+                                                 "activities finishing on the project finish (engine): the paths that "
+                                                 "converge on it"},
+            "flag_count": sum(len(v) for v in flags.values()) + len(rows), "max_cut_pct": max_cut_pct,
+            "note": "Flags only: none of them stops the run. They mark what a reviewer would question."}
+
+
+def _finish_ties(cpm: _Cpm, res: dict, drv: dict) -> tuple:
+    """(predecessor, finish activity) pairs whose link drives an activity finishing on the project finish, from an
+    activity that does not (a chain of activities all on the finish is one path)."""
+    end = cpm.finish(res)[1]
+    fins = [n for n, d in cpm.t.items() if d["task_type"] not in ("TT_LOE", "TT_WBS") and res[n]["ef"] >= end - CPM_TOL]
+    return tuple((p, f) for f in sorted(fins) for p in dict.fromkeys(cpm.ties(drv.get(f))) if p not in fins)
+
+
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: CompareTo = "current",
-                       milestones: Optional[list[ActivityId]] = None, offset: Offset = 0, limit: Limit = 50) -> dict:
+                       milestones: Optional[list[ActivityId]] = None, offset: Offset = 0, limit: Limit = 50,
+                       max_cut_pct: CutPct = WHATIF_CUT_PCT, near_critical_days: NonNegDays = 10,
+                       dcma: bool = True) -> dict:
     """What-if scheduling in memory (the database is never written): applies the edits in order (add,
     delete or update links, durations, constraints; lag days and durations in days of the lag rule and
     activity calendars), runs this server's CPM engine and compares with compare_to: 'current' (P6's
@@ -5480,12 +6175,26 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     and up to 50 rows by float after) and no_longer_critical; longest_path_change: open activities that
     joined (up to 50 rows) or left the longest path; page of changed activities (early dates or
     total float moved by more than a minute), largest finish change first. engine: match rate of the
-    unchanged network against the F9 (trusted at 0.99); engine_version. Changes to make for real: the write tools,
-    then F9 in P6."""
+    unchanged network against the F9 (trusted at 0.99); engine_version. assumptions (flags only, the run is
+    never refused): duration_cuts (cut by more than max_cut_pct, default 30, of the original or remaining
+    duration), open_ends (open activities left without a predecessor or successor, or without a link to
+    their start or from their finish, by a deleted or retyped link), hard_constraints (new mandatory, must
+    or no later than constraints), negative_lags, ss_zero_lag (with starts_together and overlap_d),
+    near_critical (became near critical: total float within near_critical_days, default 10, of the critical
+    limit), finish_convergence (links driving the activities on the project finish, before and after),
+    flag_count, and dcma: p6_health_check's DCMA checks before and after the edits, in memory with no
+    snapshot (failed_before, failed_after, newly_failed, no_longer_failed, changed; dcma=False skips them).
+    caveat: the dates are calculated the way P6 would, not checked against crews, materials or access.
+    Changes to make for real: the write tools, then F9 in P6."""
     if compare_to not in get_args(CompareTo):
         raise ValueError("compare_to must be current or engine")
     if not isinstance(edits, (list, tuple)) or not edits:
         raise ValueError("edits: a list of at least one edit")
+    cut, near = _num(max_cut_pct), _num(near_critical_days)
+    if cut is None or not 0 <= cut <= 100:
+        raise ValueError("max_cut_pct must be a number from 0 to 100")
+    if near is None or near < 0:
+        raise ValueError("near_critical_days must be 0 or more")
     con = _connect()
     pid = _project_id(con, project)
     con.execute("BEGIN")
@@ -5495,18 +6204,23 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     finally:
         con.rollback()
     state = _schedule_state(con, pid)
-    r0 = base.run()
+    d0: dict = {}
+    r0 = base.run(d0)
     chk = _cpm_compare(base, r0, state["stale"])
     trial = base.copy()
-    done = []
+    done, trace = [], []
     for i, e in enumerate(edits):
         if not isinstance(e, Mapping):
             raise ValueError(f"edit {i}: an object with op")
+        k = len(trace)
         try:
-            done.append(_whatif_apply(trial, e))
+            done.append(_whatif_apply(trial, e, trace))
         except ValueError as err:
             raise ValueError(f"edit {i} ({e.get('op')}): {err}") from None
-    r1 = trial.run()
+        for t in trace[k:]:
+            t["edit"] = done[-1]
+    d1: dict = {}
+    r1 = trial.run(d1)
     T = base.t
     if compare_to == "current":
         before = {n: {"es": d["early_start_date"], "ef": d["early_end_date"], "tf_h": None if d["total_float_hr_cnt"] is None
@@ -5572,12 +6286,30 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     longest_change = {"joined": len(joined), "joined_rows": joined[:ACT_LINKS_CAP],
                       "left": sum(bool(lp_before(n)) and not r1[n]["longest"] for n in opn),
                       "on_path_after": sum(bool(r1[n]["longest"]) for n in opn)}
+    assumptions = _whatif_assumptions(base, trial, before, r1, trace, crit_b, crit_a, opn, cut, near, lim,
+                                      _finish_ties(base, r0, d0), _finish_ties(trial, r1, d1))
+    if dcma:
+        cb, src = _dcma_memory(pid, base, r0) if compare_to == "engine" else _dcma_memory(pid)
+        ca = _dcma_memory(pid, trial, r1)[0]
+        fb, fa = ([k for k, v in c.items() if v["pass"] is False and k not in HC_UNSCORED] for c in (cb, ca))
+        assumptions["dcma"] = {
+            "before": _dcma_brief(cb), "after": _dcma_brief(ca), "failed_before": fb, "failed_after": fa,
+            "newly_failed": [k for k in fa if k not in fb], "no_longer_failed": [k for k in fb if k not in fa],
+            "changed": [k for k in ca if k in cb and any(ca[k].get(f) != cb[k].get(f) for f in ("count", "pct", "value", "pass"))],
+            "threshold_source": src,
+            "note": "p6_health_check's DCMA checks (project settings, project baseline, remaining durations) run in "
+                    "memory, no snapshot saved: before = " + ("P6's last F9 as stored" if compare_to == "current" else
+                                                              "the engine on the unchanged network")
+                    + ", after = the edited network with the engine's dates (critical path test rerun on it)"}
+    else:
+        assumptions["dcma"] = None
     out = _slice(changed, offset, limit)
     out.update(project=project, edits=done, compare_to=compare_to,
                project_finish={"before": fin_before and _fmt_dt(fin_before), "after": _fmt_dt(fin_after),
                                "delta_cd": delta(fin_before, fin_after), "delta_wd": wd(fin_before, fin_after),
                                "finish_activity": fm and fm["task_code"]},
                milestones=ms, float_change=float_change, longest_path_change=longest_change,
+               assumptions=assumptions, caveat=WHATIF_CAVEAT,
                engine={"match_rate": chk["match_rate"], "trusted": chk["match_rate"] is not None
                                       and chk["match_rate"] >= CPM_TRUST, "open_mismatched": chk["counts"]["open_mismatched"]},
                engine_version=ENGINE_VERSION, schedule_state=state, note="In memory only: nothing was written. "

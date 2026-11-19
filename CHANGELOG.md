@@ -3,6 +3,29 @@
 All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `p6_cpm_validate` explains every difference. Each row has a `cause_class`: `stale_f9` (the activity, one of its
+  links, its assignments or calendar, a linked activity of another project, the scheduling options, deleted rows
+  or the server's own writes changed after the last F9: the stored dates are out of date, not wrong), `data`
+  (invalid input: actual dates after the data date or out of order, status against actual dates, out of sequence
+  progress, a missing or unreadable calendar, an unreadable date, a constraint without a date, no F9 recorded),
+  `engine` (same inputs, another result, with the rule named) or `unknown` (never guessed). Rows also carry
+  `evidence`, `inherited_from` (the neighbour whose difference they only inherit) and `context`: the activity,
+  its calendar with the non-work days around the differing date, its constraints and actual dates, and its links
+  with type, lag, lag calendar and which link drives the stored date and the engine's. New result keys:
+  `cause_counts`, `project_context` (data date, last F9, scheduling options in force), `stale_f9` and
+  `stale_f9_detail` (what changed after the F9, measured from the end of an XER import when the project came in
+  by import). `match_rate` and the 0.99 trust threshold are unchanged. A page ends early past about 150 KB.
+- `p6_schedule_whatif` adds `assumptions`, flags only (the run is never refused): duration cuts above
+  `max_cut_pct` (default 30) of the original or remaining duration, open or dangling ends left by deleted or
+  retyped links, new hard constraints, negative lags, SS links with lag 0, activities that became near critical
+  (`near_critical_days`, default 10), the paths that converge on the project finish, and the DCMA checks before
+  and after the edits, run in memory with no snapshot (`dcma=False` skips them). A fixed `caveat` line says the
+  dates are calculated the way P6 would, not checked against crews, materials or access.
+
 ## [2.1.1] - 2026-11-13
 
 ### Fixed

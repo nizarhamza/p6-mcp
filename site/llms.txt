@@ -74,8 +74,8 @@ Facts an assistant should get right:
 
 - `p6_compare_projects`: Two updates or a baseline compared activity by activity and link by link, with slip causes and float erosion (read)
 - `p6_update_integrity`: Review of an update against the previous one: changes a reviewer should question (read)
-- `p6_cpm_validate`: Runs the built-in CPM engine and compares it with P6's last F9, activity by activity (read)
-- `p6_schedule_whatif`: What-if in memory: add or remove links, change durations or constraints, see the new finish (read)
+- `p6_cpm_validate`: Runs the built-in CPM engine against P6's last F9 and explains each difference: changed since the F9, bad input, an engine rule or unknown (read)
+- `p6_schedule_whatif`: What-if in memory: add or remove links, change durations or constraints, see the new finish and what a reviewer would question (read)
 - `p6_schedule_risk`: Monte Carlo schedule risk in memory: finish percentiles, on-time probability, criticality index (read)
 
 ### XER files
