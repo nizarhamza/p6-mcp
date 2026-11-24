@@ -6,6 +6,7 @@
 ![Windows 10 and 11](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0A1A33)
 [![M8ven Score](https://m8ven.ai/badge/mcp/nizarhamza-p6-mcp-151l9d?v=5514a55ce01fb84cdf4699c8d59f0d6b)](https://m8ven.ai/mcp/nizarhamza-p6-mcp-151l9d?s=readme)
 [![MCP for Primavera P6 MCP server](https://mcprush.com/badge/mcp-for-primavera-p6/card.svg)](https://mcprush.com/to/mcp-for-primavera-p6?ref=badge)
+[![P6 MCP MCP server – quality and maintenance score on Glama](https://glama.ai/mcp/servers/nizarhamza/p6-mcp/badges/card.svg)](https://glama.ai/mcp/servers/nizarhamza/p6-mcp)
 
 # MCP for Primavera P6: Primavera P6 MCP Server
 
