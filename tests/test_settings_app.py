@@ -39,6 +39,7 @@ def env(tmp_path, monkeypatch, golden):
     answers = {"value": True}
     monkeypatch.setattr(pages, "ask", lambda *a, **k: answers["value"])
     monkeypatch.setattr("p6mcp.settings_app.clients_page.ask", lambda *a, **k: answers["value"])
+    monkeypatch.setattr("p6mcp.settings_app.eppm_panel.ask", lambda *a, **k: answers["value"])
     monkeypatch.setattr(SettingsWindow, "ask_close", lambda self: "discard")
     # config.json written by another program (the p6 helper, the shop install tool): overwrite unless a test says
     monkeypatch.setattr(SettingsWindow, "ask_changed", lambda self: answers.get("changed", "overwrite"))
@@ -424,6 +425,67 @@ def test_xer_only_mode_in_settings(qtbot, win, env, p6, tmp_path, monkeypatch):
     assert st.xer_files == (os.path.normpath(xer),) and st.allow_writes is False
     page.xer.add_files([str(tmp_path / "other.xer")])
     assert win.data["xer_confirmed"] is False  # a changed list needs a new load check
+
+
+def test_eppm_mode_in_settings(qtbot, win, monkeypatch):
+    from test_eppm_connection import DB, PW, USER, Fake  # the fake P6 EPPM server
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from p6mcp.settings_app import eppm_panel
+    vault = {}  # the Credential Manager, faked
+    monkeypatch.setattr(eppm_panel.credentials, "get", lambda k: vault.get(k))
+    monkeypatch.setattr(eppm_panel.credentials, "set", lambda k, v: vault.__setitem__(k, v))
+    monkeypatch.setattr(eppm_panel.credentials, "delete", lambda k: vault.pop(k, None) is not None)
+    Fake.sessions, Fake.seen = set(), []
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        page = win.page(DatabasePage)
+        panel = page.eppm
+        assert not panel.isVisibleTo(page)
+        page.src_eppm.click()
+        assert win.data["data_source"] == "eppm" and panel.isVisibleTo(page) and not page.profiles_box.isVisibleTo(page)
+        assert "P6 EPPM" in win.banner.text()
+        assert panel.add_server("ftp://nope") is None and not win.data.get("eppm_profiles")
+        name = panel.add_server(url)
+        assert name == "127.0.0.1" and panel.selected() == name and not panel.use_btn.isEnabled()
+        panel.db_edit.setText(DB)
+        panel.db_edit.editingFinished.emit()
+        panel.user_edit.setText(USER)
+        panel.user_edit.editingFinished.emit()
+        panel.pw_edit.setText("wrong")
+        panel.run_test()
+        qtbot.waitUntil(lambda: panel.job is None, timeout=15000)
+        assert "Sign-in refused" in panel.result.text() and not vault and not panel.use_btn.isEnabled()
+        panel.pw_edit.setText(PW)
+        panel.run_test()
+        qtbot.waitUntil(lambda: panel.job is None, timeout=15000)
+        assert "2 project(s)" in panel.result.text() and vault == {f"eppm:{name}": PW}  # kept once it worked
+        assert panel.use_btn.isEnabled()
+        panel.use_btn.click()
+        assert win.data["eppm_active"] == name and settings_logic_find(win, name)["confirmed"]
+        assert not (win.banner.isVisibleTo(win) and "P6 EPPM" in win.banner.text()) and not tools_allow_enabled(win)
+        assert win.save()
+        st = config.load()
+        assert st.eppm == name and st.allow_writes is False and "no project pulled" in st.db_problem
+        panel.db_edit.setText("OTHER")  # a connection change clears the confirmation
+        panel.db_edit.editingFinished.emit()
+        assert not settings_logic_find(win, name)["confirmed"] and win.data["eppm_active"] is None
+        panel.name_edit.setText("Main")  # the password follows a rename
+        panel.name_edit.editingFinished.emit()
+        assert vault == {"eppm:Main": PW} and panel.selected() == "Main"
+        panel._remove()  # the env fixture answers yes
+        assert not win.data["eppm_profiles"] and not vault
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def settings_logic_find(w, name):
+    from p6mcp import settings_logic
+    return settings_logic.find_eppm(w.data, name)
 
 
 def tools_allow_enabled(w):

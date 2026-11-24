@@ -107,6 +107,120 @@ def confirm(data: dict, name: str, result: dict) -> dict:
                                                 "projects": result.get("projects")})
 
 
+# ----------------------------------------------------------------- P6 EPPM servers
+
+EPPM_TEST_KEYS = ("confirmed", "tested_at", "test_digest", "projects", "sql_ok")
+
+
+def find_eppm(data: dict, name: str) -> Optional[dict]:
+    return config.eppm_profile(data, name)
+
+
+def unique_eppm_name(data: dict, base: str) -> str:
+    base = (base or "EPPM").strip() or "EPPM"
+    names = {p.get("name") for p in data.get("eppm_profiles", [])}
+    if base not in names:
+        return base
+    n = 2
+    while f"{base} {n}" in names:
+        n += 1
+    return f"{base} {n}"
+
+
+def eppm_name_from_url(url: str) -> str:
+    from urllib.parse import urlsplit
+    host = urlsplit(url or "").hostname or ""
+    return host.split(".")[0] if host and not host.replace(".", "").isdigit() else (host or "EPPM")
+
+
+def add_eppm_profile(data: dict, base_url: str, user: str = "", database: str = "",
+                     name: Optional[str] = None) -> tuple[dict, str]:
+    """New server entry (not confirmed). Returns (data, name used)."""
+    data = copy.deepcopy(data)
+    name = unique_eppm_name(data, name or eppm_name_from_url(base_url))
+    data.setdefault("eppm_profiles", []).append(
+        {"name": name, "base_url": base_url.strip(), "context": "p6ws", "database": database.strip(),
+         "user": user.strip(), "auth": "auto", "ca_bundle": None, "timeout_s": 120, "sql": None, "confirmed": False})
+    return data, name
+
+
+def update_eppm_profile(data: dict, name: str, new_name: Optional[str] = None, **changes) -> dict:
+    """Rename and/or change settings. A change of a connection setting clears the confirmation and the test."""
+    from p6mcp import eppm
+    data = copy.deepcopy(data)
+    entry = find_eppm(data, name)
+    if entry is None:
+        raise config.ConfigError(f"No P6 EPPM server named {name!r}")
+    if new_name is not None and new_name.strip() != name:
+        new_name = new_name.strip()
+        if not new_name:
+            raise config.ConfigError("A server needs a name.")
+        if find_eppm(data, new_name) is not None:
+            raise config.ConfigError(f"The name {new_name!r} is already used.")
+        entry["name"] = new_name
+        if data.get("eppm_active") == name:
+            data["eppm_active"] = new_name
+    before = eppm.digest(entry)
+    for k, v in changes.items():
+        if k not in eppm.CONNECTION_KEYS + ("timeout_s",):
+            raise config.ConfigError(f"Unknown P6 EPPM server setting {k!r}")
+        entry[k] = v.strip() if isinstance(v, str) else v
+    if eppm.digest(entry) != before:
+        for k in EPPM_TEST_KEYS:
+            entry.pop(k, None)
+        entry["confirmed"] = False
+        if data.get("eppm_active") == entry["name"]:
+            data["eppm_active"] = None
+    return data
+
+
+def remove_eppm_profile(data: dict, name: str) -> dict:
+    """The entry only: its passwords stay in the Credential Manager until forget_eppm_passwords."""
+    data = copy.deepcopy(data)
+    data["eppm_profiles"] = [p for p in data.get("eppm_profiles", []) if p.get("name") != name]
+    if data.get("eppm_active") == name:
+        data["eppm_active"] = None
+    return data
+
+
+def set_eppm_active(data: dict, name: str) -> dict:
+    entry = find_eppm(data, name)
+    if entry is None:
+        raise config.ConfigError(f"No P6 EPPM server named {name!r}")
+    if not entry.get("confirmed"):
+        raise config.ConfigError("Test the connection of this server and confirm it before using it.")
+    data = copy.deepcopy(data)
+    data["eppm_active"] = name
+    return data
+
+
+def confirm_eppm(data: dict, name: str, result: dict) -> dict:
+    """The user confirms a successful test of the current settings: entry confirmed and active."""
+    from p6mcp import eppm
+    entry = find_eppm(data, name)
+    if entry is None:
+        raise config.ConfigError(f"No P6 EPPM server named {name!r}")
+    if not result.get("ok"):
+        raise config.ConfigError("Only a successful connection test can be confirmed.")
+    if result.get("digest") != eppm.digest(entry):
+        raise config.ConfigError("The settings changed after the test: test this server again.")
+    data = copy.deepcopy(data)
+    entry = find_eppm(data, name)
+    sql = result.get("sql")
+    entry.update(confirmed=True, tested_at=result.get("tested_at"), test_digest=result["digest"],
+                 projects=(result.get("rest") or {}).get("projects"),
+                 sql_ok=None if sql is None else bool(sql.get("ok")))
+    data["eppm_active"] = name
+    return data
+
+
+def forget_eppm_passwords(name: str) -> None:
+    """Delete both passwords of a server profile from the Credential Manager."""
+    from p6mcp import credentials
+    for key in (credentials.eppm_key(name), credentials.eppm_sql_key(name)):
+        credentials.delete(key)
+
+
 def trust_schema(data: dict, fingerprint: str, trusted: bool = True) -> dict:
     data = copy.deepcopy(data)
     fps = [f for f in data.get("trusted_schemas", []) if f != fingerprint]

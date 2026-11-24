@@ -129,6 +129,18 @@ stay outside this repository.
   files every read tool runs and `p6_cpm_validate` gives a match rate of 1.0. Settings: Database page data
   source radios and `xer_panel.XerPanel` (files, order, load check on the thread pool).
 
+- P6 EPPM mode (3.0.0, in progress, plan `docs/EPPM_PLAN.md`; milestone 1 done): config schema 4,
+  `data_source: eppm`, `eppm_profiles` (validated by `config._check_eppm`; `config.eppm_profile`), `eppm_active`;
+  `load()` gives `Settings.eppm` (confirmed active profile) and no database until the pull exists, writes off.
+  Passwords `credentials.eppm_key` / `eppm_sql_key`, stored by the panel only after a test shows they work.
+  `p6mcp/eppm/rest.py` `Session` (stdlib urllib: `/login?DatabaseName` + authToken header + JSESSIONID cookie,
+  or OAuth bearer for oraclecloud.com hosts; `read(entity, fields, filter)`; `EppmError` messages never hold
+  the password), `p6mcp/eppm/sql.py` (pymssql / oracledb imported only when present, SELECT only, `table()`
+  with schema and the DACS `T6_` prefix), `eppm.test_profile` (ok follows REST, SQL reported beside) and
+  `eppm.digest` (a test confirms only the settings it ran with). `settings_logic` `*_eppm_*` functions;
+  Settings `settings_app/eppm_panel.EppmPanel` (third data source radio). Tests: `tests/test_eppm_connection.py`
+  (fake server on 127.0.0.1), `test_settings_app.py::test_eppm_mode_in_settings`.
+
 - Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (copies the brand icon, version
   resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`
   without Qt for the bundle; locales and package metadata collected; exe icon and the Settings app's brand

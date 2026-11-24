@@ -3,6 +3,8 @@
 Entries live under the service name "P6MCP" (P6MCP_SECRET_SERVICE overrides it, for tests):
   http_token          bearer token of the localhost HTTP transport
   db:<profile name>   password of a database connection profile (server backends, later)
+  eppm:<profile>      REST password of a P6 EPPM server profile (config eppm_profiles)
+  eppm-sql:<profile>  password of that profile's read-only SQL account
 """
 
 from __future__ import annotations
@@ -65,6 +67,16 @@ def delete(name: str) -> bool:
 
 def db_key(profile: str) -> str:
     return f"db:{profile}"
+
+
+def eppm_key(profile: str) -> str:
+    """REST password of a P6 EPPM server profile."""
+    return f"eppm:{profile}"
+
+
+def eppm_sql_key(profile: str) -> str:
+    """Password of the read-only SQL account of a P6 EPPM server profile."""
+    return f"eppm-sql:{profile}"
 
 
 def new_token() -> str:

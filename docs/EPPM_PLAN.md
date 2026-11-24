@@ -206,19 +206,21 @@ push and schedule. `INSTRUCTIONS` (ASCII, under 1 KB) gets one line on pull, edi
 
 ## 6. Configuration, secrets, Settings
 
-- `config.DATA_SOURCES` = ("database", "xer", "eppm"); new keys `eppm_profiles` ({name, base_url, database,
-  user, auth: oauth or basic, sql: {driver, host, port, service or database, user} or null}),
-  `eppm_active`, `eppm_confirmed` (set by Test connection, like `confirmed` for a database). Schema version
-  bump with a migration.
+- `config.DATA_SOURCES` = ("database", "xer", "eppm"); new keys `eppm_profiles` ({name, base_url, context,
+  database, user, auth: auto, oauth or login, ca_bundle, timeout_s, sql: {driver, host, port, service, user,
+  schema, table_prefix} or null, confirmed, tested_at, test_digest, projects, sql_ok}) and `eppm_active`.
+  A profile is confirmed by the user after a successful test of its current connection settings
+  (`eppm.digest`); any change of them clears the confirmation. Config schema 4 (`_migrate_3_to_4`). Built
+  in milestone 1.
 - Secrets in the Credential Manager only: `eppm:<profile>` (REST password), `eppm-sql:<profile>` (SQL
   password). OAuth tokens are kept in memory for their lifetime, never written.
 - Settings, Database page: a third data source "P6 EPPM server" with an `EppmPanel` (URL, database, user,
   password, auth, optional SQL connection, Test connection on the thread pool: REST login + project count,
   SQL connect + schema fingerprint + row count of PROJECT), then the project list with Pull. All strings in
   `locales/*.json` (straight quotes, no long dashes).
-- HTTP: `httpx` (already installed by `mcp`; declared explicitly; the other network code, `updates.py` and
-  `shop.py`, stays on `urllib`), TLS verification on, optional custom CA
-  bundle path for company certificates, timeouts, retries only on idempotent reads.
+- HTTP: the standard library (`urllib`, as `updates.py` and `shop.py`: httpx is not installed with every
+  `mcp` version), TLS verification on, optional custom CA bundle path for company certificates, timeouts,
+  retries only on idempotent reads.
 
 ## 7. Code layout
 
@@ -241,7 +243,7 @@ push and schedule. `INSTRUCTIONS` (ASCII, under 1 KB) gets one line on pull, edi
 
 ## 8. Tests
 
-- Fake EPPM REST server in pytest (an httpx `MockTransport`): its objects are generated from the synthetic
+- Fake EPPM REST server in pytest (`http.server` on 127.0.0.1, `tests/test_eppm_connection.py`): its objects are generated from the synthetic
   database of `tests/fixtures/make_db.py`, so a REST pull must rebuild that database (every column the tools
   read), and pushes are checked against the fake's state.
 - SQL route tested with a SQLite file standing in for the PMDB (same tables) through the same DB-API code;
@@ -267,7 +269,9 @@ push and schedule. `INSTRUCTIONS` (ASCII, under 1 KB) gets one line on pull, edi
    whether `/scheduleOptions` is per user; size and time of a full read of the largest project; write rights
    on a test project agreed with the EPPM administrator. Output: a short findings note (private, no data in
    the repository) that fixes decisions D1 to D4.
-1. Configuration, credentials, Settings panel, Test connection.
+1. Configuration, credentials, Settings panel, Test connection. Done (`p6mcp/eppm/rest.py`, `sql.py`,
+   `settings_app/eppm_panel.py`); checked against the test server. The on-demand install of the SQL drivers
+   moves to milestone 2, with the SQL pull that needs them.
 2. SQL pull, working copy, read tools on it, `p6_eppm_projects`, `p6_eppm_status`.
 3. REST pull (calendar rebuild, schedule options).
 4. Local writes on the working copy, pending changes in `p6_eppm_status`.
