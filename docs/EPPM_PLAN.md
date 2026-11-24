@@ -272,6 +272,12 @@ push and schedule. `INSTRUCTIONS` (ASCII, under 1 KB) gets one line on pull, edi
 1. Configuration, credentials, Settings panel, Test connection. Done (`p6mcp/eppm/rest.py`, `sql.py`,
    `settings_app/eppm_panel.py`); checked against the test server. The on-demand install of the SQL drivers
    moves to milestone 2, with the SQL pull that needs them.
+   Milestone 2 done (`eppm/drivers.py`, `eppm/store.py`, the three tools in `server.py`): checked against the
+   test server, DEMO-SS225 and its baseline pulled in about 1 s, `p6_cpm_validate` match rate 1.0 on the
+   working copy. Two choices made while building it: one working copy per server profile
+   (`%LOCALAPPDATA%\P6MCP\eppm\<profile>\working.db`, every pulled project in it, rebuilt as a whole by each
+   pull) instead of one file per project, so the tools that compare projects keep working; and relationships to
+   projects that were not pulled are left out with a warning (pull both projects to keep them).
 2. SQL pull, working copy, read tools on it, `p6_eppm_projects`, `p6_eppm_status`.
 3. REST pull (calendar rebuild, schedule options).
 4. Local writes on the working copy, pending changes in `p6_eppm_status`.

@@ -35,8 +35,9 @@ TOOL_KIND: dict[str, str] = {
     "p6_schedule_options": READ, "p6_schedule_whatif": READ, "p6_inspect_xer": READ,
     "p6_list_backups": READ, "p6_edit_log": READ, "p6_diagnose": READ, "p6_sql_select": READ,
     "p6_list_udfs": READ, "p6_shop_search": READ, "p6_shop_get": READ,
-    # file output
-    "p6_export_xer": FILE, "p6_export_dashboard": FILE,
+    "p6_eppm_projects": READ, "p6_eppm_status": READ,
+    # file output (p6_eppm_pull: the local working copy, the server is only read)
+    "p6_export_xer": FILE, "p6_export_dashboard": FILE, "p6_eppm_pull": FILE,
     # write
     "p6_update_activity": WRITE, "p6_update_assignment": WRITE, "p6_update_assignments": WRITE,
     "p6_update_udf": WRITE, "p6_update_udfs": WRITE,
@@ -57,7 +58,8 @@ BASIC_TOOLS = frozenset({
     "p6_health_check",
 })
 # Tools that do not need a database (the rest refuse with the "No database configured" message)
-NO_DB_TOOLS = frozenset({"p6_diagnose", "p6_inspect_xer", "p6_shop_search", "p6_shop_get", "p6_shop_install"})
+NO_DB_TOOLS = frozenset({"p6_diagnose", "p6_inspect_xer", "p6_shop_search", "p6_shop_get", "p6_shop_install",
+                         "p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status"})
 # The skill shop (p6mcp.shop): GitHub reads, offered only while the setting shop_enabled is on
 SHOP_TOOLS = frozenset({"p6_shop_search", "p6_shop_get", "p6_shop_install"})
 SHOP_OFF = ("The skill shop is turned off. Turn on 'Allow the skill shop' in MCP for Primavera P6 Settings "

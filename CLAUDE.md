@@ -140,6 +140,15 @@ stay outside this repository.
   `eppm.digest` (a test confirms only the settings it ran with). `settings_logic` `*_eppm_*` functions;
   Settings `settings_app/eppm_panel.EppmPanel` (third data source radio). Tests: `tests/test_eppm_connection.py`
   (fake server on 127.0.0.1), `test_settings_app.py::test_eppm_mode_in_settings`.
+  Milestone 2 (done): `eppm/drivers.py` installs pymssql / oracledb on demand (PyPI JSON API, https only, wheel
+  SHA-256 checked, unpacked into `%LOCALAPPDATA%\P6MCP\drivers\cp3XY`, `activate()` adds it to sys.path; the
+  panel's Install button asks first). `eppm/store.py` `pull_sql` (REST: project list = the user's rights,
+  `CurrentBaselineProjectObjectId`, `scheduleOptions` -> PROJPROP 'scheduling' through `sched_values` and the
+  server's `_set_props`; SQL: `TABLES` rows as stored, dates as 'YYYY-MM-DD HH:MM:SS', links to projects not
+  pulled left out with a warning) builds one working copy per profile (`working.db` + `pull.json`, temp file
+  then `os.replace`). Server: `_refresh` points `DB_PATH` at the copy (`EPPM_MANIFEST`), writes refused with
+  `EPPM_READ_ONLY` until the push exists, tools `p6_eppm_projects` / `p6_eppm_pull` (FILE) / `p6_eppm_status`
+  (in `NO_DB_TOOLS`), `p6_diagnose` `eppm_mode`. Tests: `tests/test_eppm_pull.py` (sqlite3 as the SQL driver).
 
 - Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (copies the brand icon, version
   resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`

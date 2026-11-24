@@ -101,6 +101,7 @@ from p6mcp import skills as _skills
 from p6mcp import schema as _schema
 from p6mcp import shop as _shop
 from p6mcp import xerstore as _xerstore
+from p6mcp.eppm import store as _eppm_store
 
 # Effective settings: refreshed by _refresh() at the start of every tool call (config.json may change
 # while the server runs). STARTUP = the settings the tool list was built with.
@@ -329,6 +330,10 @@ _schema_cache: dict[str, dict] = {}  # db path -> schema.detect() (trust applied
 XER_MANIFEST: Optional[dict] = None  # XER-only mode: files, projects (Project ID renames), warnings
 XER_READ_ONLY = ("XER-only mode is read only: the XER files are analysed, never changed. Select a P6 database in "
                  "MCP for Primavera P6 Settings to write.")
+EPPM_MANIFEST: Optional[dict] = None  # P6 EPPM mode: pull.json of the working copy (server, projects, rows)
+EPPM_READ_ONLY = ("P6 EPPM mode is read only in this version: the working copy is analysed; edits and the push to "
+                  "the server come in a later version.")
+EPPM_TOOLS = ("p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status")
 TOOL_HINTS: dict[str, dict[str, bool]] = {}
 HINT_KEYS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")  # MCP tool annotations, in order
 REGISTERED: dict[str, Callable] = {}  # tool -> what a client call runs (policy gate + two-step write flow)
@@ -347,8 +352,13 @@ def _refresh() -> _config.Settings:
     """Re-read the settings (cheap while config.json is unchanged). A new database clears the caches
     tied to the old one."""
     global SETTINGS, DB_PATH, P6_USER, BACKUP_DIR, LOG_DIR, SKIP_PROC, _backup_done, _last_backup, XER_MANIFEST
+    global EPPM_MANIFEST
     st = _config.load()
-    XER_MANIFEST = None
+    XER_MANIFEST = EPPM_MANIFEST = None
+    if st.eppm:  # P6 EPPM mode: the working copy of the pulled projects, once there is one
+        EPPM_MANIFEST = _eppm_store.read_manifest(st.eppm)
+        if EPPM_MANIFEST:
+            st = dataclasses.replace(st, db_path=_eppm_store.store_path(st.eppm), db_problem=None)
     if st.xer_files:  # XER-only mode: the read-only store built from the files (cached until they change)
         try:
             path, XER_MANIFEST = _xerstore.ensure(st.xer_files)
@@ -374,6 +384,8 @@ def _before_call(tool: str) -> _config.Settings:
     st = _refresh()
     if st.xer_files and _policy.is_write(tool):
         raise ValueError(XER_READ_ONLY)
+    if st.eppm and _policy.is_write(tool):
+        raise ValueError(EPPM_READ_ONLY)
     why = _policy.refusal(tool, st.tool_profile, st.allow_writes, _shop_on(st))
     if why:
         raise ValueError(why)
@@ -399,6 +411,8 @@ def _write_refusal() -> Optional[str]:
     """Why this database may not be written now (settings and schema), None when it may."""
     if SETTINGS.xer_files:
         return XER_READ_ONLY
+    if SETTINGS.eppm:
+        return EPPM_READ_ONLY
     why = _policy.write_refusal(SETTINGS.tool_profile, SETTINGS.allow_writes)
     if why:
         return why
@@ -8271,6 +8285,13 @@ def p6_diagnose() -> dict:
                                       "xer_version": f.get("xer_version"), "projects": f["projects"],
                                       "warnings": f["warnings"][:10]} for f in XER_MANIFEST["files"]],
                            "note": "Read only. A Project ID already used by an earlier file gets a ~2 suffix."}
+    if st.eppm:
+        m = EPPM_MANIFEST or {}
+        out["eppm_mode"] = {"server": st.eppm, "working_copy": _eppm_store.store_path(st.eppm) if m else None,
+                            "pulled_at": m.get("pulled_at"), "route": m.get("route"),
+                            "projects": [p["project_id"] for p in m.get("projects", [])],
+                            "warnings": m.get("warnings", [])[:10],
+                            "note": "Read only in this version. Pull with p6_eppm_pull; see p6_eppm_status."}
     if not DB_PATH:
         out["database_problem"] = st.db_problem or _config.NO_DB_MESSAGE
         return out
@@ -12402,6 +12423,127 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
             "warnings": warnings, "schedule_state": state,
             "note": "Values of the last F9 in P6. The Dashboard sheet is protected (no password) and prints on one A3 "
                     "landscape page."}
+
+
+# ----------------------------------------------------------------- P6 EPPM server (p6mcp.eppm)
+
+def _eppm_profile() -> dict:
+    """The confirmed active P6 EPPM server profile; ValueError outside P6 EPPM mode."""
+    st = SETTINGS
+    p = _config.eppm_profile(st.raw, st.eppm) if st.eppm else None
+    if p is None:
+        raise ValueError("Not in P6 EPPM mode: in MCP for Primavera P6 Settings (Database), choose 'A P6 EPPM "
+                         "server', add the server, test the connection, click Use this server, then Save.")
+    return p
+
+
+def _eppm_secret(key: str, what: str) -> str:
+    from p6mcp import credentials
+    try:
+        pw = credentials.get(key)
+    except credentials.SecretStoreError as e:
+        raise ValueError(str(e)) from None
+    if not pw:
+        raise ValueError(f"No {what} is stored for this server: enter it in MCP for Primavera P6 Settings "
+                         "(Database) and click Test connection.")
+    return pw
+
+
+def _eppm_session(p: dict):
+    from p6mcp import credentials
+    from p6mcp.eppm import rest
+    return rest.Session(p["base_url"], p.get("user", ""), _eppm_secret(credentials.eppm_key(p["name"]), "P6 password"),
+                        p.get("database") or "", p.get("auth", "auto"), p.get("context") or rest.DEFAULT_CONTEXT,
+                        p.get("ca_bundle") or None, int(p.get("timeout_s", 120)))
+
+
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
+def p6_eppm_projects(search: str = "", offset: int = 0, limit: int = 100) -> dict:
+    """P6 EPPM mode: the projects this P6 user can read on the server (Project ID, name, data date, last
+    schedule, whether a baseline is set, whether it is in the working copy). Reads the server.
+    search: part of the Project ID or name (case ignored)."""
+    offset, limit = _check_page(offset, limit)
+    p = _eppm_profile()
+    pulled = {x["project_id"].lower() for x in (EPPM_MANIFEST or {}).get("projects", [])}
+    from p6mcp.eppm import rest
+    try:
+        with _eppm_session(p) as s:
+            rows = s.read("project", ["ObjectId", "Id", "Name", "DataDate", "LastScheduleDate", "Status",
+                                      "CurrentBaselineProjectObjectId"])
+    except rest.EppmError as e:
+        raise ValueError(str(e)) from None
+    q = search.strip().lower()
+    out = sorted(({"project_id": r.get("Id"), "name": r.get("Name"), "status": r.get("Status"),
+                   "data_date": (r.get("DataDate") or "").replace("T", " ")[:19] or None,
+                   "last_schedule": (r.get("LastScheduleDate") or "").replace("T", " ")[:19] or None,
+                   "has_baseline": r.get("CurrentBaselineProjectObjectId") not in (None, ""),
+                   "pulled": str(r.get("Id", "")).lower() in pulled}
+                  for r in rows if not q or q in f"{r.get('Id', '')} {r.get('Name', '')}".lower()),
+                 key=lambda r: (str(r["project_id"]).lower(), str(r["name"])))
+    return dict(_slice(out, offset, limit), server=p["name"])
+
+
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
+def p6_eppm_pull(projects: list[str], include_baseline: bool = True) -> dict:
+    """P6 EPPM mode: copy projects from the server into the local working copy that every other tool
+    reads (the projects pulled before are refreshed too). Reads the server only: nothing is changed there.
+    projects: Project IDs (see p6_eppm_projects). include_baseline: also copy each project's current
+    baseline (needed by baseline variance, BEI and milestones vs baseline).
+    Version 1 pulls through the server's read-only SQL account (set in MCP for Primavera P6 Settings)."""
+    from p6mcp import credentials
+    from p6mcp.eppm import rest, sql
+    p = _eppm_profile()
+    if not projects:
+        raise ValueError("Name at least one project (Project ID, see p6_eppm_projects).")
+    if not p.get("sql"):
+        raise ValueError("This server has no read-only SQL account: version 1 pulls by SQL. Add it in MCP for "
+                         "Primavera P6 Settings (Database); the pull by REST alone comes in a later version.")
+    if sql.driver_module(p["sql"]["driver"]) is None:
+        raise ValueError(f"The {sql.DRIVERS[p['sql']['driver']]} driver is not installed: install it from MCP for "
+                         "Primavera P6 Settings (Database, Test connection).")
+    pw = _eppm_secret(credentials.eppm_key(p["name"]), "P6 password")
+    spw = _eppm_secret(credentials.eppm_sql_key(p["name"]), "SQL password")
+    try:
+        m = _eppm_store.pull_sql(p, projects, pw, spw, include_baseline, server_module=sys.modules[__name__])
+    except (rest.EppmError, sql.SqlError, _eppm_store.PullError) as e:
+        raise ValueError(str(e)) from None
+    except OSError as e:
+        raise ValueError(f"The working copy could not be replaced (is another tool reading it?): {e}") from None
+    _cols_cache.clear()
+    _schema_cache.clear()
+    _refresh()
+    return {"server": p["name"], "pulled_at": m["pulled_at"], "seconds": m["seconds"], "route": m["route"],
+            "projects": m["projects"], "rows": m["rows"], "warnings": m["warnings"],
+            "next": "Every tool now reads the working copy. Edits and the push to the server come in a later version."}
+
+
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
+def p6_eppm_status(check_server: bool = True) -> dict:
+    """P6 EPPM mode: the working copy (server, pull time, route, projects, rows, warnings) and, with
+    check_server, how many activities of each pulled project changed on the server since the pull
+    (one read per project: pull again to bring them in)."""
+    p = _eppm_profile()
+    m = EPPM_MANIFEST
+    out: dict[str, Any] = {"server": p["name"], "address": p["base_url"], "pulled": m is not None}
+    if m is None:
+        out["next"] = "Nothing pulled yet: list the projects with p6_eppm_projects, then p6_eppm_pull."
+        return out
+    out.update(working_copy=_eppm_store.store_path(p["name"]), pulled_at=m["pulled_at"], route=m["route"],
+               projects=m["projects"], rows=m["rows"], warnings=m["warnings"])
+    if check_server and m.get("server_stamp"):
+        from p6mcp.eppm import rest
+        stamp = m["server_stamp"].replace("T", " ")
+        changed = {}
+        try:
+            with _eppm_session(p) as s:
+                for x in m["projects"]:
+                    rows = s.read("activity", ["ObjectId"],
+                                  f"ProjectObjectId :eq: {int(x['object_id'])} :and: LastUpdateDate:gt:'{stamp}'")
+                    changed[x["project_id"]] = len(rows)
+            out["changed_on_server"] = {"since": stamp, "activities": changed}
+        except rest.EppmError as e:
+            out["changed_on_server"] = {"error": str(e)}
+    return out
 
 
 # ----------------------------------------------------------------- skill shop (p6mcp.shop)

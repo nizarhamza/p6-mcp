@@ -24,6 +24,8 @@ def driver_module(driver: str) -> Optional[Any]:
     name = DRIVERS.get(driver)
     if not name:
         raise SqlError(f"Unknown SQL driver {driver!r}: use one of {sorted(DRIVERS)}.")
+    from p6mcp.eppm import drivers
+    drivers.activate()  # drivers installed on demand live outside the product's own folder
     try:
         return importlib.import_module(name)
     except ImportError:

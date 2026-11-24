@@ -84,6 +84,12 @@ Facts an assistant should get right:
 - `p6_import_xer`: Imports an XER as a new project, a baseline or an update of an existing project (write)
 - `p6_export_xer`: Exports a project to an XER file, schedule options included (writes a file)
 
+### P6 EPPM server
+
+- `p6_eppm_projects`: Lists the projects the P6 user can read on the P6 EPPM server (read)
+- `p6_eppm_pull`: Copies projects and their baselines from the P6 EPPM server into the local working copy (writes a file)
+- `p6_eppm_status`: Working copy of the P6 EPPM server: projects, pull time, changes on the server since (read)
+
 ### Edits (off by default)
 
 - `p6_update_activity`: Edits an activity: name, durations, constraint, actual dates, physical % complete (write)

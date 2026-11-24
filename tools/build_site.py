@@ -109,7 +109,8 @@ ICONS = {
 GROUP_ICONS = {
     "Projects and structure": "layers", "Activities and relationships": "share", "Critical path and float": "route",
     "Schedule quality": "clipboard-check", "Progress and reporting": "activity",
-    "Comparison, what-if and risk": "git-compare", "XER files": "file", "Edits (off by default)": "pencil",
+    "Comparison, what-if and risk": "git-compare", "XER files": "file", "P6 EPPM server": "database",
+    "Edits (off by default)": "pencil",
     "Backups, log and diagnostics": "archive", "Skill shop": "store",
 }
 

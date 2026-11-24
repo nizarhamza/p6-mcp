@@ -125,6 +125,10 @@ class EppmPanel(QWidget):
         self.use_btn = QPushButton(tr("eppm.use"))
         self.use_btn.clicked.connect(self._confirm)
         urow.addWidget(self.use_btn)
+        self.install_btn = QPushButton(tr("eppm.install"))
+        self.install_btn.clicked.connect(self.install_driver)
+        self.install_btn.hide()
+        urow.addWidget(self.install_btn)
         urow.addStretch(1)
         dl.addLayout(urow)
         lay.addWidget(box)
@@ -318,6 +322,9 @@ class EppmPanel(QWidget):
             return
         res = self.results.get(p["name"])
         self.test_btn.setEnabled(self.job is None)
+        missing = ((res or {}).get("sql") or {}).get("driver_missing")
+        self.install_btn.setVisible(bool(missing))
+        self.install_btn.setEnabled(self.job is None)
         fresh = bool(res and res.get("ok") and res.get("digest") == eppm.digest(p))
         self.use_btn.setEnabled(fresh and not (p.get("confirmed") and self.win.data.get("eppm_active") == p["name"]))
         if res is None:
@@ -377,6 +384,29 @@ class EppmPanel(QWidget):
         if self.selected() == name:
             self._fill()
         self.win.page_changed()
+
+    def install_driver(self) -> None:
+        """Download and install the SQL driver the last test missed (asks first: it reaches PyPI)."""
+        from p6mcp.eppm import drivers, sql
+        p = self.current()
+        if p is None or not p.get("sql") or self.job is not None:
+            return
+        drv = p["sql"]["driver"]
+        if not ask(self, tr("eppm.install"), tr("eppm.install.ask", driver=sql.DRIVERS[drv]), warning=False):
+            return
+        self.install_btn.setEnabled(False)
+        self.test_btn.setEnabled(False)
+        pill(self.state, "info", tr("eppm.installing", driver=sql.DRIVERS[drv]))
+        self.job = start(Job(lambda: drivers.install(drv), self._installed))
+
+    def _installed(self, res) -> None:
+        self.job = None
+        if isinstance(res, Exception):
+            pill(self.state, "error", tr("eppm.install.failed", err=str(res)))
+            self.install_btn.setEnabled(True)
+            self.test_btn.setEnabled(True)
+            return
+        self.run_test()  # the test now finds the driver
 
     def _confirm(self) -> None:
         p = self.current()
