@@ -39,13 +39,15 @@ TOOL_KIND: dict[str, str] = {
     # file output (p6_eppm_pull: the local working copy, the server is only read)
     "p6_export_xer": FILE, "p6_export_dashboard": FILE, "p6_eppm_pull": FILE,
     # write
-    "p6_update_activity": WRITE, "p6_update_assignment": WRITE, "p6_update_assignments": WRITE,
+    "p6_update_activity": WRITE, "p6_update_activities": WRITE, "p6_update_assignment": WRITE,
+    "p6_update_assignments": WRITE,
     "p6_update_udf": WRITE, "p6_update_udfs": WRITE,
     "p6_add_relationship": WRITE, "p6_add_relationships": WRITE,
     "p6_update_relationship": WRITE, "p6_update_relationships": WRITE, "p6_delete_relationship": WRITE,
     "p6_delete_relationships": WRITE, "p6_create_eps": WRITE, "p6_import_xer": WRITE,
     "p6_set_schedule_options": WRITE, "p6_backup_database": WRITE,
     "p6_eppm_schedule": WRITE,  # schedules on the P6 EPPM server (two-step flow), then pulls
+    "p6_eppm_discard": WRITE,  # drops pending changes of the local working copy (the server is not touched)
     # destructive
     "p6_delete_activity": DESTRUCTIVE, "p6_delete_project": DESTRUCTIVE, "p6_restore_backup": DESTRUCTIVE,
     "p6_eppm_push": DESTRUCTIVE,  # writes to the P6 EPPM server

@@ -334,10 +334,10 @@ EPPM_MANIFEST: Optional[dict] = None  # P6 EPPM mode: pull.json of the working c
 EPPM_TOOLS = ("p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status")
 # Edits allowed on a P6 EPPM working copy: the ones the push can send (docs/EPPM_PLAN.md 4.1), plus the local backups
 EPPM_EDIT_TOOLS = frozenset({
-    "p6_update_activity", "p6_update_assignment", "p6_update_assignments",
+    "p6_update_activity", "p6_update_activities", "p6_update_assignment", "p6_update_assignments",
     "p6_add_relationship", "p6_add_relationships", "p6_update_relationship", "p6_update_relationships",
     "p6_delete_relationship", "p6_delete_relationships", "p6_backup_database", "p6_restore_backup",
-    "p6_eppm_push", "p6_eppm_schedule"})
+    "p6_eppm_push", "p6_eppm_schedule", "p6_eppm_discard"})
 EPPM_NEXT = ("Changed in the local working copy only: nothing is sent to the P6 EPPM server until p6_eppm_push "
              "(dry run first, then the user's yes). p6_eppm_status lists the pending changes.")
 
@@ -8871,110 +8871,196 @@ def p6_update_activity(
     makes it In Progress, actual_finish makes it Completed. A milestone has one date: either actual
     date sets both and makes it Completed (a date alone: first shift start for a start milestone,
     last shift end for a finish milestone). Dry run unless confirm=True."""
-    for name, v in (("original_duration_days", original_duration_days),
-                    ("remaining_duration_days", remaining_duration_days)):
-        if v is not None and not (math.isfinite(float(v)) and float(v) >= 0):
-            raise ValueError(f"{name}: a duration must be 0 or more")
-    if physical_pct is not None and not 0 <= float(physical_pct) <= 100:
-        raise ValueError("physical_pct must be between 0 and 100")
+    it = {k: v for k, v in (
+        ("task_code", task_code), ("task_name", task_name), ("original_duration_days", original_duration_days),
+        ("remaining_duration_days", remaining_duration_days), ("constraint", constraint),
+        ("constraint_date", constraint_date), ("actual_start", actual_start), ("actual_finish", actual_finish),
+        ("physical_pct", physical_pct)) if v is not None}
+    if allow_after_data_date:
+        it["allow_after_data_date"] = True
+    _act_check(it)  # a malformed value fails before any lock or backup
+    with _write_session(confirm) as (con, backup):
+        try:
+            r = _act_update(con, project, it)
+        except _Refused as e:
+            return {"applied": False, "error": str(e)}
+        plan = list(r["_lines"])
+        if backup: plan.append(f"Backup: {backup}")
+        return _commit(con, plan, confirm, projects=r["projects"], log=r["log"])
+
+
+class _ActEditKeys(TypedDict):
+    task_code: str
+
+
+class ActEdit(_ActEditKeys, total=False):
+    """An activity (task_code) and the fields to change, as p6_update_activity takes them."""
+    task_name: str
+    original_duration_days: float
+    remaining_duration_days: float
+    constraint: str
+    constraint_date: str
+    actual_start: str
+    actual_finish: str
+    physical_pct: float
+    allow_after_data_date: bool
+
+
+ActEdits = Annotated[list[ActEdit], Field(min_length=1, description="Activities to change.")]
+ACT_KEYS = set(ActEdit.__annotations__) | set(_ActEditKeys.__annotations__)
+
+
+def _act_check(it: Mapping) -> dict:
+    """Checks of one activity edit that need no database (keys, durations, %, constraint, date formats).
+    Returns {code: constraint code or None, dates: {field: (value, edge)}}; ValueError otherwise."""
+    if not isinstance(it, Mapping):
+        raise ValueError("an item must be an object with task_code")
+    bad = sorted(set(it) - ACT_KEYS)
+    if bad:
+        raise ValueError(f"unknown key(s) {bad}; allowed: {sorted(ACT_KEYS)}")
+    if not isinstance(it.get("task_code"), str) or not it["task_code"]:
+        raise ValueError("task_code is required")
+    for name in ("original_duration_days", "remaining_duration_days"):
+        v = it.get(name)
+        if v is not None:
+            f = _num(v)
+            if f is None or not (math.isfinite(f) and f >= 0):
+                raise ValueError(f"{name}: a duration must be 0 or more")
+    if it.get("physical_pct") is not None:
+        f = _num(it["physical_pct"])
+        if f is None or not 0 <= f <= 100:
+            raise ValueError("physical_pct must be between 0 and 100")
+    constraint = it.get("constraint")
     if constraint is not None and constraint not in CSTR_TYPES:
         raise ValueError(f"constraint must be one of {list(CSTR_TYPES)}")
     code = CSTR_TYPES.get(constraint) if constraint is not None else None
-    if code and code != "CS_ALAP" and not constraint_date:
+    if code and code != "CS_ALAP" and not it.get("constraint_date"):
         raise ValueError("constraint_date is required for this constraint")
-    dates = {"actual_start": (actual_start, "start"), "actual_finish": (actual_finish, "finish"),
-             "constraint_date": (constraint_date if code and code != "CS_ALAP" else None,
+    dates = {"actual_start": (it.get("actual_start"), "start"), "actual_finish": (it.get("actual_finish"), "finish"),
+             "constraint_date": (it.get("constraint_date") if code and code != "CS_ALAP" else None,
                                  "finish" if code in CSTR_FINISH else "start")}
     for k, (v, _) in dates.items():
         if v:
-            _parse_dt(v, k)  # a malformed date fails before any lock or backup
+            _parse_dt(v, k)
+    return {"code": code, "dates": dates}
+
+
+def _act_update(con, project: str, it: Mapping) -> dict:
+    """Change one activity (an ActEdit item) on an open write connection. Returns {plan (one line),
+    _lines (plan line then notes), log, projects, task_code}; _Refused when there is nothing to change,
+    ValueError for an edit P6 would refuse."""
+    chk = _act_check(it)
+    code, dates = chk["code"], chk["dates"]
+    task_code = it["task_code"]
+    task_name = it.get("task_name")
+    original_duration_days = None if it.get("original_duration_days") is None else _num(it["original_duration_days"])
+    remaining_duration_days = None if it.get("remaining_duration_days") is None else _num(it["remaining_duration_days"])
+    constraint = it.get("constraint")
+    actual_start, actual_finish = it.get("actual_start"), it.get("actual_finish")
+    physical_pct = None if it.get("physical_pct") is None else _num(it["physical_pct"])
+    t = _task(con, project, task_code)
+    hpd = float(t["hpd"])
+    sets: dict[str, Any] = {}
+    plan: list[str] = []
+    notes: list[str] = []
+    cal = _calendars(con, int(t["clndr_id"])).get(int(t["clndr_id"])) if t["clndr_id"] is not None else None
+    cal = None if cal is None or cal.error else cal
+
+    def norm(field: str) -> Optional[str]:
+        v, edge = dates[field]
+        if not v:
+            return None
+        out, n = _resolve_dt(cal, v, field, edge)
+        notes.extend(n)
+        return out
+
+    if task_name:
+        sets["task_name"] = task_name; plan.append(f"name -> {task_name}")
+    if original_duration_days is not None:
+        sets["target_drtn_hr_cnt"] = original_duration_days * hpd
+        plan.append(f"orig dur {_days(t['target_drtn_hr_cnt'], hpd)} -> {original_duration_days} d")
+        if t["status_code"] == "TK_NotStart" and remaining_duration_days is None:
+            sets["remain_drtn_hr_cnt"] = original_duration_days * hpd
+            plan.append(f"rem dur -> {original_duration_days} d (not started: follows the original)")
+    if remaining_duration_days is not None:
+        sets["remain_drtn_hr_cnt"] = remaining_duration_days * hpd
+        plan.append(f"rem dur {_days(t['remain_drtn_hr_cnt'], hpd)} -> {remaining_duration_days} d")
+    if constraint is not None:
+        sets["cstr_type"] = code
+        sets["cstr_date"] = norm("constraint_date")
+        plan.append(f"constraint {t['cstr_type']} -> {code} {sets['cstr_date'] or ''}".strip())
+    mile = {"TT_Mile": "start", "TT_FinMile": "finish"}.get(t["task_type"])
+    if mile and (actual_start or actual_finish):  # one date: P6 stores actual start = actual finish
+        got = [_resolve_dt(cal, dates[f][0], f, mile) for f in ("actual_start", "actual_finish") if dates[f][0]]
+        if len({v for v, _ in got}) > 1:
+            raise ValueError(f"{task_code} is a {mile} milestone: its actual start and finish are one date, "
+                             f"not {' and '.join(v for v, _ in got)}")
+        v = got[0][0]
+        notes.extend(got[0][1])
+        sets.update(act_start_date=v, act_end_date=v, status_code="TK_Complete", remain_drtn_hr_cnt=0)
+        plan.append(f"actual start and finish -> {v} ({mile} milestone, Completed)")
+    if actual_start and not mile:
+        sets["act_start_date"] = norm("actual_start")
+        started = t["status_code"] == "TK_NotStart" and not actual_finish
+        if t["status_code"] == "TK_NotStart":
+            sets["status_code"] = "TK_Active"
+        plan.append(f"actual start -> {sets['act_start_date']}" + (" (In Progress)" if started else ""))
+    if actual_finish and not mile:
+        if not (actual_start or t["act_start_date"]):
+            raise ValueError("Set actual_start before (or together with) actual_finish.")
+        sets["act_end_date"] = norm("actual_finish")
+        sets["status_code"] = "TK_Complete"
+        sets["remain_drtn_hr_cnt"] = 0
+        plan.append(f"actual finish -> {sets['act_end_date']} (Completed)")
+    if physical_pct is not None:
+        sets["phys_complete_pct"] = it["physical_pct"]; plan.append(f"physical % -> {it['physical_pct']}")
+    if not sets:
+        raise _Refused("Nothing to change.")
+    start = _db_dt(sets.get("act_start_date") or t["act_start_date"])
+    finish = _db_dt(sets.get("act_end_date") or t["act_end_date"])
+    if start and finish and finish < start:
+        raise ValueError(f"actual finish {_fmt_dt(finish)} is before actual start {_fmt_dt(start)}")
+    dd = None
+    if "last_recalc_date" in _cols(con, "PROJECT"):
+        dd = _db_dt(con.execute("SELECT last_recalc_date FROM PROJECT WHERE proj_id = ?", (t["proj_id"],)).fetchone()[0])
+    late = [f"{k} {sets[c]}" for k, c in (("actual_start", "act_start_date"), ("actual_finish", "act_end_date"))
+            if c in sets and dd and _db_dt(sets[c]) > dd]
+    if late and not it.get("allow_after_data_date"):
+        raise ValueError(f"{' and '.join(late)} after the data date {_fmt_dt(dd)}: actuals belong before it. "
+                         "Pass allow_after_data_date=True if this is intended.")
+    notes += [f"{x} is after the data date {_fmt_dt(dd)} (allowed)" for x in late]
+    if physical_pct is not None and float(physical_pct) == 100 and not finish:
+        notes.append("physical % 100 but no actual finish: the activity is not Completed until actual_finish is set")
+    sets.update(_stamp_cols(con, "TASK", _now_str(con), create=False))
+    sets = {k: v for k, v in sets.items() if k in _cols(con, "TASK")}
+    con.execute(f"UPDATE TASK SET {', '.join(k + '=?' for k in sets)} WHERE task_id=?",
+                [*sets.values(), t["task_id"]])
+    head = f"{task_code}: " + "; ".join(plan)
+    sched = set(sets) & {"target_drtn_hr_cnt", "remain_drtn_hr_cnt", "cstr_type", "cstr_date",
+                         "act_start_date", "act_end_date", "status_code"}  # name and physical % do not move dates
+    changed = [k for k in sets if k not in ("update_date", "update_user")]
+    log = [{"operation": "update_activity", "proj_id": t["proj_id"], "table": "TASK",
+            "keys": {"task_id": t["task_id"], "task_code": task_code},
+            "before": {k: t[k] for k in changed}, "after": {k: sets[k] for k in changed}, "summary": head}]
+    return {"plan": head + "".join(f"; Note: {n}" for n in notes), "_lines": [head] + [f"Note: {n}" for n in notes],
+            "log": log, "projects": [t["proj_id"]] if sched else [], "task_code": task_code}
+
+
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
+def p6_update_activities(project: ProjectId, items: ActEdits, confirm: bool = False) -> dict:
+    """Edit many activities in one transaction (all or nothing; dry run unless confirm=True), for a
+    progress update: actual dates, remaining durations, physical %, names, constraints. Item: {task_code,
+    task_name, original_duration_days, remaining_duration_days, constraint, constraint_date, actual_start,
+    actual_finish, physical_pct, allow_after_data_date}, each with the rules of p6_update_activity. items:
+    one report per item (its plan or the error); one edit log entry per activity. At most 500 items."""
+    items = _items_arg(items)
     with _write_session(confirm) as (con, backup):
-        t = _task(con, project, task_code)
-        hpd = float(t["hpd"])
-        sets: dict[str, Any] = {}
-        plan: list[str] = []
-        notes: list[str] = []
-        cal = _calendars(con, int(t["clndr_id"])).get(int(t["clndr_id"])) if t["clndr_id"] is not None else None
-        cal = None if cal is None or cal.error else cal
-
-        def norm(field: str) -> Optional[str]:
-            v, edge = dates[field]
-            if not v:
-                return None
-            out, n = _resolve_dt(cal, v, field, edge)
-            notes.extend(n)
-            return out
-
-        if task_name:
-            sets["task_name"] = task_name; plan.append(f"name -> {task_name}")
-        if original_duration_days is not None:
-            sets["target_drtn_hr_cnt"] = original_duration_days * hpd
-            plan.append(f"orig dur {_days(t['target_drtn_hr_cnt'], hpd)} -> {original_duration_days} d")
-            if t["status_code"] == "TK_NotStart" and remaining_duration_days is None:
-                sets["remain_drtn_hr_cnt"] = original_duration_days * hpd
-                plan.append(f"rem dur -> {original_duration_days} d (not started: follows the original)")
-        if remaining_duration_days is not None:
-            sets["remain_drtn_hr_cnt"] = remaining_duration_days * hpd
-            plan.append(f"rem dur {_days(t['remain_drtn_hr_cnt'], hpd)} -> {remaining_duration_days} d")
-        if constraint is not None:
-            sets["cstr_type"] = code
-            sets["cstr_date"] = norm("constraint_date")
-            plan.append(f"constraint {t['cstr_type']} -> {code} {sets['cstr_date'] or ''}".strip())
-        mile = {"TT_Mile": "start", "TT_FinMile": "finish"}.get(t["task_type"])
-        if mile and (actual_start or actual_finish):  # one date: P6 stores actual start = actual finish
-            got = [_resolve_dt(cal, dates[f][0], f, mile) for f in ("actual_start", "actual_finish") if dates[f][0]]
-            if len({v for v, _ in got}) > 1:
-                raise ValueError(f"{task_code} is a {mile} milestone: its actual start and finish are one date, "
-                                 f"not {' and '.join(v for v, _ in got)}")
-            v = got[0][0]
-            notes.extend(got[0][1])
-            sets.update(act_start_date=v, act_end_date=v, status_code="TK_Complete", remain_drtn_hr_cnt=0)
-            plan.append(f"actual start and finish -> {v} ({mile} milestone, Completed)")
-        if actual_start and not mile:
-            sets["act_start_date"] = norm("actual_start")
-            started = t["status_code"] == "TK_NotStart" and not actual_finish
-            if t["status_code"] == "TK_NotStart":
-                sets["status_code"] = "TK_Active"
-            plan.append(f"actual start -> {sets['act_start_date']}" + (" (In Progress)" if started else ""))
-        if actual_finish and not mile:
-            if not (actual_start or t["act_start_date"]):
-                raise ValueError("Set actual_start before (or together with) actual_finish.")
-            sets["act_end_date"] = norm("actual_finish")
-            sets["status_code"] = "TK_Complete"
-            sets["remain_drtn_hr_cnt"] = 0
-            plan.append(f"actual finish -> {sets['act_end_date']} (Completed)")
-        if physical_pct is not None:
-            sets["phys_complete_pct"] = physical_pct; plan.append(f"physical % -> {physical_pct}")
-        if not sets:
-            return {"applied": False, "error": "Nothing to change."}
-        start = _db_dt(sets.get("act_start_date") or t["act_start_date"])
-        finish = _db_dt(sets.get("act_end_date") or t["act_end_date"])
-        if start and finish and finish < start:
-            raise ValueError(f"actual finish {_fmt_dt(finish)} is before actual start {_fmt_dt(start)}")
-        dd = None
-        if "last_recalc_date" in _cols(con, "PROJECT"):
-            dd = _db_dt(con.execute("SELECT last_recalc_date FROM PROJECT WHERE proj_id = ?", (t["proj_id"],)).fetchone()[0])
-        late = [f"{k} {sets[c]}" for k, c in (("actual_start", "act_start_date"), ("actual_finish", "act_end_date"))
-                if c in sets and dd and _db_dt(sets[c]) > dd]
-        if late and not allow_after_data_date:
-            raise ValueError(f"{' and '.join(late)} after the data date {_fmt_dt(dd)}: actuals belong before it. "
-                             "Pass allow_after_data_date=True if this is intended.")
-        notes += [f"{x} is after the data date {_fmt_dt(dd)} (allowed)" for x in late]
-        if physical_pct is not None and float(physical_pct) == 100 and not finish:
-            notes.append("physical % 100 but no actual finish: the activity is not Completed until actual_finish is set")
-        sets.update(_stamp_cols(con, "TASK", _now_str(con), create=False))
-        sets = {k: v for k, v in sets.items() if k in _cols(con, "TASK")}
-        con.execute(f"UPDATE TASK SET {', '.join(k + '=?' for k in sets)} WHERE task_id=?",
-                    [*sets.values(), t["task_id"]])
-        plan = [f"{task_code}: " + "; ".join(plan)] + [f"Note: {n}" for n in notes]
-        if backup: plan.append(f"Backup: {backup}")
-        sched = set(sets) & {"target_drtn_hr_cnt", "remain_drtn_hr_cnt", "cstr_type", "cstr_date",
-                             "act_start_date", "act_end_date", "status_code"}  # name and physical % do not move dates
-        changed = [k for k in sets if k not in ("update_date", "update_user")]
-        log = [{"operation": "update_activity", "proj_id": t["proj_id"], "table": "TASK",
-                "keys": {"task_id": t["task_id"], "task_code": task_code},
-                "before": {k: t[k] for k in changed}, "after": {k: sets[k] for k in changed}, "summary": plan[0]}]
-        return _commit(con, plan, confirm, projects=(t["proj_id"],) if sched else (), log=log)
+        _project_id(con, project)
+        b = _batch(con, items, lambda i, it: _act_update(con, project, it))
+        for rep, it in zip(b["items"], items):
+            rep["item"] = it
+        word = "activity" if len(items) == 1 else "activities"
+        return _batch_commit(con, b, confirm, f"Update {len(items)} {word}", backup)
 
 
 # ----------------------------------------------------------------- resource assignment units
@@ -12645,7 +12731,8 @@ def p6_eppm_status(check_server: bool = True) -> dict:
     from p6mcp.eppm import pending
     changes = _eppm_pending()
     out["pending"] = {"count": len(changes), "by_table": pending.summary(changes),
-                      "changes": [{k: v for k, v in c.items() if k != "entries"} for c in changes[:50]],
+                      "changes": [{k: v for k, v in c.items() if k not in ("entries", "rollups")}
+                                  for c in changes[:50]],
                       "truncated": len(changes) > 50}
     if m.get("pushes"):
         out["last_push"] = m["pushes"][-1]
@@ -12700,7 +12787,8 @@ def p6_eppm_push(confirm: bool = False) -> dict:
             pl = _push.plan(sess, changes, _eppm_store.LOCAL_ID_BASE)
             view = {"calls": len(pl["calls"]),
                     "already_done": [{"what": x["label"], "why": x["reason"]} for x in pl["already_done"]],
-                    "conflicts": [{"what": x["label"], "why": x["reason"]} for x in pl["conflicts"]],
+                    "conflicts": [{"what": x["label"], "why": x["reason"], "id": x["change"].get("id")}
+                                  for x in pl["conflicts"]],
                     "unsupported": [f"{c['table']} {c['action']}" for c in pl["unsupported"]],
                     "not_sent_fields": {x["label"]: x["not_sent"] for x in pl["calls"] if x.get("not_sent")}}
             reasons = ([f"conflict: {x['what']}: {x['why']}" for x in view["conflicts"]]
@@ -12751,6 +12839,158 @@ def p6_eppm_push(confirm: bool = False) -> dict:
         out["next"] = ("The push stopped at the first failure; the changes listed in sent reached the server. Fix "
                        "the cause, then push again: only the rest is sent.")
     return out
+
+
+def _eppm_revert(con, c: dict) -> dict:
+    """Give one pending change's object back the values it had at the pull, on an open write connection, as an
+    ordinary logged edit (same operations as the edit tools): the netting of pending.net then cancels the change.
+    Returns {plan, log, projects}."""
+    t, act, keys, refs, lb = c["table"], c["action"], c["keys"], c.get("refs") or {}, c.get("labels") or {}
+    fields = c.get("fields") or {}
+    stamp = lambda table, create=False: _stamp_cols(con, table, _now_str(con), create=create)  # noqa: E731
+    if t == "TASK" and act == "update":
+        tid = int(keys["task_id"])
+        row = con.execute("SELECT * FROM TASK WHERE task_id = ?", (tid,)).fetchone()
+        if row is None:
+            raise ValueError(f"activity {lb.get('task_code', tid)} is no longer in the working copy")
+        cols = [k for k in fields if k in _cols(con, "TASK")]
+        sets = {k: fields[k]["pulled"] for k in cols}
+        before = {k: row[k] for k in cols}
+        full = {**sets, **{k: v for k, v in stamp("TASK").items() if k in _cols(con, "TASK")}}
+        con.execute(f"UPDATE TASK SET {', '.join(k + '=?' for k in full)} WHERE task_id=?", [*full.values(), tid])
+        plan = f"activity {lb.get('task_code', tid)}: " + ", ".join(f"{k} {before[k]!r} -> {sets[k]!r}" for k in cols)
+        return {"plan": plan, "projects": [c.get("proj_id")],
+                "log": [{"operation": "update_activity", "proj_id": c.get("proj_id"), "table": "TASK",
+                         "keys": {"task_id": tid, "task_code": lb.get("task_code")}, "before": before,
+                         "after": sets, "summary": "discard: " + plan}]}
+    if t == "TASKRSRC" and act == "update":
+        rid, tid = int(keys["taskrsrc_id"]), refs.get("task_id")
+        row = con.execute("SELECT * FROM TASKRSRC WHERE taskrsrc_id = ?", (rid,)).fetchone()
+        if row is None:
+            raise ValueError(f"assignment {rid} is no longer in the working copy")
+        tid = int(tid if tid is not None else row["task_id"])
+        cols = [k for k in fields if k in _cols(con, "TASKRSRC")]
+        sets = {k: fields[k]["pulled"] for k in cols}
+        before = {k: row[k] for k in cols}
+        full = {**sets, **{k: v for k, v in stamp("TASKRSRC").items() if k in _cols(con, "TASKRSRC")}}
+        con.execute(f"UPDATE TASKRSRC SET {', '.join(k + '=?' for k in full)} WHERE taskrsrc_id=?", [*full.values(), rid])
+        trow = con.execute("SELECT * FROM TASK WHERE task_id = ?", (tid,)).fetchone()
+        tbefore, tafter = {}, {}
+        for col, v in (c.get("rollups") or {}).items():  # the activity totals lose this assignment's delta only
+            if trow is None or col not in _cols(con, "TASK"):
+                continue
+            delta = float(v["local"] or 0) - float(v["pulled"] or 0)
+            tbefore[col] = trow[col]
+            tafter[col] = float(trow[col] or 0) - delta
+        if tafter:
+            con.execute(f"UPDATE TASK SET {', '.join(k + '=?' for k in tafter)} WHERE task_id=?", [*tafter.values(), tid])
+        who = lb.get("resource") or lb.get("role") or rid
+        plan = f"assignment {lb.get('task_code', tid)} {who}: " + ", ".join(
+            f"{k} {before[k]!r} -> {sets[k]!r}" for k in cols)
+        return {"plan": plan, "projects": [],
+                "log": [{"operation": "update_assignment", "proj_id": c.get("proj_id"), "table": "TASKRSRC",
+                         "keys": {"taskrsrc_id": rid, "task_id": tid, "task_code": lb.get("task_code"),
+                                  "resource": lb.get("resource"), "role": lb.get("role")},
+                         "before": {**before, **{f"TASK.{k}": v for k, v in tbefore.items()}},
+                         "after": {**sets, **{f"TASK.{k}": v for k, v in tafter.items()}},
+                         "summary": "discard: " + plan}]}
+    if t == "TASKPRED":
+        pid = int(keys["task_pred_id"])
+        link = f"relationship {lb.get('predecessor', refs.get('pred_task_id'))} -> {lb.get('successor', refs.get('task_id'))}"
+        lkeys = {"task_pred_id": pid, "task_id": refs.get("task_id"), "pred_task_id": refs.get("pred_task_id"),
+                 "successor": lb.get("successor"), "predecessor": lb.get("predecessor"),
+                 "pred_proj_id": refs.get("pred_proj_id")}
+        projects = [c.get("proj_id"), refs.get("pred_proj_id")]
+        row = con.execute("SELECT * FROM TASKPRED WHERE task_pred_id = ?", (pid,)).fetchone()
+        if act == "create":  # added locally: removed
+            if row is not None:
+                con.execute("DELETE FROM TASKPRED WHERE task_pred_id = ?", (pid,))
+            before = None if row is None else {k: row[k] for k in REL_LOG_COLS}
+            plan = f"{link}: added locally, removed"
+            return {"plan": plan, "projects": projects,
+                    "log": [{"operation": "delete_relationship", "proj_id": c.get("proj_id"), "table": "TASKPRED",
+                             "keys": lkeys, "before": before, "after": None, "summary": "discard: " + plan}]}
+        if act == "update":
+            if row is None:
+                raise ValueError(f"{link} is no longer in the working copy")
+            cols = [k for k in fields if k in _cols(con, "TASKPRED")]
+            sets = {k: fields[k]["pulled"] for k in cols}
+            before = {k: row[k] for k in cols}
+            full = {**sets, **{k: v for k, v in stamp("TASKPRED").items() if k in _cols(con, "TASKPRED")}}
+            con.execute(f"UPDATE TASKPRED SET {', '.join(k + '=?' for k in full)} WHERE task_pred_id=?",
+                        [*full.values(), pid])
+            plan = f"{link}: " + ", ".join(f"{k} {before[k]!r} -> {sets[k]!r}" for k in cols)
+            return {"plan": plan, "projects": projects,
+                    "log": [{"operation": "update_relationship", "proj_id": c.get("proj_id"), "table": "TASKPRED",
+                             "keys": lkeys, "before": before, "after": sets, "summary": "discard: " + plan}]}
+        if act == "delete":  # deleted locally: put back with its server id
+            vals = {k: (fields.get(k) or {}).get("pulled") for k in REL_LOG_COLS}
+            if row is not None:
+                raise ValueError(f"{link}: id {pid} is in use again in the working copy")
+            if None in (refs.get("task_id"), refs.get("pred_task_id"), vals["pred_type"]):
+                raise ValueError(f"{link}: the edit log lacks what is needed to put it back (pull again)")
+            same = con.execute("SELECT task_pred_id FROM TASKPRED WHERE task_id=? AND pred_task_id=? AND pred_type=?"
+                               + _alive(con, "TASKPRED", "TASKPRED"),
+                               (refs["task_id"], refs["pred_task_id"], vals["pred_type"])).fetchone()
+            if same is not None:
+                raise ValueError(f"{link}: a relationship of this type links these activities again in the working "
+                                 f"copy (TASKPRED:{same[0]}): drop that change first")
+            row = {"task_pred_id": pid, "task_id": refs["task_id"], "pred_task_id": refs["pred_task_id"],
+                   "proj_id": c.get("proj_id"), "pred_proj_id": refs.get("pred_proj_id") or c.get("proj_id"),
+                   "pred_type": vals["pred_type"], "lag_hr_cnt": vals["lag_hr_cnt"] or 0.0, **stamp("TASKPRED", True)}
+            row = {k: v for k, v in row.items() if k in _cols(con, "TASKPRED")}
+            con.execute(f"INSERT INTO TASKPRED ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
+                        list(row.values()))
+            plan = f"{link}: deleted locally, put back ({REL_TYPES_REV.get(vals['pred_type'], vals['pred_type'])})"
+            return {"plan": plan, "projects": projects,
+                    "log": [{"operation": "add_relationship", "proj_id": c.get("proj_id"), "table": "TASKPRED",
+                             "keys": lkeys, "before": None, "after": {k: row.get(k) for k in REL_LOG_COLS},
+                             "summary": "discard: " + plan}]}
+    raise ValueError(f"{c.get('id')}: a {t} {act} cannot be dropped (pull again)")
+
+
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
+def p6_eppm_discard(changes: list[str], confirm: bool = False) -> dict:
+    """P6 EPPM mode: drop pending changes of the local working copy, by their id in p6_eppm_status
+    (pending.changes[].id, also given with each conflict of a p6_eppm_push dry run), or ["all"]. Each object
+    gets back the values it had at the pull and stops counting as pending; the other changes stay pending.
+    The server is not touched. Use it after a push conflict on one change, instead of a new pull that drops
+    every change. Dry run unless confirm=True."""
+    _eppm_profile()
+    if not EPPM_MANIFEST:
+        raise ValueError("Nothing pulled yet: there is nothing to discard.")
+    want = list(dict.fromkeys(str(x).strip() for x in (changes or []) if str(x).strip()))
+    if not want:
+        raise ValueError("Name the changes to drop: their id in p6_eppm_status (pending.changes), or ['all'].")
+    pend = _eppm_pending()
+    by_id = {c["id"]: c for c in pend}
+    if [w.lower() for w in want] == ["all"]:
+        sel = pend
+    else:
+        unknown = [w for w in want if w not in by_id]
+        if unknown:
+            ids = ", ".join(list(by_id)[:20]) or "none"
+            raise ValueError(f"Not a pending change: {', '.join(unknown)}. Pending: {ids}.")
+        sel = [by_id[w] for w in want]
+    if not sel:
+        return {"applied": False, "error": "No pending change to drop."}
+    with _write_session(confirm) as (con, backup):
+        plan, log, projects = [], [], set()
+        for c in sel:
+            r = _eppm_revert(con, c)
+            plan.append(f"  {c['id']}: {r['plan']}")
+            log += r["log"]
+            projects |= {x for x in r["projects"] if x is not None}
+        left = len(pend) - len(sel)
+        plan = ([f"Drop {len(sel)} pending change(s) from the working copy (the server is not touched); "
+                 f"{left} stay pending"] + plan)
+        if backup:
+            plan.append(f"Backup: {backup}")
+        res = _commit(con, plan, confirm, projects=tuple(projects), log=log)
+    if confirm and res.get("applied"):
+        res["next"] = ("Dropped from the working copy: these objects hold their pulled values again. "
+                       "p6_eppm_status lists what is still pending.")
+    return res
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True})

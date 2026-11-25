@@ -371,3 +371,72 @@ def test_push_needs_the_confirmation_text_and_writes_allowed(push_env):
     p6.set(allow_writes=False)
     with pytest.raises(ValueError):
         p6.call("p6_eppm_push")
+
+
+def test_discard_drops_chosen_changes_and_keeps_the_others(push_env):
+    p6, H = push_env
+    wc = store.store_path("srv")
+    ids = dict(rows(wc, "SELECT task_code, task_id FROM TASK WHERE proj_id = 2"))
+    codes = [r[0] for r in rows(wc, "SELECT task_code FROM TASK WHERE proj_id = 2 ORDER BY task_id")]
+    a, b, c = codes[0], codes[1], codes[-1]
+    links = rows(wc, "SELECT task_pred_id, pred_task_id, task_id, pred_type, lag_hr_cnt FROM TASKPRED ORDER BY 1")
+    code_of = {v: k for k, v in ids.items()}
+    upd_link, del_link = links[0], links[1]
+    rem = dict(rows(wc, "SELECT task_code, remain_drtn_hr_cnt FROM TASK WHERE proj_id = 2"))
+    # the batch tool's edits are pending changes like the single tool's
+    p6.apply("p6_update_activities", project="DEMO-A", items=[{"task_code": a, "remaining_duration_days": 9},
+                                                              {"task_code": b, "task_name": "Renamed"}])
+    p6.apply("p6_add_relationship", project="DEMO-A", predecessor_code=a, successor_code=c, rel_type="SS")
+    p6.apply("p6_update_relationship", project="DEMO-A", predecessor_code=code_of[upd_link[1]],
+             successor_code=code_of[upd_link[2]], lag_days=2)
+    p6.apply("p6_delete_relationship", project="DEMO-A", predecessor_code=code_of[del_link[1]],
+             successor_code=code_of[del_link[2]])
+    pend = p6.call("p6_eppm_status", check_server=False)["pending"]
+    by = {(x["table"], x["action"], x.get("labels", {}).get("task_code")): x["id"] for x in pend["changes"]}
+    assert pend["count"] == 5 and all("rollups" not in x for x in pend["changes"])
+    new_id = by[("TASKPRED", "create", None)]
+    assert by[("TASK", "update", a)] == f"TASK:{ids[a]}"
+    assert by[("TASKPRED", "delete", None)] == f"TASKPRED:{del_link[0]}"
+    with pytest.raises(ValueError, match="Not a pending change: TASK:1. Pending: TASK:"):
+        p6.call("p6_eppm_discard", changes=["TASK:1"])
+    # drop the new link and the deletion: the copy has the pulled links again, the other three stay pending
+    dry = p6.call("p6_eppm_discard", changes=[new_id, f"TASKPRED:{del_link[0]}"])
+    assert dry["would_do"][0].startswith("Drop 2 pending change(s)") and "3 stay pending" in dry["would_do"][0]
+    assert "added locally, removed" in dry["would_do"][1] and "deleted locally, put back (" in dry["would_do"][2]
+    res = p6.apply("p6_eppm_discard", changes=[new_id, f"TASKPRED:{del_link[0]}"])
+    assert res["applied"] and "pulled values" in res["next"]
+    now = rows(wc, "SELECT task_pred_id, pred_task_id, task_id, pred_type, lag_hr_cnt FROM TASKPRED ORDER BY 1")
+    assert del_link in now and len(now) == len(links)  # put back with its server id, type and lag
+    assert rows(wc, f"SELECT COUNT(*) FROM TASKPRED WHERE task_pred_id >= {store.LOCAL_ID_BASE}") == [(0,)]
+    left = p6.call("p6_eppm_status", check_server=False)["pending"]
+    assert left["count"] == 3 and {x["id"] for x in left["changes"]} == {
+        f"TASK:{ids[a]}", f"TASK:{ids[b]}", f"TASKPRED:{upd_link[0]}"}
+    # the push sends only what is left
+    dry = p6.call("p6_eppm_push")
+    assert dry["calls"] == 3 and [x.split(" ")[1] for x in dry["would_do"]] == ["PUT", "PUT", "PUT"]
+    # all: the copy is as pulled, nothing to push
+    p6.apply("p6_eppm_discard", changes=["all"])
+    assert p6.call("p6_eppm_status", check_server=False)["pending"]["count"] == 0
+    assert dict(rows(wc, "SELECT task_code, remain_drtn_hr_cnt FROM TASK WHERE proj_id = 2")) == rem
+    assert rows(wc, "SELECT task_pred_id, pred_task_id, task_id, pred_type, lag_hr_cnt FROM TASKPRED ORDER BY 1") \
+        == links
+    assert p6.call("p6_eppm_push")["refuse_reasons"] == ["No pending change to push."]
+    assert p6.call("p6_eppm_discard", changes=["all"]) == {"applied": False, "error": "No pending change to drop."}
+    assert H.calls == []  # the server was never written
+
+
+def test_a_conflict_is_cleared_by_discarding_that_change(push_env):
+    p6, H = push_env
+    wc = store.store_path("srv")
+    ids = dict(rows(wc, "SELECT task_code, task_id FROM TASK WHERE proj_id = 2"))
+    codes = [r[0] for r in rows(wc, "SELECT task_code FROM TASK WHERE proj_id = 2 ORDER BY task_id")]
+    a, b = codes[0], codes[1]
+    p6.apply("p6_update_activity", project="DEMO-A", task_code=a, remaining_duration_days=9)
+    p6.apply("p6_update_activity", project="DEMO-A", task_code=b, task_name="Mine")
+    H.live["activity"][str(ids[a])]["RemainingDuration"] = "99.0"  # someone else, in P6 EPPM
+    dry = p6.call("p6_eppm_push")
+    assert dry["would_refuse"] and dry["conflicts"] == [
+        {"what": f"activity {a}", "why": dry["conflicts"][0]["why"], "id": f"TASK:{ids[a]}"}]
+    p6.apply("p6_eppm_discard", changes=[dry["conflicts"][0]["id"]])
+    dry = p6.call("p6_eppm_push")
+    assert not dry.get("would_refuse") and dry["calls"] == 1 and dry["would_do"][0].startswith(f"1. PUT activity {b}")

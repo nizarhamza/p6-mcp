@@ -105,12 +105,21 @@ def net(entries: Iterable[dict]) -> list[dict]:
             fields = {f: {"pulled": v, "local": None} for f, v in o["pulled"].items() if not f.startswith("TASK.")}
             if all(v["pulled"] is None for v in fields.values()):
                 continue  # nothing existed at the pull (a UDF value set then cleared locally)
-        out.append({"table": o["table"], "action": action, "keys": o["keys"], "refs": o.get("refs", {}),
+        rollups = {f[5:]: {"pulled": o["pulled"].get(f), "local": v} for f, v in o["local"].items()
+                   if f.startswith("TASK.") and action == "update" and not _same(o["pulled"].get(f), v)}
+        out.append({"id": change_id(o["table"], o["keys"]), "table": o["table"], "action": action,
+                    "keys": o["keys"], "refs": o.get("refs", {}),
                     "labels": o["labels"],
                     "project": o["project"], "proj_id": o["proj_id"], "fields": fields, "edits": o["edits"],
                     "first_edit": str(o["first_ts"])[:19], "last_edit": str(o["last_ts"])[:19],
-                    "entries": o["entries"]})
+                    "entries": o["entries"], "rollups": rollups})
     return out
+
+
+def change_id(table: str, keys: dict) -> str:
+    """The id p6_eppm_status shows for a pending change and p6_eppm_discard takes: table and key values
+    ('TASK:36272', 'TASKPRED:2247', 'UDFVALUE:12:36272')."""
+    return ":".join([table] + [str(v) for v in keys.values()])
 
 
 def _same(a, b) -> bool:
