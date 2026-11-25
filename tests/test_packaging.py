@@ -119,3 +119,5 @@ def test_installer_script_is_consistent():
     # servers started by MCP clients lock the files setup replaces: setup stops the ones of this installation
     assert "CloseApplications=force" in text and "function PrepareToInstall" in text
     assert "Get-Process -Name p6mcp-server" in text and "ExpandConstant('{app}')" in text
+    # every install leaves a log (%TEMP%\Setup Log ...; automatic updates pass /LOG)
+    assert "SetupLogging=yes" in text.splitlines()

@@ -16,6 +16,11 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   values it had at the pull; the other changes stay pending, and the server is not touched. Before, the only way
   out of a conflict was a new pull that dropped every local change.
 
+### Changed
+
+- Setup writes a log of every install in `%TEMP%` (`Setup Log <date> #<n>.txt`), as automatic updates already did
+  in `%LOCALAPPDATA%\P6MCP\updates\setup.log`: a 3.0.0 install that replaced no file left nothing to read.
+
 ## [3.0.0] - 2026-11-25
 
 ### Added

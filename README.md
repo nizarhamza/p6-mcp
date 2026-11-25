@@ -542,6 +542,9 @@ Yes, under the Apache License 2.0.
 - **"Unknown P6 schema"**: your P6 version was not tested; reads work. You can trust the schema under Database
   (after a backup).
 - **HTTP server error**: Server shows the last error (often a port in use: pick another one).
+- **An install or update did not take effect** (`p6_diagnose` still shows the old behaviour): Setup writes a log
+  of each install in `%TEMP%` (`Setup Log <date> #<n>.txt`; an automatic update writes
+  `%LOCALAPPDATA%\P6MCP\updates\setup.log`). It lists every file replaced and any error.
 - Logs: **Logs and updates > Open log folder** (`%LOCALAPPDATA%\P6MCP\logs`). Settings live in
   `%APPDATA%\P6MCP\config.json`; backups, edit log and XER copies in `%LOCALAPPDATA%\P6MCP`.
 
