@@ -178,7 +178,10 @@ class SettingsWindow(QMainWindow):
         elif self.data.get("data_source") == "xer" and not (self.data.get("xer_files")
                                                              and self.data.get("xer_confirmed")):
             pill(self.banner, "warn", tr("app.no_xer"))
-        elif self.data.get("data_source") != "xer" and not (
+        elif self.data.get("data_source") == "eppm" and not (
+                (settings_logic.find_eppm(self.data, self.data.get("eppm_active") or "") or {}).get("confirmed")):
+            pill(self.banner, "warn", tr("app.no_eppm"))
+        elif self.data.get("data_source") not in ("xer", "eppm") and not (
                 self.data.get("active_database") and settings_logic.find(self.data, self.data["active_database"])):
             pill(self.banner, "warn", tr("app.no_database"))
         elif self._update() is not None:

@@ -129,6 +129,54 @@ stay outside this repository.
   files every read tool runs and `p6_cpm_validate` gives a match rate of 1.0. Settings: Database page data
   source radios and `xer_panel.XerPanel` (files, order, load check on the thread pool).
 
+- P6 EPPM mode (3.0.0, in progress, plan `docs/EPPM_PLAN.md`; milestone 1 done): config schema 4,
+  `data_source: eppm`, `eppm_profiles` (validated by `config._check_eppm`; `config.eppm_profile`), `eppm_active`;
+  `load()` gives `Settings.eppm` (confirmed active profile) and no database until the pull exists, writes off.
+  Passwords `credentials.eppm_key` / `eppm_sql_key`, stored by the panel only after a test shows they work.
+  `p6mcp/eppm/rest.py` `Session` (stdlib urllib: `/login?DatabaseName` + authToken header + JSESSIONID cookie,
+  or OAuth bearer for oraclecloud.com hosts; `read(entity, fields, filter)`; `EppmError` messages never hold
+  the password), `p6mcp/eppm/sql.py` (pymssql / oracledb imported only when present, SELECT only, `table()`
+  with schema and the DACS `T6_` prefix), `eppm.test_profile` (ok follows REST, SQL reported beside) and
+  `eppm.digest` (a test confirms only the settings it ran with). `settings_logic` `*_eppm_*` functions;
+  Settings `settings_app/eppm_panel.EppmPanel` (third data source radio). Tests: `tests/test_eppm_connection.py`
+  (fake server on 127.0.0.1), `test_settings_app.py::test_eppm_mode_in_settings`.
+  Milestone 2 (done): `eppm/drivers.py` installs pymssql / oracledb on demand (PyPI JSON API, https only, wheel
+  SHA-256 checked, unpacked into `%LOCALAPPDATA%\P6MCP\drivers\cp3XY`, `activate()` adds it to sys.path; the
+  panel's Install button asks first). `eppm/store.py` `pull_sql` (REST: project list = the user's rights,
+  `CurrentBaselineProjectObjectId`, `scheduleOptions` -> PROJPROP 'scheduling' through `sched_values` and the
+  server's `_set_props`; SQL: `TABLES` rows as stored, dates as 'YYYY-MM-DD HH:MM:SS', links to projects not
+  pulled left out with a warning) builds one working copy per profile (`working.db` + `pull.json`, temp file
+  then `os.replace`). Server: `_refresh` points `DB_PATH` at the copy (`EPPM_MANIFEST`), writes refused with
+  `EPPM_READ_ONLY` until the push exists, tools `p6_eppm_projects` / `p6_eppm_pull` (FILE) / `p6_eppm_status`
+  (in `NO_DB_TOOLS`), `p6_diagnose` `eppm_mode`. Tests: `tests/test_eppm_pull.py` (sqlite3 as the SQL driver).
+  Milestone 3 (REST route): `store.pull(route=auto|sql|rest)`; `pull_rest` exports the projects in one XER
+  (`/export/exportXERProject`, ids = ObjectIds), builds with `xerstore.build`, adds each baseline from REST
+  object reads (`eppm/mapping.py`: the server refuses a baseline export; `ACTIVITY` / `RELATIONSHIP` / `WBS` /
+  `ASSIGNMENT` / `BASELINE_PROJECT` specs of (REST field, column, kind), `value()` (text to number, date
+  without 'T' or offset, enum to P6 code), `fields()` keeps the fields the server lists, `insert()` widens
+  tables, `_calendars` copies the same-named calendar's working time), links it by `sum_base_proj_id` /
+  `orig_proj_id`, then `_finish` (REST schedule options; `row_factory = sqlite3.Row` for the server's
+  writers). Manifest route `rest`. Test: the baseline's REST objects are generated from the synthetic database
+  (`rest_objects`), and the pull must give its column values back.
+  Milestone 4 (local edits): `EPPM_EDIT_TOOLS` write the working copy (`_before_call` refuses the other writes
+  with `_eppm_refusal`; `_write_refusal` skips the schema gate; `_guard_write` skips PM.exe; `_commit` next =
+  `EPPM_NEXT`); `config.load` keeps `allow_writes` in EPPM mode. Store file `eppm_<profile>.db` (STORE_VERSION
+  2), NEXTKEY `TASKPRED_task_pred_id` = `LOCAL_ID_BASE`, manifest `pulled_ts` (ms). `_eppm_pending()` =
+  `pending.net(pending.entries_since(log, pulled_ts, undone, pushed_entries))` (entry identity
+  `pending.ident` = commit + table + key; changes carry `entries` and `refs`); `p6_eppm_status` `pending` and
+  `last_push`, `p6_eppm_pull(discard_pending=)` (destructiveHint True).
+  Milestone 5 (push): `eppm/push.py` `plan(sess, changes)` (live reads by ObjectId, `same()` compares dates to the
+  minute, `PUSHED` column -> REST field, `TEXT` P6 codes -> REST text, `ORDER`) and `apply(sess, calls, journal)`;
+  `p6_eppm_push(confirm)` DESTRUCTIVE (`_confirm_text` `PUSH TO <server>`, `_plan_gate` on the call list),
+  `store.update_manifest(pushed_entries=, push=)`, local TASKPRED ids replaced by the server's. UDF tools are out
+  of `EPPM_EDIT_TOOLS` until their REST calls are checked. Tests: `tests/test_eppm_push.py` (fake server with a
+  live state, `fail_on`).
+  Milestone 6 (server schedule): `eppm/jobs.py` `schedule(sess, oids, new_data_date)` (`POLL_S`, `TIMEOUT_S`,
+  terminal / running status patterns, log capped at `LOG_MAX`) and `log_facts`; `p6_eppm_schedule(projects,
+  new_data_date, pull_after, confirm)` WRITE kind, refused while changes are pending when it pulls after, then
+  `_eppm_pull_now` (shared with `p6_eppm_pull`). The pull stamps PROJPROP 'scheduling' with the project's
+  `last_schedule_date` (a copy, not an edit, for `_stale_f9`).
+
 - Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (copies the brand icon, version
   resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`
   without Qt for the bundle; locales and package metadata collected; exe icon and the Settings app's brand

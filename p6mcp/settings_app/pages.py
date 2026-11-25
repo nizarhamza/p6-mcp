@@ -43,8 +43,9 @@ class DatabasePage(QWidget):
         box, sl = group(tr("db.source"))
         self.src_db = QRadioButton(tr("db.source.database"))
         self.src_xer = QRadioButton(tr("db.source.xer"))
+        self.src_eppm = QRadioButton(tr("db.source.eppm"))
         self.src_grp = QButtonGroup(self)
-        for b in (self.src_db, self.src_xer):
+        for b in (self.src_db, self.src_xer, self.src_eppm):
             self.src_grp.addButton(b)
             sl.addWidget(b)
         self.src_grp.buttonClicked.connect(self._source)
@@ -126,12 +127,17 @@ class DatabasePage(QWidget):
         from p6mcp.settings_app.xer_panel import XerPanel
         self.xer = XerPanel(win)
         lay.addWidget(self.xer)
+        from p6mcp.settings_app.eppm_panel import EppmPanel
+        self.eppm = EppmPanel(win)
+        lay.addWidget(self.eppm)
         lay.addStretch(1)
         self.refresh()
 
     def _source(self, *_args) -> None:
-        self.win.set_data(dict(self.win.data, data_source="xer" if self.src_xer.isChecked() else "database"))
+        src = "xer" if self.src_xer.isChecked() else ("eppm" if self.src_eppm.isChecked() else "database")
+        self.win.set_data(dict(self.win.data, data_source=src))
         self.refresh()
+        self.win.page_changed()
 
     # -- table
     def selected(self) -> Optional[str]:
@@ -144,13 +150,17 @@ class DatabasePage(QWidget):
     def refresh(self, select: Optional[str] = None) -> None:
         keep = select or self.selected()
         data = self.win.data
-        xer = data.get("data_source") == "xer"
-        (self.src_xer if xer else self.src_db).setChecked(True)
-        self.profiles_box.setVisible(not xer)
-        self.detail.setVisible(not xer)
+        src = data.get("data_source", "database")
+        xer, ep = src == "xer", src == "eppm"
+        {"xer": self.src_xer, "eppm": self.src_eppm}.get(src, self.src_db).setChecked(True)
+        self.profiles_box.setVisible(not (xer or ep))
+        self.detail.setVisible(not (xer or ep))
         if hasattr(self, "xer"):
             self.xer.setVisible(xer)
             self.xer.refresh()
+        if hasattr(self, "eppm"):
+            self.eppm.setVisible(ep)
+            self.eppm.refresh()
         self.table.blockSignals(True)
         self.table.setRowCount(0)
         for d in data.get("databases", []):
@@ -672,10 +682,12 @@ class ToolsPage(QWidget):
         d = self.win.data
         full = d.get("tool_profile") == "full"
         (self.full if full else self.basic).setChecked(True)
-        xer = d.get("data_source") == "xer"
+        src = d.get("data_source")
+        xer = src == "xer"  # P6 EPPM mode writes its local working copy (sent to the server only by a push)
         self.allow.setChecked(bool(d.get("allow_writes")))
         self.allow.setEnabled(full and not xer)
-        self.allow.setToolTip(tr("tools.allow.xer") if xer else ("" if full else tr("tools.allow.needs_full")))
+        self.allow.setToolTip(tr("tools.allow.xer") if xer else tr("tools.allow.eppm") if src == "eppm" and full
+                              else ("" if full else tr("tools.allow.needs_full")))
         self.backup.setChecked(bool(d.get("backup_before_write", True)))
         self.block.setChecked(bool(d.get("block_when_p6_running", True)))
         self.shop.setChecked(d.get("shop_enabled", True) is not False)

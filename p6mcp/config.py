@@ -25,13 +25,15 @@ from typing import Any, Optional
 
 from p6mcp import instructions, skills
 
-CONFIG_VERSION = 3
+CONFIG_VERSION = 4
 APP_DIR_NAME = "P6MCP"
 TOOL_PROFILES = ("basic", "full")
 TRANSPORTS = ("stdio", "http")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 DB_KINDS = ("sqlite",)  # SQL Server / Oracle: later versions (read only)
-DATA_SOURCES = ("database", "xer")  # xer: read-only analysis of XER files, no P6 database
+DATA_SOURCES = ("database", "xer", "eppm")  # xer: read-only analysis of XER files; eppm: a P6 EPPM server
+EPPM_AUTH = ("auto", "oauth", "login")  # auto: OAuth for Oracle Cloud hosts, else the /login session
+EPPM_SQL_DRIVERS = ("mssql", "oracle")  # pymssql / oracledb, installed on demand
 BACKUP_SCOPES = ("every_write", "session")
 SECRET_KEYS = ("password", "token", "secret", "pwd")  # never stored in the file
 
@@ -42,6 +44,10 @@ DEFAULTS: dict[str, Any] = {
     "data_source": "database",    # database, or xer (XER-only mode, read only)
     "xer_files": [],              # XER-only mode: the files loaded together (two updates to compare...)
     "xer_confirmed": False,       # the files were loaded and checked in the Settings app
+    "eppm_profiles": [],          # P6 EPPM servers [{name, base_url, context, database, user, auth, ca_bundle,
+                                  #   timeout_s, sql {driver, host, port, service, user, schema, table_prefix}
+                                  #   or null, confirmed, tested_at, ...}]; passwords in the Credential Manager
+    "eppm_active": None,          # name of the active entry of eppm_profiles (data_source eppm)
     "tool_profile": "basic",      # basic: read-only curated set; full: every tool
     "allow_writes": False,
     "backup_before_write": True,
@@ -128,7 +134,18 @@ def _migrate_2_to_3(d: dict) -> dict:
     return d
 
 
-MIGRATIONS = {0: _migrate_0_to_1, 1: _migrate_1_to_2, 2: _migrate_2_to_3}  # from version -> version + 1
+def _migrate_3_to_4(d: dict) -> dict:
+    """3.0.0: P6 EPPM servers (eppm_profiles, eppm_active, data_source eppm). Nothing to convert: the bump keeps
+    an older version from reading a file whose data_source it does not know."""
+    d = dict(d)
+    d.setdefault("eppm_profiles", [])
+    d.setdefault("eppm_active", None)
+    d["schema_version"] = 4
+    return d
+
+
+MIGRATIONS = {0: _migrate_0_to_1, 1: _migrate_1_to_2, 2: _migrate_2_to_3,
+              3: _migrate_3_to_4}  # from version -> version + 1
 
 
 def migrate(d: dict) -> tuple[dict, list[str]]:
@@ -228,12 +245,79 @@ def validate(d: dict) -> dict:
             errs.append(f"databases[{i}].confirmed must be true or false")
     if out["active_database"] is not None and out["active_database"] not in names:
         errs.append(f"active_database {out['active_database']!r} is not in databases")
+    errs += _check_eppm(out)
     leaks = _secret_keys(out)
     if leaks:
         errs.append(f"secrets must not be stored in config.json (use the Windows Credential Manager): {leaks}")
     if errs:
         raise ConfigError("; ".join(errs))
     return out
+
+
+def _text(v, empty_ok: bool = False) -> bool:
+    return isinstance(v, str) and (empty_ok or bool(v.strip()))
+
+
+def _check_eppm(out: dict) -> list[str]:
+    """eppm_profiles entries and eppm_active (milestone 1 of docs/EPPM_PLAN.md)."""
+    errs, names = [], set()
+    profs = out["eppm_profiles"]
+    if not isinstance(profs, list):
+        return ["eppm_profiles must be a list"]
+    for i, p in enumerate(profs):
+        at = f"eppm_profiles[{i}]"
+        if not isinstance(p, dict):
+            errs.append(f"{at} must be an object")
+            continue
+        name = p.get("name")
+        if not _text(name):
+            errs.append(f"{at}.name must be non-empty text")
+        elif name in names:
+            errs.append(f"{at}.name {name!r} is used twice")
+        names.add(name)
+        url = p.get("base_url")
+        if not _text(url) or not url.strip().lower().startswith(("https://", "http://")):
+            errs.append(f"{at}.base_url must start with https:// or http://")
+        for key in ("database", "context", "user"):  # user may still be empty: the test asks for it
+            if p.get(key) is not None and not _text(p.get(key), empty_ok=True):
+                errs.append(f"{at}.{key} must be text")
+        if p.get("auth", "auto") not in EPPM_AUTH:
+            errs.append(f"{at}.auth must be one of {list(EPPM_AUTH)}")
+        if p.get("ca_bundle") is not None and not _text(p.get("ca_bundle"), empty_ok=True):
+            errs.append(f"{at}.ca_bundle must be the path of a certificate file or null")
+        t = p.get("timeout_s", 120)
+        if not isinstance(t, int) or isinstance(t, bool) or not 5 <= t <= 900:
+            errs.append(f"{at}.timeout_s must be a whole number of seconds between 5 and 900")
+        if not isinstance(p.get("confirmed", False), bool):
+            errs.append(f"{at}.confirmed must be true or false")
+        sql = p.get("sql")
+        if sql is not None:
+            if not isinstance(sql, dict):
+                errs.append(f"{at}.sql must be an object or null")
+                continue
+            if sql.get("driver") not in EPPM_SQL_DRIVERS:
+                errs.append(f"{at}.sql.driver must be one of {list(EPPM_SQL_DRIVERS)}")
+            for key in ("host", "service"):
+                if not _text(sql.get(key)):
+                    errs.append(f"{at}.sql.{key} must be non-empty text")
+            if not _text(sql.get("user", ""), empty_ok=True):
+                errs.append(f"{at}.sql.user must be text")
+            port = sql.get("port")
+            if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+                errs.append(f"{at}.sql.port must be a whole number between 1 and 65535")
+            for key in ("schema", "table_prefix"):
+                if sql.get(key) is not None and not _text(sql.get(key), empty_ok=True):
+                    errs.append(f"{at}.sql.{key} must be text")
+    act = out["eppm_active"]
+    if act is not None and act not in names:
+        errs.append(f"eppm_active {act!r} is not in eppm_profiles")
+    return errs
+
+
+def eppm_profile(cfg: dict, name: Optional[str] = None) -> Optional[dict]:
+    """The named entry of eppm_profiles (the active one by default), or None."""
+    name = cfg.get("eppm_active") if name is None else name
+    return next((p for p in cfg.get("eppm_profiles", []) if p.get("name") == name), None)
 
 
 # ----------------------------------------------------------------- file access
@@ -311,6 +395,7 @@ class Settings:
     db_name: Optional[str] = None
     db_problem: Optional[str] = None  # why db_path is empty or unusable (user-facing)
     xer_files: tuple[str, ...] = ()   # XER-only mode: db_path is then set by the server (p6mcp.xerstore)
+    eppm: Optional[str] = None        # P6 EPPM mode: name of the confirmed active server profile
     tool_profile: str = "basic"
     allow_writes: bool = False
     backup_before_write: bool = True
@@ -357,6 +442,7 @@ def load() -> Settings:
     if err:
         problem = f"{err} Open MCP for Primavera P6 Settings to fix it."
     xer_files: tuple[str, ...] = ()
+    eppm: Optional[str] = None
     if env_db:
         db_path, db_name, problem = os.path.abspath(env_db), "P6_DB_PATH", None
     elif not err and cfg.get("data_source") == "xer":
@@ -371,6 +457,17 @@ def load() -> Settings:
                        "Primavera P6 Settings to fix the list.")
         else:
             xer_files, db_name = tuple(files), "XER files"
+    elif not err and cfg.get("data_source") == "eppm":
+        prof = eppm_profile(cfg)
+        if prof is None:
+            problem = "P6 EPPM mode: no server selected. Open MCP for Primavera P6 Settings (Database) to add one."
+        elif not prof.get("confirmed"):
+            problem = (f"P6 EPPM server {prof['name']!r} was added but its connection was not tested and confirmed. "
+                       "Open MCP for Primavera P6 Settings (Database) and click Test connection.")
+        else:  # the working copy of a pulled project becomes db_path (p6mcp.eppm, milestone 2)
+            eppm, db_name = prof["name"], prof["name"]
+            problem = (f"P6 EPPM server {prof['name']!r}: no project pulled yet. Pull a project first "
+                       "(p6_eppm_pull, coming in a later version).")
     elif not err:
         active = cfg.get("active_database")
         entry = next((d for d in cfg["databases"] if d.get("name") == active), None)
@@ -403,10 +500,10 @@ def load() -> Settings:
         profile = "basic"
     allow = _env_flag("P6MCP_ALLOW_WRITES")
     if xer_files:
-        allow = False  # XER-only mode never writes
+        allow = False  # XER-only mode never writes (P6 EPPM mode writes its local working copy only)
     block = cfg["block_when_p6_running"] and os.environ.get("P6_SKIP_PROCESS_CHECK", "0") != "1"
     return Settings(
-        source=source, db_path=db_path, db_name=db_name, db_problem=problem, xer_files=xer_files,
+        source=source, db_path=db_path, db_name=db_name, db_problem=problem, xer_files=xer_files, eppm=eppm,
         tool_profile=profile, allow_writes=cfg["allow_writes"] if allow is None else allow,
         backup_before_write=cfg["backup_before_write"],
         backup_scope="session" if legacy and data is None else cfg["backup_scope"],

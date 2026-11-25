@@ -12,11 +12,12 @@
 
 **MCP for Primavera P6** is a local [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that
 connects Claude, ChatGPT, Cursor, VS Code and any other MCP client to your **Oracle Primavera P6 Professional**
-schedules on Windows. It reads the P6 database itself (P6 Professional standalone, SQLite) or plain **XER files**
-and answers scheduling questions with real computations: critical path and driving path, total float, the
-**DCMA 14-point check**, look-ahead, baseline and update comparison, CPM what-if and Monte Carlo schedule risk.
-Unlike XER-only MCP servers, it can also **write changes back to the P6 database**: durations, logic,
-constraints, actuals, units and UDFs, each one previewed in a dry run, applied only after your confirmation,
+schedules on Windows. It reads the P6 database itself (P6 Professional standalone, SQLite), plain **XER files**,
+or projects of a live **P6 EPPM server** (on premises or Oracle Cloud), and answers scheduling questions with real
+computations: critical path and driving path, total float, the **DCMA 14-point check**, look-ahead, baseline and
+update comparison, CPM what-if and Monte Carlo schedule risk. Unlike XER-only MCP servers, it can also **write
+changes back**: to the P6 database (durations, logic, constraints, actuals, units and UDFs), or to the P6 EPPM
+server through a push you approve. Each change is previewed in a dry run, applied only after your confirmation,
 backed up first and recorded in an edit log.
 
 > MCP for Primavera P6 is an independent project. It is not affiliated with, endorsed or sponsored by Oracle.
@@ -47,6 +48,9 @@ from the schedule; the model explains it. Dates and float come from P6's last sc
   status, WBS or code, and a one-page **Excel dashboard** with native charts.
 - **XER files**: inspect, import (new project, baseline, update), export, or analyse XER files alone in XER-only
   mode, without a P6 database or P6 installed.
+- **P6 EPPM server** (3.0): pull projects and their baselines from a live P6 EPPM server into a local working
+  copy (REST API, optional read-only SQL account), run every tool on it, edit locally, push the changes after a
+  conflict check and your yes, and schedule on the server with P6's own scheduler.
 - **Edits** (off by default): durations, constraints, actual dates, physical % complete, resource assignment
   units, activity UDF values, relationships, schedule options, EPS, deletes, backups and restore.
 
@@ -57,7 +61,7 @@ bundled.
 
 1. Download `P6MCP-Setup-<version>.exe` from
    [Releases](https://github.com/nizarhamza/p6-mcp/releases/latest) and check it against
-   `SHA256SUMS.txt` (`certutil -hashfile P6MCP-Setup-2.2.0.exe SHA256`).
+   `SHA256SUMS.txt` (`certutil -hashfile P6MCP-Setup-3.0.0.exe SHA256`).
 2. Run it. It installs for your Windows user only (no administrator rights) and, on its last page, offers to
    register the server with every MCP client it finds (Claude Desktop, Claude Code, Cursor, VS Code, LM Studio,
    Cline). Untick the ones you do not want.
@@ -165,7 +169,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 ## Tools
 
 <!-- tools:start -->
-58 tools: 37 read-only (11 of them in the Basic profile), 2 that write a file, 18 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
+63 tools: 39 read-only (11 of them in the Basic profile), 3 that write a file, 20 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
 
 **Projects and structure**
 
@@ -236,6 +240,16 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 | `p6_import_xer` | Imports an XER as a new project, a baseline or an update of an existing project | Write |  |
 | `p6_export_xer` | Exports a project to an XER file, schedule options included | Writes a file |  |
 
+**P6 EPPM server**
+
+| Tool | What it does | Access | Basic |
+|---|---|---|---|
+| `p6_eppm_projects` | Lists the projects the P6 user can read on the P6 EPPM server | Read |  |
+| `p6_eppm_pull` | Copies projects and their baselines from the P6 EPPM server into the local working copy | Writes a file |  |
+| `p6_eppm_status` | Working copy of the P6 EPPM server: projects, pull time, pending local changes, changes on the server since | Read |  |
+| `p6_eppm_push` | Sends the pending local changes to the P6 EPPM server after a conflict check and your yes | Delete or replace |  |
+| `p6_eppm_schedule` | Schedules projects on the P6 EPPM server (P6's own F9), returns its log, then pulls them again | Write |  |
+
 **Edits (off by default)**
 
 | Tool | What it does | Access | Basic |
@@ -293,7 +307,7 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
 | Excel dashboard, P6 skills (ready-made workflows) | Yes | Varies |
 | Installation | Windows installer with a Settings window; registers your MCP clients | Usually a Python package (pip, uvx) |
 | Runs on macOS or Linux | No: Windows only, like P6 Professional | Usually yes |
-| P6 EPPM, or P6 on SQL Server or Oracle | No | No (XER only) |
+| P6 EPPM server (on premises or Oracle Cloud) | Yes (3.0): pull, local edits, push you approve, server schedule | No (XER only) |
 
 "Varies" means some XER servers do it and others do not: check the one you are looking at.
 
@@ -301,11 +315,14 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
 
 ![Settings: tools and safety](docs/images/settings-tools.png)
 
-- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 58).
+- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 63).
 - **Writes are off by default.** With the Full profile and "Allow write operations", every write takes two calls:
   a dry run that shows the plan and returns a single-use confirmation token, then, after your explicit yes, the
   same call with that token. Deleting a project or an activity and restoring a backup also need a confirmation
   text. If the database changed in between, the write is refused.
+- With a **P6 EPPM server**, edits change only the local working copy. `p6_eppm_push` reads every changed object
+  on the server first and refuses on any change made there since the pull; it needs the confirmation text
+  `PUSH TO <server>`, sends one object per call and stops at the first failure, with a journal of what was sent.
 - A **backup** is taken before every write (with a retention you choose), writes are refused while **P6 is
   running**, and every write goes to the **edit log** with its parameters.
 - Writes are refused on a P6 schema version the server was not tested with, unless you trust it explicitly.
@@ -422,11 +439,38 @@ Under **Database > Data source**, choose **XER files only**, add one or more XER
 check**. The files are read into a private read-only copy; every read tool works on it. Load two updates of the
 same schedule to compare them: a Project ID already used by the first file gets a `~2` suffix.
 
+## P6 EPPM server
+
+Under **Database > Data source**, choose **A P6 EPPM server**, click **Add server...** and give its address
+(`https://<host>`; the REST API is `/p6ws/restapi`). Enter the database name shown on P6's sign-in page, your
+P6 user and password, then **Test connection**: it signs in (a session on premises, an OAuth token on Oracle
+Cloud), counts the projects you can read and signs out. A password is kept in the Windows Credential Manager
+only once a test shows it works. Optionally add a **read-only SQL account** (SQL Server or Oracle): it reads
+every table as stored and is faster; its driver is downloaded from PyPI only when you ask, and each file is
+checked against the checksum PyPI publishes. Click **Use this server**, then **Save**.
+
+Then, from your MCP client:
+
+1. `p6_eppm_projects` lists the projects your P6 user can read; `p6_eppm_pull` copies the ones you name, with
+   their current baseline, into a local **working copy** (by SQL, or by REST alone: the project from P6's XER
+   export, its baseline from REST objects, the schedule options from REST). Every other tool reads that copy.
+2. Edits (with "Allow write operations") change the working copy only: activity fields, relationships and
+   assignment units, each with its dry run and your confirmation. `p6_eppm_status` lists the **pending
+   changes** (netted per object and field) and whether the server changed since the pull.
+3. `p6_eppm_push` sends them: it reads each changed object on the server and refuses on any change made there
+   since the pull, then, after your yes and the text `PUSH TO <server>`, sends one object per call and stops at
+   the first failure; a journal records what reached the server, and a new push sends the rest.
+4. `p6_eppm_schedule` runs P6 EPPM's own scheduler (optionally with a new data date), returns its log and pulls
+   the projects again. It never runs by itself after a push.
+
+Not in this version: deleting activities, UDF edits, schedule options and other structure changes through the
+working copy (do them in P6 EPPM, then pull again). Tested against P6 EPPM 25.12 on SQL Server.
+
 ## FAQ
 
 **What is an MCP server for Primavera P6?**
 MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant
-58 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
+63 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
 computed from the schedule rather than guessed by the model.
 
 **Can the AI change my schedule?**
@@ -440,11 +484,13 @@ with a cloud model that means its provider. For confidential projects use a loca
 
 **Which P6 versions and databases are supported?**
 P6 Professional standalone (SQLite), tested with 25.12; other versions are read only until tested or trusted.
-XER files from P6 Professional 24.12 and from the server's own export. P6 EPPM and P6 Professional on SQL Server
-or Oracle are not supported.
+XER files from P6 Professional 24.12 and from the server's own export. P6 EPPM servers through their REST API
+(and optionally a read-only SQL account), tested with P6 EPPM 25.12 on SQL Server. P6 Professional connected
+directly to SQL Server or Oracle is not supported.
 
 **Do I need P6 installed?**
-Not for XER files: XER-only mode analyses them without P6 or a P6 database.
+Not for XER files: XER-only mode analyses them without P6 or a P6 database. Not for a P6 EPPM server either: the
+server is reached over the network.
 
 **How does the DCMA 14-point check work?**
 `p6_health_check` runs the 14 DCMA checks on the last F9, with the thresholds set in P6's schedule check settings

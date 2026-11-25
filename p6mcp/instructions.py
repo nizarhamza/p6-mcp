@@ -40,6 +40,11 @@ BUILTIN: tuple[Line, ...] = (
     Line("sql", "Use p6_sql_select only when no other tool fits."),
 )
 BY_ID = {ln.id: ln for ln in BUILTIN}
+# Added only when the data source is a P6 EPPM server (3.0.0): the F9 and P6-closed lines above speak of P6
+# Professional, and the skills say "press F9 in P6".
+EPPM_LINE = ("P6 EPPM server mode: tools read a local working copy (p6_eppm_pull) and edits change only that copy. "
+             "Send them with p6_eppm_push after the user's yes. Where a tool or skill says to press F9 in P6, use "
+             "p6_eppm_schedule instead, with the user's yes.")
 
 
 def enabled(line: Line, cfg: Optional[dict]) -> bool:
@@ -59,6 +64,8 @@ def custom_lines(cfg: Optional[dict]) -> list[str]:
 def build(cfg: Optional[dict] = None) -> str:
     """The instructions sent to clients under these settings (None: the built-in text)."""
     lines = [HEADER] + ["- " + ln.text for ln in BUILTIN if enabled(ln, cfg)]
+    if (cfg or {}).get("data_source") == "eppm":
+        lines.append("- " + EPPM_LINE)
     mine = custom_lines(cfg)
     if mine:
         lines += [CUSTOM_HEADER] + ["- " + t for t in mine]
