@@ -291,6 +291,7 @@
   "eppm.sql.password": "Mot de passe SQL",
   "eppm.test": "Tester la connexion",
   "eppm.testing": "Test en cours...",
+  "eppm.lockout": "Chaque connexion refusée, test compris, compte pour le verrouillage du compte P6 (5 de suite par défaut, puis le compte reste verrouillé jusqu'à ce qu'un administrateur P6 le déverrouille) : vérifiez l'utilisateur et le mot de passe avant de tester à nouveau.",
   "eppm.use": "Utiliser ce serveur",
   "eppm.status.active": "utilisé",
   "eppm.status.confirmed": "testé",

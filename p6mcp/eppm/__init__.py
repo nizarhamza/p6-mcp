@@ -19,6 +19,32 @@ def digest(profile: dict) -> str:
     return hashlib.sha256(json.dumps(keys, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
+def lock_check(profile: dict, sql_password: Optional[str] = None,
+               sql_module: Optional[Callable[[str], Any]] = None) -> Optional[Callable[[], str]]:
+    """For rest.Session(lock_check=): when a sign-in is refused as P6 EPPM refuses a locked account, read the user's
+    failed sign-ins with the profile's read-only SQL account and say what they show. sql_password None = the stored
+    one, read only then; sql_module = driver factory (tests). None when the profile has no SQL account."""
+    sqlcfg = profile.get("sql")
+    if not sqlcfg:
+        return None
+
+    def check() -> str:
+        from p6mcp.eppm import rest, sql
+        pw = sql_password
+        if pw is None:
+            from p6mcp import credentials
+            try:
+                pw = credentials.get(credentials.eppm_sql_key(profile["name"]))
+            except Exception:  # noqa: BLE001  (no secret store: nothing to add)
+                return ""
+        if not pw:
+            return ""
+        module = sql_module(sqlcfg.get("driver", "")) if sql_module else None
+        return rest.lock_finding(sql.failed_sign_ins(sqlcfg, pw, profile.get("user", ""), module),
+                                 profile.get("user", ""))
+    return check
+
+
 def test_profile(profile: dict, password: Optional[str], sql_password: Optional[str] = None,
                  rest_opener: Optional[Callable] = None, sql_module: Optional[Callable[[str], Any]] = None) -> dict:
     """Test connection of a server profile: REST sign-in and project count, then the SQL account when the profile
@@ -28,7 +54,8 @@ def test_profile(profile: dict, password: Optional[str], sql_password: Optional[
     if not password:
         res["rest"] = {"ok": False, "error": "No password: enter the P6 password of this server."}
     else:
-        res["rest"] = rest.test_connection(profile, password, rest_opener)
+        res["rest"] = rest.test_connection(profile, password, rest_opener,
+                                           lock_check(profile, sql_password or "", sql_module))
     res["ok"] = bool(res["rest"].get("ok"))
     if profile.get("sql"):
         if not sql_password:

@@ -219,12 +219,16 @@ SCHED_FIELDS = list(SCHED_FLAGS) + list(SCHED_NUMS) + [
 ROUTES = ("auto", "sql", "rest")
 
 
-def _session(profile: dict, password: str, rest_opener: Optional[Callable] = None):
+def _session(profile: dict, password: str, rest_opener: Optional[Callable] = None,
+             sql_password: Optional[str] = None, sql_module: Any = None):
+    from p6mcp import eppm
     from p6mcp.eppm import rest
     return rest.Session(profile["base_url"], profile.get("user", ""), password, profile.get("database") or "",
                         profile.get("auth", "auto"), profile.get("context") or rest.DEFAULT_CONTEXT,
                         profile.get("ca_bundle") or None, int(profile.get("timeout_s", 120)),
-                        opener=rest_opener() if rest_opener else None)
+                        opener=rest_opener() if rest_opener else None,
+                        lock_check=eppm.lock_check(profile, sql_password,
+                                                   (lambda _d: sql_module) if sql_module is not None else None))
 
 
 def _wanted(profile: dict, project_ids: Iterable[str]) -> set[str]:
@@ -319,7 +323,7 @@ def pull_sql(profile: dict, project_ids: Iterable[str], password: str, sql_passw
     sqlcfg = profile["sql"]
     wanted = _wanted(profile, project_ids)
     started = datetime.now()
-    with _session(profile, password, rest_opener) as sess:
+    with _session(profile, password, rest_opener, sql_password, sql_module) as sess:
         listed, projects, sched_rows = _server_info(sess, wanted, include_baseline)
     oids = [p["object_id"] for p in projects]
     id_set = sorted(set(oids) | {p["baseline_object_id"] for p in projects if p["baseline_object_id"]})

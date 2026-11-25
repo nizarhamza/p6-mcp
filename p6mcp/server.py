@@ -12591,11 +12591,11 @@ def _eppm_pending() -> list[dict]:
 
 
 def _eppm_session(p: dict):
-    from p6mcp import credentials
+    from p6mcp import credentials, eppm
     from p6mcp.eppm import rest
     return rest.Session(p["base_url"], p.get("user", ""), _eppm_secret(credentials.eppm_key(p["name"]), "P6 password"),
                         p.get("database") or "", p.get("auth", "auto"), p.get("context") or rest.DEFAULT_CONTEXT,
-                        p.get("ca_bundle") or None, int(p.get("timeout_s", 120)))
+                        p.get("ca_bundle") or None, int(p.get("timeout_s", 120)), lock_check=eppm.lock_check(p))
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
