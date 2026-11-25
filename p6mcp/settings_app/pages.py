@@ -683,10 +683,10 @@ class ToolsPage(QWidget):
         full = d.get("tool_profile") == "full"
         (self.full if full else self.basic).setChecked(True)
         src = d.get("data_source")
-        xer = src in ("xer", "eppm")  # no writes yet in EPPM mode: they come with the working copy and the push
+        xer = src == "xer"  # P6 EPPM mode writes its local working copy (sent to the server only by a push)
         self.allow.setChecked(bool(d.get("allow_writes")))
         self.allow.setEnabled(full and not xer)
-        self.allow.setToolTip(tr("tools.allow.eppm") if src == "eppm" else tr("tools.allow.xer") if xer
+        self.allow.setToolTip(tr("tools.allow.xer") if xer else tr("tools.allow.eppm") if src == "eppm" and full
                               else ("" if full else tr("tools.allow.needs_full")))
         self.backup.setChecked(bool(d.get("backup_before_write", True)))
         self.block.setChecked(bool(d.get("block_when_p6_running", True)))

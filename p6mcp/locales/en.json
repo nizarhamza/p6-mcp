@@ -307,7 +307,7 @@
   "eppm.result.sql_driver": "SQL: the {driver} driver is not installed: click Install the SQL driver (REST works meanwhile).",
   "eppm.result.sql_failed": "SQL: {err}",
   "app.no_eppm": "No P6 EPPM server is tested and in use yet: add one on the Database page.",
-  "tools.allow.eppm": "Edits on a P6 EPPM server come with the working copy and the push (a later version).",
+  "tools.allow.eppm": "With a P6 EPPM server, edits change the local working copy only: nothing reaches the server without a push you confirm.",
   "tools.allow.xer": "XER-only mode is read only",
   "nav.logs": "Logs and updates",
   "nav.about": "About",

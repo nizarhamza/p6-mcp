@@ -499,8 +499,8 @@ def load() -> Settings:
     if profile not in TOOL_PROFILES:
         profile = "basic"
     allow = _env_flag("P6MCP_ALLOW_WRITES")
-    if xer_files or eppm:
-        allow = False  # XER-only mode never writes; EPPM writes come with the working copy and the push
+    if xer_files:
+        allow = False  # XER-only mode never writes (P6 EPPM mode writes its local working copy only)
     block = cfg["block_when_p6_running"] and os.environ.get("P6_SKIP_PROCESS_CHECK", "0") != "1"
     return Settings(
         source=source, db_path=db_path, db_name=db_name, db_problem=problem, xer_files=xer_files, eppm=eppm,

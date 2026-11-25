@@ -158,6 +158,12 @@ stay outside this repository.
   `orig_proj_id`, then `_finish` (REST schedule options; `row_factory = sqlite3.Row` for the server's
   writers). Manifest route `rest`. Test: the baseline's REST objects are generated from the synthetic database
   (`rest_objects`), and the pull must give its column values back.
+  Milestone 4 (local edits): `EPPM_EDIT_TOOLS` write the working copy (`_before_call` refuses the other writes
+  with `_eppm_refusal`; `_write_refusal` skips the schema gate; `_guard_write` skips PM.exe; `_commit` next =
+  `EPPM_NEXT`); `config.load` keeps `allow_writes` in EPPM mode. Store file `eppm_<profile>.db` (STORE_VERSION
+  2), NEXTKEY `TASKPRED_task_pred_id` = `LOCAL_ID_BASE`, manifest `pulled_ts` (ms). `_eppm_pending()` =
+  `pending.net(pending.entries_since(log, pulled_ts, undone, pushed_commits))`; `p6_eppm_status` `pending`,
+  `p6_eppm_pull(discard_pending=)` (destructiveHint True).
 
 - Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (copies the brand icon, version
   resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`

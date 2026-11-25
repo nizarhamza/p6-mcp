@@ -9,6 +9,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 import re
 import sqlite3
 import threading
@@ -234,8 +235,8 @@ def test_server_tools_in_eppm_mode(p6, eppm_env, monkeypatch):
     assert [r["proj_short_name"] for r in p6.call("p6_list_projects")["rows"]] == ["DEMO-A"]
     v = p6.call("p6_cpm_validate", project="DEMO-A")
     assert v["match_rate"] is not None
-    with pytest.raises(ValueError, match="P6 EPPM mode is read only"):
-        p6.call("p6_update_activity", project="DEMO-A", task_code="A1000", name="x")
+    with pytest.raises(ValueError, match="not available on a P6 EPPM working copy"):
+        p6.call("p6_import_xer", path="x.xer")
     st = p6.call("p6_eppm_status")
     assert st["pulled"] and st["changed_on_server"]["activities"] == {"DEMO-A": 1}
     assert ("/p6ws/restapi/activity", "ProjectObjectId :eq: 2 :and: LastUpdateDate:gt:'2026-01-06 10:00:00'") \
@@ -310,6 +311,83 @@ def test_rest_route_builds_the_copy_from_the_xer_export(p6, tmp_path, monkeypatc
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_local_edits_become_pending_changes(p6, eppm_env, monkeypatch):
+    """Milestone 4: the supported edits change the working copy (two-step flow, local backup), never the server;
+    p6_eppm_status lists them netted; other writes are refused; a pull keeps them unless discard_pending."""
+    e = eppm_env
+    vault = {"eppm:srv": PW, "eppm-sql:srv": SPW}
+    monkeypatch.setattr("p6mcp.credentials.get", lambda k: vault.get(k))
+    monkeypatch.setattr("p6mcp.eppm.sql.driver_module", lambda d: e["driver"])
+    p6.set(data_source="eppm", eppm_profiles=[e["profile"]], eppm_active="srv")
+    with pytest.raises(RuntimeError, match="no project pulled"):
+        p6.call("p6_update_activity", project="DEMO-A", task_code="A1000", task_name="x")
+    p6.call("p6_eppm_pull", projects=["DEMO-A"])
+    wc = store.store_path("srv")
+    assert os.path.basename(wc) == "eppm_srv.db"
+    codes = [r[0] for r in rows(wc, "SELECT task_code FROM TASK WHERE proj_id = 2 ORDER BY task_id")]
+    a, b, c = codes[0], codes[1], codes[-1]
+    before_golden = rows(e["golden"], "SELECT task_name FROM TASK ORDER BY task_id")
+
+    res = p6.apply("p6_update_activity", project="DEMO-A", task_code=a, task_name="Renamed locally")
+    assert res["applied"] and "nothing is sent to the P6 EPPM server" in res["next"]
+    p6.apply("p6_update_activity", project="DEMO-A", task_code=b, task_name="Changed then reverted")
+    old_b = before_golden[1][0]
+    p6.apply("p6_update_activity", project="DEMO-A", task_code=b, task_name=old_b)  # back: drops out
+    added = p6.apply("p6_add_relationship", project="DEMO-A", predecessor_code=a, successor_code=c, rel_type="SS")
+    assert added["applied"]
+    new_id = rows(wc, "SELECT MAX(task_pred_id) FROM TASKPRED")[0][0]
+    assert new_id >= store.LOCAL_ID_BASE  # a local id, above every server ObjectId
+    st = p6.call("p6_eppm_status", check_server=False)
+    pend = st["pending"]
+    assert pend["count"] == 2 and pend["by_table"] == {"TASK": {"update": 1}, "TASKPRED": {"create": 1}}
+    upd = next(x for x in pend["changes"] if x["table"] == "TASK")
+    assert upd["labels"]["task_code"] == a and upd["fields"]["task_name"]["local"] == "Renamed locally"
+    assert upd["fields"]["task_name"]["pulled"] == before_golden[0][0]
+    cre = next(x for x in pend["changes"] if x["table"] == "TASKPRED")
+    assert cre["keys"]["task_pred_id"] == new_id and cre["fields"]["pred_type"]["local"] == "PR_SS"
+    ids = dict(rows(wc, "SELECT task_code, task_id FROM TASK WHERE proj_id = 2"))
+    assert cre["refs"] == {"task_id": ids[c], "pred_task_id": ids[a], "pred_proj_id": 2}  # what the push sends
+    # created then deleted locally: nothing left to send
+    p6.apply("p6_delete_relationship", project="DEMO-A", predecessor_code=a, successor_code=c, current_type="SS")
+    assert p6.call("p6_eppm_status", check_server=False)["pending"]["count"] == 1
+    # the golden database (the "server" here) never changed
+    assert rows(e["golden"], "SELECT task_name FROM TASK ORDER BY task_id") == before_golden
+    for tool, kw, msg in (("p6_delete_activity", {"project": "DEMO-A", "task_code": a}, "not deleted through"),
+                          ("p6_create_eps", {"name": "X"}, "not available on a P6 EPPM working copy")):
+        with pytest.raises(ValueError, match=msg):
+            p6.call(tool, **kw)
+    with pytest.raises(ValueError, match="1 local change"):
+        p6.call("p6_eppm_pull", projects=["DEMO-A"])
+    res = p6.call("p6_eppm_pull", projects=["DEMO-A"], discard_pending=True)
+    assert res["discarded_changes"] == 1
+    assert p6.call("p6_eppm_status", check_server=False)["pending"]["count"] == 0
+    assert rows(wc, "SELECT task_name FROM TASK ORDER BY task_id") == before_golden
+
+
+def test_pending_net_rules():
+    from p6mcp.eppm import pending
+
+    def ent(op, table, keys, before, after, ts):
+        return {"ts": ts, "commit": ts, "operation": op, "table": table, "keys": keys, "before": before,
+                "after": after, "project": "P", "proj_id": 1}
+    es = [ent("update_udf", "UDFVALUE", {"udf_type_id": 5, "fk_id": 9, "udf": "Area"}, None, {"udf_text": "N"}, "1"),
+          ent("clear_udf", "UDFVALUE", {"udf_type_id": 5, "fk_id": 9}, {"udf_text": "N"}, None, "2"),
+          ent("update_assignment", "TASKRSRC", {"taskrsrc_id": 3, "task_code": "A1"},
+              {"remain_qty": 8.0, "TASK.remain_work_qty": 8.0}, {"remain_qty": 16.0, "TASK.remain_work_qty": 16.0},
+              "3"),
+          ent("update_relationship", "TASKPRED", {"task_pred_id": 7}, {"lag_hr_cnt": 0.0}, {"lag_hr_cnt": 8.0}, "4"),
+          ent("delete_relationship", "TASKPRED", {"task_pred_id": 7}, {"pred_type": "PR_FS", "lag_hr_cnt": 8.0},
+              None, "5"),
+          ent("restore_backup", None, None, None, None, "6")]
+    keep = pending.entries_since(es, "0", lambda e: False)
+    assert [e["ts"] for e in keep] == ["1", "2", "3", "4", "5"]
+    out = {(c["table"], c["action"]): c for c in pending.net(keep)}
+    assert not [k for k in out if k[0] == "UDFVALUE"]  # set where none was pulled, then cleared: nothing to send
+    assert out[("TASKRSRC", "update")]["fields"] == {"remain_qty": {"pulled": 8.0, "local": 16.0}}  # no rollups
+    assert out[("TASKPRED", "delete")]["fields"]["lag_hr_cnt"]["pulled"] == 0.0  # the pulled value, not the edit's
+    assert pending.entries_since(es, "3", lambda e: e["ts"] == "4", pushed=["5"]) == [es[2]]
 
 
 # ----------------------------------------------------------------- driver install

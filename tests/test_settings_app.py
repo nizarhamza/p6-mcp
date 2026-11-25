@@ -466,7 +466,8 @@ def test_eppm_mode_in_settings(qtbot, win, monkeypatch):
         assert panel.use_btn.isEnabled()
         panel.use_btn.click()
         assert win.data["eppm_active"] == name and settings_logic_find(win, name)["confirmed"]
-        assert not (win.banner.isVisibleTo(win) and "P6 EPPM" in win.banner.text()) and not tools_allow_enabled(win)
+        # writes may be allowed: in P6 EPPM mode they change the local working copy only
+        assert not (win.banner.isVisibleTo(win) and "P6 EPPM" in win.banner.text()) and tools_allow_enabled(win)
         assert win.save()
         st = config.load()
         assert st.eppm == name and st.allow_writes is False and "no project pulled" in st.db_problem

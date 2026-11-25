@@ -131,7 +131,7 @@ def test_load_in_eppm_mode_reports_what_is_missing(clean_env):
                          encoding="utf-8")
     st = config.load()
     assert st.eppm == "test" and st.db_path == "" and "no project pulled" in st.db_problem
-    assert st.allow_writes is False  # writes come with the working copy and the push
+    assert st.allow_writes is True  # the setting holds: EPPM writes change the local working copy only
 
 
 def test_migration_from_3_adds_the_eppm_keys(clean_env):

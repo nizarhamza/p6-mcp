@@ -331,9 +331,22 @@ XER_MANIFEST: Optional[dict] = None  # XER-only mode: files, projects (Project I
 XER_READ_ONLY = ("XER-only mode is read only: the XER files are analysed, never changed. Select a P6 database in "
                  "MCP for Primavera P6 Settings to write.")
 EPPM_MANIFEST: Optional[dict] = None  # P6 EPPM mode: pull.json of the working copy (server, projects, rows)
-EPPM_READ_ONLY = ("P6 EPPM mode is read only in this version: the working copy is analysed; edits and the push to "
-                  "the server come in a later version.")
 EPPM_TOOLS = ("p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status")
+# Edits allowed on a P6 EPPM working copy: the ones the push can send (docs/EPPM_PLAN.md 4.1), plus the local backups
+EPPM_EDIT_TOOLS = frozenset({
+    "p6_update_activity", "p6_update_assignment", "p6_update_assignments", "p6_update_udf", "p6_update_udfs",
+    "p6_add_relationship", "p6_add_relationships", "p6_update_relationship", "p6_update_relationships",
+    "p6_delete_relationship", "p6_delete_relationships", "p6_backup_database", "p6_restore_backup"})
+EPPM_NEXT = ("Changed in the local working copy only: nothing is sent to the P6 EPPM server until a push (a later "
+             "version). p6_eppm_status lists the pending changes.")
+
+
+def _eppm_refusal(tool: str) -> str:
+    if tool == "p6_delete_activity":
+        return ("Activities are not deleted through a P6 EPPM working copy in this version: delete it in P6 EPPM, "
+                "then pull again.")
+    return (f"{tool} is not available on a P6 EPPM working copy: the push to the server supports activity, "
+            "relationship, assignment and UDF edits only. Do it in P6 EPPM, then pull again.")
 TOOL_HINTS: dict[str, dict[str, bool]] = {}
 HINT_KEYS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")  # MCP tool annotations, in order
 REGISTERED: dict[str, Callable] = {}  # tool -> what a client call runs (policy gate + two-step write flow)
@@ -384,8 +397,8 @@ def _before_call(tool: str) -> _config.Settings:
     st = _refresh()
     if st.xer_files and _policy.is_write(tool):
         raise ValueError(XER_READ_ONLY)
-    if st.eppm and _policy.is_write(tool):
-        raise ValueError(EPPM_READ_ONLY)
+    if st.eppm and _policy.is_write(tool) and tool not in EPPM_EDIT_TOOLS:
+        raise ValueError(_eppm_refusal(tool))
     why = _policy.refusal(tool, st.tool_profile, st.allow_writes, _shop_on(st))
     if why:
         raise ValueError(why)
@@ -411,8 +424,10 @@ def _write_refusal() -> Optional[str]:
     """Why this database may not be written now (settings and schema), None when it may."""
     if SETTINGS.xer_files:
         return XER_READ_ONLY
-    if SETTINGS.eppm:
-        return EPPM_READ_ONLY
+    if SETTINGS.eppm:  # the working copy is ours: no schema gate, writes as the settings allow
+        if not EPPM_MANIFEST:
+            return "Nothing pulled yet from the P6 EPPM server: pull a project with p6_eppm_pull first."
+        return _policy.write_refusal(SETTINGS.tool_profile, SETTINGS.allow_writes)
     why = _policy.write_refusal(SETTINGS.tool_profile, SETTINGS.allow_writes)
     if why:
         return why
@@ -832,6 +847,8 @@ def _caller_tool() -> Optional[str]:
 
 
 def _guard_write() -> Optional[str]:
+    if SETTINGS.eppm:  # P6 never opens the working copy of a P6 EPPM server
+        return None
     if _p6_running():
         return "P6 (PM.exe) is running. Close P6 completely, then retry."
     return None
@@ -8363,7 +8380,8 @@ def _commit(con: sqlite3.Connection, plan: list[str], confirm: bool, projects: I
                 "before": it.get("before"), "after": it.get("after"), "summary": it.get("summary"),
                 "change": plan[0][:160], "backup": _last_backup, "stale": stale,
                 "stale_projects": [v[0] for v in snap.values()]} for it in items]
-    res = {"applied": True, "done": plan, "next": "Open P6 and press F9 to reschedule."}
+    res = {"applied": True, "done": plan,
+           "next": EPPM_NEXT if SETTINGS.eppm else "Open P6 and press F9 to reschedule."}
     if snap:
         res["stale_projects"] = [v[0] for v in snap.values()]
     try:
@@ -12449,6 +12467,17 @@ def _eppm_secret(key: str, what: str) -> str:
     return pw
 
 
+def _eppm_pending() -> list[dict]:
+    """Net pending changes of the working copy (edits since the pull, not undone, not pushed)."""
+    from p6mcp.eppm import pending
+    m = EPPM_MANIFEST
+    if not m or not DB_PATH:
+        return []
+    es = _log_entries()
+    return pending.net(pending.entries_since(es, m.get("pulled_ts") or m["pulled_at"], _undone_fn(es),
+                                             m.get("pushed_commits", [])))
+
+
 def _eppm_session(p: dict):
     from p6mcp import credentials
     from p6mcp.eppm import rest
@@ -12483,21 +12512,28 @@ def p6_eppm_projects(search: str = "", offset: int = 0, limit: int = 100) -> dic
     return dict(_slice(out, offset, limit), server=p["name"])
 
 
-@_tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True})
 def p6_eppm_pull(projects: list[str], include_baseline: bool = True,
-                 route: Literal["auto", "sql", "rest"] = "auto") -> dict:
+                 route: Literal["auto", "sql", "rest"] = "auto", discard_pending: bool = False) -> dict:
     """P6 EPPM mode: copy projects from the server into the local working copy that every other tool
     reads (the projects pulled before are refreshed too). Reads the server only: nothing is changed there.
     projects: Project IDs (see p6_eppm_projects). include_baseline: also copy each project's current
     baseline (needed by baseline variance, BEI and milestones vs baseline).
     route: sql (the read-only SQL account set in MCP for Primavera P6 Settings: every table as stored),
     rest (the server's XER export, for servers without a SQL account), auto = sql when it is set up and
-    its driver installed, else rest."""
+    its driver installed, else rest.
+    A pull rebuilds the working copy: it is refused while local edits are pending (see p6_eppm_status)
+    unless discard_pending=True, which drops them (ask the user first)."""
     from p6mcp import credentials
     from p6mcp.eppm import rest, sql
     p = _eppm_profile()
     if not projects:
         raise ValueError("Name at least one project (Project ID, see p6_eppm_projects).")
+    waiting = _eppm_pending()
+    if waiting and not discard_pending:
+        raise ValueError(f"{len(waiting)} local change(s) are pending in the working copy and a pull would drop them. "
+                         "Push them first (a later version), or pull with discard_pending=True if the user agrees to "
+                         "lose them. See p6_eppm_status.")
     if route not in _eppm_store.ROUTES:
         raise ValueError(f"route must be one of {list(_eppm_store.ROUTES)}")
     spw = None
@@ -12524,9 +12560,13 @@ def p6_eppm_pull(projects: list[str], include_baseline: bool = True,
     _cols_cache.clear()
     _schema_cache.clear()
     _refresh()
-    return {"server": p["name"], "pulled_at": m["pulled_at"], "seconds": m["seconds"], "route": m["route"],
-            "projects": m["projects"], "rows": m["rows"], "warnings": m["warnings"],
-            "next": "Every tool now reads the working copy. Edits and the push to the server come in a later version."}
+    out = {"server": p["name"], "pulled_at": m["pulled_at"], "seconds": m["seconds"], "route": m["route"],
+           "projects": m["projects"], "rows": m["rows"], "warnings": m["warnings"],
+           "next": "Every tool now reads the working copy. Edits change the copy only (p6_eppm_status lists them); "
+                   "the push to the server comes in a later version."}
+    if waiting:
+        out["discarded_changes"] = len(waiting)
+    return out
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
@@ -12542,6 +12582,10 @@ def p6_eppm_status(check_server: bool = True) -> dict:
         return out
     out.update(working_copy=_eppm_store.store_path(p["name"]), pulled_at=m["pulled_at"], route=m["route"],
                projects=m["projects"], rows=m["rows"], warnings=m["warnings"])
+    from p6mcp.eppm import pending
+    changes = _eppm_pending()
+    out["pending"] = {"count": len(changes), "by_table": pending.summary(changes), "changes": changes[:50],
+                      "truncated": len(changes) > 50}
     if check_server and m.get("server_stamp"):
         from p6mcp.eppm import rest
         stamp = m["server_stamp"].replace("T", " ")

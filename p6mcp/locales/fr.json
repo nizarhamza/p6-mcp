@@ -306,7 +306,7 @@
   "eppm.result.sql_driver": "SQL : le pilote {driver} n'est pas installé : cliquez sur Installer le pilote SQL (REST fonctionne en attendant).",
   "eppm.result.sql_failed": "SQL : {err}",
   "app.no_eppm": "Aucun serveur P6 EPPM n'est encore testé et utilisé : ajoutez-en un dans la page Base de données.",
-  "tools.allow.eppm": "Les modifications sur un serveur P6 EPPM viendront avec la copie de travail et l'envoi (version ultérieure).",
+  "tools.allow.eppm": "Avec un serveur P6 EPPM, les modifications changent la copie de travail locale seulement : rien n'atteint le serveur sans un envoi que vous confirmez.",
   "tools.allow.xer": "Le mode XER seul est en lecture seule",
   "nav.logs": "Journaux et mises à jour",
   "nav.about": "À propos",

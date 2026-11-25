@@ -288,6 +288,17 @@ push and schedule. `INSTRUCTIONS` (ASCII, under 1 KB) gets one line on pull, edi
    baseline finish, 36 working days of variance, planned units 54.5059 %, SPI 0.8473) in under 1 s. A pull by
    object reads alone (a server without the XER export) is not built: the export exists on every release this
    product targets.
+   Milestone 4 done (local edits, `p6mcp/eppm/pending.py`): in P6 EPPM mode the edits the push supports
+   (`server.EPPM_EDIT_TOOLS`: activity, relationship, assignment and UDF edits, local backup and restore) write
+   the working copy through the usual two-step flow, with no schema gate and no PM.exe check; the others are
+   refused (`p6_delete_activity` per D5). The working copy is named `eppm_<profile>.db` so the edit log keeps
+   servers apart; NEXTKEY gives new relationships ids from `LOCAL_ID_BASE` (2,000,000,000). Pending changes =
+   the log entries since the pull (`pulled_ts`, to the millisecond), not undone, not pushed, netted per object
+   and field (`pending.net`: create, update, delete; a field back to its pulled value, a link created then
+   deleted, a UDF set then cleared where none was pulled all drop out; assignment rollups `TASK.*` left out;
+   `refs` keep the ids a creation needs). `p6_eppm_status` lists them; `p6_eppm_pull` refuses over them unless
+   `discard_pending=True` (so the tool is marked destructive). Checked on the test server: an edit and a new link
+   on DEMO-SS225 are pending locally while the server keeps its values.
 2. SQL pull, working copy, read tools on it, `p6_eppm_projects`, `p6_eppm_status`.
 3. REST pull (calendar rebuild, schedule options).
 4. Local writes on the working copy, pending changes in `p6_eppm_status`.

@@ -28,8 +28,12 @@ from typing import Any, Callable, Iterable, Optional
 from p6mcp import config
 from p6mcp.eppm import sql as _sql
 
-STORE_FILE, MANIFEST_FILE = "working.db", "pull.json"
-STORE_VERSION = 1
+MANIFEST_FILE = "pull.json"
+STORE_VERSION = 2  # 2: the file is named after the profile (the edit log keys its entries by file name)
+# Rows created locally (a new relationship) get ids from here up, above every server ObjectId: the push sends them
+# as creations and maps them to the ObjectIds the server returns. Seeded in NEXTKEY for each LOCAL_KEYS table.
+LOCAL_ID_BASE = 2_000_000_000
+LOCAL_KEYS = (("TASKPRED", "task_pred_id"),)
 BATCH = 1000
 
 # (table, WHERE clause with {S} = the pulled project ids, optional table)
@@ -92,7 +96,9 @@ def store_dir(profile_name: str) -> str:
 
 
 def store_path(profile_name: str) -> str:
-    return os.path.join(store_dir(profile_name), STORE_FILE)
+    """eppm_<profile>.db: a name of its own, so the edit log (one folder, entries keyed by file name) keeps the
+    servers apart."""
+    return os.path.join(store_dir(profile_name), f"eppm_{_safe(profile_name)}.db")
 
 
 def read_manifest(profile_name: str) -> Optional[dict]:
@@ -236,6 +242,7 @@ def _write(profile: dict, tmp: str, route: str, started: datetime, listed: list,
     stamp = max((str(p.get("LastUpdateDate") or "") for p in listed if int(p["ObjectId"]) in oids), default="")
     manifest = {"store_version": STORE_VERSION, "server": profile["base_url"], "profile": profile["name"],
                 "route": route, "pulled_at": started.isoformat(timespec="seconds"),
+                "pulled_ts": started.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],  # edit log precision (pending changes)
                 "seconds": round((datetime.now() - started).total_seconds(), 2),
                 "server_stamp": stamp[:19], "projects": projects, "rows": counts, "warnings": warnings}
     os.replace(tmp, store_path(profile["name"]))
@@ -414,6 +421,11 @@ def _finish(out: sqlite3.Connection, profile: dict, projects: list[dict], sched_
     for t, c in INDEXES:
         if t in have:
             out.execute(f"CREATE INDEX IF NOT EXISTS ix_{t}_{c} ON {t} ({c})")
+    for t, c in LOCAL_KEYS:  # local ids start above the server's (the server's own counters are not ours to use)
+        key = f"{t}_{c}"
+        if out.execute("UPDATE NEXTKEY SET key_seq_num = ? WHERE lower(key_name) = lower(?)",
+                       (LOCAL_ID_BASE, key)).rowcount == 0:
+            out.execute("INSERT INTO NEXTKEY (key_name, key_seq_num) VALUES (?, ?)", (key, LOCAL_ID_BASE))
     s = server_module
     if s is None:
         from p6mcp import server as s
