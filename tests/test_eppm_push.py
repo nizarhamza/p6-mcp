@@ -63,6 +63,11 @@ def make_handler(db):
     con.close()
     state = live_objects(db)
     seq = {"n": 900000}
+    clock = {"n": 0}
+
+    def tick() -> str:  # LastUpdateDate the server stamps on what it writes (after the pull stamp, server clock)
+        clock["n"] += 1
+        return f"2026-01-07T09:00:{clock['n']:02d}-08:00"
 
     class H(BaseHTTPRequestHandler):
         live = state
@@ -104,6 +109,7 @@ def make_handler(db):
                 H.job_polls = 0
                 return self._send(201, [{"JobId": "1:7", "JobStatus": "Pending"}])
             if u.path.endswith("/job/readJobLog"):
+                self._body()  # read the request body first: an unread body can reset the connection on Windows
                 return self._send(201, [{"JobLog": "Primavera P6 Scheduling Log\nStatistics\n  Number of Activities: "
                                                    "7\nErrors\n  Activities that have invalid relationship loops\n"
                                                    "    none\nScheduling Results\n  Earliest Data Date: January-05-2026"
@@ -119,6 +125,7 @@ def make_handler(db):
                 seq["n"] += 1
                 o = {k: str(v) for k, v in o.items()}
                 o["ObjectId"] = str(seq["n"])
+                o["LastUpdateDate"] = tick()
                 H.live[entity][o["ObjectId"]] = o
                 ids.append(o["ObjectId"])
             return self._send(201, ids)
@@ -130,7 +137,7 @@ def make_handler(db):
             if ("PUT", entity) in H.fail_on:
                 return self._send(500, {"message": "server error"})
             for o in body:
-                H.live[entity][str(o["ObjectId"])].update({k: str(v) for k, v in o.items()})
+                H.live[entity][str(o["ObjectId"])].update({k: str(v) for k, v in o.items()}, LastUpdateDate=tick())
             return self._send(200, True)
 
         def do_DELETE(self):
@@ -160,6 +167,9 @@ def make_handler(db):
             if entity in H.live:
                 cs = conds(filt)
                 rows = list(H.live[entity].values())
+                gt = re.search(r"LastUpdateDate:gt:'([^']+)'", filt)
+                if gt:
+                    rows = [r for r in rows if str(r.get("LastUpdateDate") or "").replace("T", " ")[:19] > gt[1]]
                 if " :and: " in filt:
                     rows = [r for r in rows if all(r.get(f) == v for f, v in cs)]
                 else:
@@ -244,6 +254,30 @@ def test_push_sends_the_changes_in_order_and_records_them(push_env):
     again = p6.call("p6_eppm_push")
     assert again["would_refuse"] and again["refuse_reasons"] == ["No pending change to push."]
     assert "confirmation_token" not in again
+
+
+def test_status_counts_own_pushes_apart_from_server_changes(push_env):
+    p6, H = push_env
+    wc = store.store_path("srv")
+    ids = dict(rows(wc, "SELECT task_code, task_id FROM TASK WHERE proj_id = 2"))
+    codes = [r[0] for r in rows(wc, "SELECT task_code FROM TASK WHERE proj_id = 2 ORDER BY task_id")]
+    a, b, c = codes[0], codes[1], codes[-1]
+    st = p6.call("p6_eppm_status")["changed_on_server"]
+    assert st["activities"] == {"DEMO-A": 0} and st["pushed_by_you"] == {"DEMO-A": 0}
+    assert st["since"] == p6.call("p6_eppm_status", check_server=False)["pulled_at"]  # this PC's clock
+    assert st["since_server_clock"] == "2026-01-06 10:00:00"
+    p6.apply("p6_update_activity", project="DEMO-A", task_code=a, remaining_duration_days=9)
+    p6.apply("p6_add_relationship", project="DEMO-A", predecessor_code=a, successor_code=c, rel_type="SS")
+    _dry, res = push(p6)
+    assert res["applied"]
+    # the push changed activity a on the server: that is the user's own change, not someone else's
+    st = p6.call("p6_eppm_status")["changed_on_server"]
+    assert st["activities"] == {"DEMO-A": 0} and st["pushed_by_you"] == {"DEMO-A": 1}
+    # someone edits b, then a again, in P6 EPPM: both count as server changes
+    H.live["activity"][str(ids[b])]["LastUpdateDate"] = "2026-01-07T11:00:00-08:00"
+    H.live["activity"][str(ids[a])]["LastUpdateDate"] = "2026-01-07T11:00:01-08:00"
+    st = p6.call("p6_eppm_status")["changed_on_server"]
+    assert st["activities"] == {"DEMO-A": 2} and st["pushed_by_you"] == {"DEMO-A": 0}
 
 
 def test_conflicts_refuse_the_push(push_env):

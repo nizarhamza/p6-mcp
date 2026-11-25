@@ -41,6 +41,13 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   replaces the files (an update with Claude Desktop open stopped with "DeleteFile failed; code 5"), and closes
   any other program holding a file. Restart your MCP clients after an update, as before.
 - Setup no longer shows the large logo at the top right of its pages.
+- `p6_eppm_status` no longer reports your own pushes as changes made by someone else on the server: they are
+  counted apart in `pushed_by_you`. `changed_on_server.since` is now the pull time on this PC's clock, and
+  `since_server_clock` the server time the comparison starts from.
+- In P6 EPPM mode, the server instructions no longer speak of P6 Professional (standalone SQLite, "P6 must be
+  closed", new activities through an XER import), `p6_diagnose` names the schema "P6 EPPM working copy"
+  instead of an unknown, unwritable P6 schema, a backup restore no longer asks to close P6, and the
+  update-import-safely command is not offered (the working copy refuses `p6_import_xer`).
 
 ### Not in this version
 

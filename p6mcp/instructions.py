@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 HEADER = "Primavera P6 Professional database (standalone SQLite)."
+EPPM_HEADER = "Primavera P6 EPPM server, read through a local working copy of the pulled projects."
 CUSTOM_HEADER = "User instructions (follow them in every answer):"
 MAX_CUSTOM = 30          # custom lines kept in the config
 MAX_CUSTOM_CHARS = 1000  # characters of one custom line
@@ -22,26 +23,32 @@ class Line:
     id: str
     text: str
     locked: bool = False  # always sent: the two-step write rule protects the database
+    eppm: Optional[str] = None  # the text sent instead on a P6 EPPM server (P6 Professional is not involved)
 
 
 BUILTIN: tuple[Line, ...] = (
     Line("names", "Name projects by Project ID (p6_list_projects) and activities by Activity ID."),
     Line("days", "Durations and float are in days of each activity's calendar."),
     Line("lag", "Lag days use the project's lag calendar option (see lag_rule)."),
-    Line("f9", "Dates and float come from the last P6 schedule run (F9); edits do not reschedule."),
+    Line("f9", "Dates and float come from the last P6 schedule run (F9); edits do not reschedule.",
+         eppm="Dates and float come from the last schedule run on the server; edits do not reschedule."),
     Line("writes", "Writes take two calls: dry_run=true (default) returns the plan and a confirmation_token; after "
                    "the user's explicit yes, repeat the call with dry_run=false and that token (and confirmation_text "
-                   "if asked). P6 must be closed. Then ask the user to press F9 in P6.", locked=True),
+                   "if asked). P6 must be closed. Then ask the user to press F9 in P6.", locked=True,
+         eppm="Writes take two calls: dry_run=true (default) returns the plan and a confirmation_token; after "
+              "the user's explicit yes, repeat the call with dry_run=false and that token (and confirmation_text "
+              "if asked)."),
     Line("diagnose", "p6_diagnose explains configuration errors."),
-    Line("planned", "Planned dates are never written; new activities only come from p6_import_xer."),
+    Line("planned", "Planned dates are never written; new activities only come from p6_import_xer.",
+         eppm="Planned dates are never written; new activities are added in P6 EPPM, then pulled."),
     Line("paging", "List tools return {total, offset, returned, next_offset, rows}: pass offset=next_offset for the "
                    "next page (null = last). fields= trims activity rows."),
     Line("overview", "Overview first: p6_project_summary."),
     Line("sql", "Use p6_sql_select only when no other tool fits."),
 )
 BY_ID = {ln.id: ln for ln in BUILTIN}
-# Added only when the data source is a P6 EPPM server (3.0.0): the F9 and P6-closed lines above speak of P6
-# Professional, and the skills say "press F9 in P6".
+# Added only when the data source is a P6 EPPM server (3.0.0), where the header and the lines with an eppm text
+# change too: P6 Professional is neither open nor run there, and the skills say "press F9 in P6".
 EPPM_LINE = ("P6 EPPM server mode: tools read a local working copy (p6_eppm_pull) and edits change only that copy. "
              "Send them with p6_eppm_push after the user's yes. Where a tool or skill says to press F9 in P6, use "
              "p6_eppm_schedule instead, with the user's yes.")
@@ -63,8 +70,10 @@ def custom_lines(cfg: Optional[dict]) -> list[str]:
 
 def build(cfg: Optional[dict] = None) -> str:
     """The instructions sent to clients under these settings (None: the built-in text)."""
-    lines = [HEADER] + ["- " + ln.text for ln in BUILTIN if enabled(ln, cfg)]
-    if (cfg or {}).get("data_source") == "eppm":
+    eppm = (cfg or {}).get("data_source") == "eppm"
+    lines = [EPPM_HEADER if eppm else HEADER] + ["- " + (ln.eppm if eppm and ln.eppm else ln.text)
+                                                  for ln in BUILTIN if enabled(ln, cfg)]
+    if eppm:
         lines.append("- " + EPPM_LINE)
     mine = custom_lines(cfg)
     if mine:

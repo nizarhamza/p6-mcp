@@ -113,12 +113,17 @@ def read_manifest(profile_name: str) -> Optional[dict]:
     return m
 
 
-def update_manifest(profile_name: str, pushed_entries: Iterable[str] = (), push: Optional[dict] = None) -> dict:
-    """Record a push in pull.json: the edit log entries it sent (no longer pending) and a short summary."""
+def update_manifest(profile_name: str, pushed_entries: Iterable[str] = (), push: Optional[dict] = None,
+                    pushed_activities: Optional[dict] = None) -> dict:
+    """Record a push in pull.json: the edit log entries it sent (no longer pending), a short summary and
+    pushed_activities = {activity ObjectId: its server LastUpdateDate read just after the push}, so that
+    p6_eppm_status does not report the user's own push as a change made by someone else on the server."""
     m = read_manifest(profile_name)
     if m is None:
         raise PullError("No working copy to update.")
     m["pushed_entries"] = list(dict.fromkeys(list(m.get("pushed_entries", [])) + list(pushed_entries)))
+    if pushed_activities:
+        m["pushed_activities"] = {**m.get("pushed_activities", {}), **pushed_activities}
     if push:
         m["pushes"] = (m.get("pushes", []) + [push])[-20:]
     path = os.path.join(store_dir(profile_name), MANIFEST_FILE)
