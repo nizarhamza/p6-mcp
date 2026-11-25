@@ -3,6 +3,21 @@
 All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- P6 EPPM sign-in on a locked account: P6 EPPM locks an account after 5 failed sign-ins in a row, and its REST
+  sign-in then answers HTTP 500 "Request failed" even with the right password. The message now says the account
+  is probably locked and that a P6 administrator must unlock it. When the server has a read-only SQL account, the
+  user's count of failed sign-ins (`USERS.failed_login_attempts_cnt`) confirms the lock or rules it out.
+- Settings (Database, P6 EPPM server) warns that each failed connection test counts toward P6's lockout.
+
+### Changed
+
+- Build workflows use `actions/checkout@v7`, `actions/setup-python@v7`, `actions/upload-artifact@v7` and
+  `azure/login@v3` (Node 24; the Node 20 versions were deprecated).
+
 ## [3.1.0] - 2026-11-25
 
 ### Added

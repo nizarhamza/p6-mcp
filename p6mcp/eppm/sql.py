@@ -55,6 +55,29 @@ def connect(sql: dict, password: str, module: Any = None):
         raise SqlError(f"SQL connection failed: {' '.join(text.split())[:300]}") from e
 
 
+def failed_sign_ins(sql: dict, password: str, user: str, module: Any = None) -> Optional[int]:
+    """USERS.failed_login_attempts_cnt of a P6 user (user name, case ignored): the count P6 EPPM locks an account
+    on. None when it cannot be read (no driver, no right on USERS, no such user). Never raises."""
+    try:
+        con = connect(sql, password, module)
+    except Exception:  # noqa: BLE001  (SqlError, or a profile without a driver key)
+        return None
+    try:
+        cur = con.cursor()
+        mark = ":1" if sql.get("driver") == "oracle" else "%s"
+        cur.execute(f"SELECT failed_login_attempts_cnt FROM {table(sql, 'USERS')} "
+                    f"WHERE UPPER(user_name) = UPPER({mark})", (user,))
+        rows = cur.fetchall()
+        return int(rows[0][0] or 0) if rows else None
+    except Exception:  # noqa: BLE001  (each driver raises its own classes)
+        return None
+    finally:
+        try:
+            con.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def test_connection(sql: dict, password: str, module_factory: Optional[Callable[[str], Any]] = None) -> dict:
     """Connect, read the column list of TASK and count PROJECT rows. Never raises."""
     t0 = time.perf_counter()

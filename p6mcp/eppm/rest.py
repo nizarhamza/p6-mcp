@@ -27,6 +27,23 @@ from typing import Any, Callable, Optional
 
 DEFAULT_CONTEXT = "p6ws"
 TOKEN_LIFETIME_S = 3600
+# P6 EPPM locks an account after this many failed sign-ins in a row (USERS.failed_login_attempts_cnt, the default,
+# measured on 25.12); a locked account's /login then answers HTTP 500 "Request failed" even with the right password
+LOCK_AFTER = 5
+LOCKED_HINT = (" P6 EPPM answers this way when the account is locked: it locks an account after {n} failed sign-ins in "
+               "a row (the default). Ask your P6 administrator to unlock it, and check the password before you try "
+               "again: every failed try counts toward the lockout.")
+
+
+def lock_finding(failed: Optional[int], user: str) -> str:
+    """What USERS.failed_login_attempts_cnt says about a refused sign-in ('' when it could not be read)."""
+    if failed is None:
+        return ""
+    if failed >= LOCK_AFTER:
+        return (f" The SQL account confirms it: P6 counts {failed} failed sign-ins in a row for {user}, so the account "
+                "is locked.")
+    return (f" The SQL account shows {failed} failed sign-in(s) in a row for {user}, under P6's lockout limit "
+            f"({LOCK_AFTER} by default): the account is probably not locked, and the P6 server log may tell the cause.")
 
 
 class EppmError(ValueError):
@@ -52,7 +69,10 @@ class Session:
 
     def __init__(self, base_url: str, user: str, password: str, database: str = "", auth: str = "auto",
                  context: str = DEFAULT_CONTEXT, ca_bundle: Optional[str] = None, timeout_s: int = 120,
-                 opener: Optional[urllib.request.OpenerDirector] = None):
+                 opener: Optional[urllib.request.OpenerDirector] = None,
+                 lock_check: Optional[Callable[[], str]] = None):
+        """lock_check: called when a sign-in looks refused for a locked account; returns a sentence to add (the
+        read-only SQL account's count of failed sign-ins, eppm.lock_check) or ''. It must never raise."""
         if not (user or "").strip():
             raise EppmError("No user name: enter the P6 user of this server.")
         if not password:
@@ -69,6 +89,7 @@ class Session:
         self.bearer: Optional[str] = None
         self.bearer_until = 0.0
         self.signed_in = False
+        self.lock_check = lock_check
         self.calls: list[dict] = []  # name, method, status, ms (no URL query, no body)
 
     # -- transport
@@ -157,7 +178,16 @@ class Session:
             return EppmError("OAuth sign-in is not set up on this server (it is for P6 EPPM on Oracle Cloud). For a "
                              "server on premises, set Sign-in to Automatic or Session sign-in. The server said: "
                              + self._detail(raw))
-        return EppmError(f"Sign-in failed (HTTP {status}): {self._detail(raw)}")
+        detail = self._detail(raw)
+        msg = f"Sign-in failed (HTTP {status}): {detail}"
+        if self.mode == "login" and status == 500 and "request failed" in detail.lower():
+            msg += LOCKED_HINT.format(n=LOCK_AFTER)
+            if self.lock_check:
+                try:
+                    msg += self.lock_check() or ""
+                except Exception:  # noqa: BLE001  (the check is a bonus: the sign-in error stays the message)
+                    pass
+        return EppmError(msg)
 
     def close(self) -> None:
         if self.signed_in and self.mode == "login":
@@ -206,7 +236,8 @@ class Session:
 
 
 def test_connection(profile: dict, password: str,
-                    opener_factory: Optional[Callable[[], urllib.request.OpenerDirector]] = None) -> dict:
+                    opener_factory: Optional[Callable[[], urllib.request.OpenerDirector]] = None,
+                    lock_check: Optional[Callable[[], str]] = None) -> dict:
     """Sign in, count the projects the user can read, sign out. Never raises: {ok, ...} or {ok: False, error}."""
     t0 = time.perf_counter()
     res: dict = {"ok": False, "auth": auth_mode(profile.get("base_url", ""), profile.get("auth", "auto"))}
@@ -214,7 +245,7 @@ def test_connection(profile: dict, password: str,
         s = Session(profile["base_url"], profile["user"], password, profile.get("database") or "",
                     profile.get("auth", "auto"), profile.get("context") or DEFAULT_CONTEXT,
                     profile.get("ca_bundle") or None, int(profile.get("timeout_s", 120)),
-                    opener=opener_factory() if opener_factory else None)
+                    opener=opener_factory() if opener_factory else None, lock_check=lock_check)
         with s:
             rows = s.read("project", ["ObjectId", "Id"])
             res.update(ok=True, projects=len(rows))

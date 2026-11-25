@@ -41,6 +41,7 @@ class Fake(BaseHTTPRequestHandler):
     sessions: set = set()
     seen: list = []
     oauth_broken = False
+    locked = False
 
     def log_message(self, *a):  # quiet
         pass
@@ -62,6 +63,8 @@ class Fake(BaseHTTPRequestHandler):
         u = urlsplit(self.path)
         Fake.seen.append(("POST", u.path, dict(self.headers)))
         if u.path == "/p6ws/restapi/login":
+            if Fake.locked:  # what P6 EPPM 25.12 answered for a locked account, even with the right password
+                return self._send(500, {"message": "Request failed"})
             want = base64.b64encode(f"{USER}:{PW}".encode()).decode()
             if self.headers.get("authToken") != want or parse_qs(u.query).get("DatabaseName") != [DB]:
                 return self._send(401, {"message": "Login failed"})
@@ -100,7 +103,7 @@ class Fake(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def server():
-    Fake.sessions, Fake.seen, Fake.oauth_broken = set(), [], False
+    Fake.sessions, Fake.seen, Fake.oauth_broken, Fake.locked = set(), [], False, False
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
@@ -293,3 +296,71 @@ def test_profile_test_combines_rest_and_sql(server):
     assert res["digest"] == eppm.digest(p)
     res = eppm.test_profile(profile(base_url=server), None)
     assert not res["ok"] and res["sql"] is None
+
+
+class UsersDriver:
+    """A SQL driver whose USERS table holds one P6 user with this many failed sign-ins (None: no such row)."""
+
+    def __init__(self, failed=None, fail=False):
+        self.failed, self.fail, self.queries = failed, fail, []
+
+    def connect(self, **kw):
+        if self.fail:
+            raise RuntimeError("Login failed")
+        drv = self
+
+        class Cur:
+            description = [("task_id",)]
+
+            def execute(self, q, params=()):
+                drv.queries.append((q, params))
+                if "USERS" not in q:  # the SQL test of test_profile
+                    self._rows = [(0,)]
+                else:
+                    self._rows = [] if drv.failed is None else [(drv.failed,)]
+
+            def fetchall(self):
+                return self._rows
+
+        class Con:
+            def cursor(self):
+                return Cur()
+
+            def close(self):
+                pass
+        return Con()
+
+
+def test_locked_account_sign_in_says_so(server):
+    Fake.locked = True
+    err = rest.test_connection(profile(base_url=server), PW)["error"]
+    assert "HTTP 500" in err and "Request failed" in err and "locked" in err and "5 failed sign-ins" in err
+    assert "administrator" in err and PW not in err
+    # with the read-only SQL account, the count of failed sign-ins confirms it or rules it out
+    drv = UsersDriver(failed=6)
+    err = eppm.test_profile(profile(base_url=server, sql=SQL), PW, "pw", sql_module=lambda d: drv)["rest"]["error"]
+    assert "confirms it" in err and "6 failed sign-ins" in err and USER in err
+    q, params = next(x for x in drv.queries if "USERS" in x[0])
+    assert "dbo.USERS" in q and "failed_login_attempts_cnt" in q and "%s" in q and params == (USER,)
+    err = eppm.test_profile(profile(base_url=server, sql=SQL), PW, "pw",
+                            sql_module=lambda d: UsersDriver(failed=2))["rest"]["error"]
+    assert "probably not locked" in err and "2 failed" in err
+    for d in (UsersDriver(failed=None), UsersDriver(fail=True)):  # nothing readable: only the hint
+        res = eppm.test_profile(profile(base_url=server, sql=SQL), PW, "pw", sql_module=lambda _d, d=d: d)
+        err = res["rest"]["error"]
+        assert "locked" in err and "SQL account" not in err
+    # a plain refusal (401) is not a lockout
+    Fake.locked = False
+    err = rest.test_connection(profile(base_url=server), "wrong")["error"]
+    assert "Sign-in refused" in err and "locked" not in err
+
+
+def test_failed_sign_ins_query_and_finding():
+    drv = UsersDriver(failed=3)
+    assert sql.failed_sign_ins(dict(SQL, driver="oracle", schema="ADMUSER"), "pw", "Admin", drv) == 3
+    q, params = drv.queries[0]
+    assert "ADMUSER.USERS" in q and ":1" in q and "UPPER(user_name)" in q and params == ("Admin",)
+    assert sql.failed_sign_ins(SQL, "pw", "x", UsersDriver(fail=True)) is None
+    assert rest.lock_finding(None, "x") == ""
+    assert "is locked" in rest.lock_finding(rest.LOCK_AFTER, "x")
+    assert eppm.lock_check(profile()) is None  # no SQL account: no check

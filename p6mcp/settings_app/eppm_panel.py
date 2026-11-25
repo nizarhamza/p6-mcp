@@ -109,6 +109,7 @@ class EppmPanel(QWidget):
         sform.addRow(tr("eppm.sql.password"), self.spw_edit)
         dl.addWidget(self.sql_box)
 
+        dl.addWidget(note(tr("eppm.lockout")))  # a failed test counts toward P6's account lockout
         trow = QHBoxLayout()
         self.test_btn = QPushButton(tr("eppm.test"))
         self.test_btn.clicked.connect(self.run_test)

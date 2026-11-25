@@ -292,6 +292,7 @@
   "eppm.sql.password": "SQL password",
   "eppm.test": "Test connection",
   "eppm.testing": "Testing...",
+  "eppm.lockout": "Each failed sign-in, a test included, counts toward P6's account lockout (5 in a row by default, then the account is locked until a P6 administrator unlocks it): check the user name and password before you test again.",
   "eppm.use": "Use this server",
   "eppm.status.active": "in use",
   "eppm.status.confirmed": "tested",
