@@ -37,6 +37,10 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 - Config schema 4 (`data_source: eppm`, `eppm_profiles`, `eppm_active`); an older version refuses the file
   rather than misread it. Changing the data source now asks for a restart of the MCP client, since the
   instructions depend on it.
+- Setup stops the MCP for Primavera P6 servers your MCP clients started from the installation folder before it
+  replaces the files (an update with Claude Desktop open stopped with "DeleteFile failed; code 5"), and closes
+  any other program holding a file. Restart your MCP clients after an update, as before.
+- Setup no longer shows the large logo at the top right of its pages.
 
 ### Not in this version
 

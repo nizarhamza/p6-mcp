@@ -466,8 +466,8 @@ def load() -> Settings:
                        "Open MCP for Primavera P6 Settings (Database) and click Test connection.")
         else:  # the working copy of a pulled project becomes db_path (p6mcp.eppm, milestone 2)
             eppm, db_name = prof["name"], prof["name"]
-            problem = (f"P6 EPPM server {prof['name']!r}: no project pulled yet. Pull a project first "
-                       "(p6_eppm_pull, coming in a later version).")
+            problem = (f"P6 EPPM server {prof['name']!r}: no project pulled yet. Pull one with p6_eppm_pull "
+                       "(p6_eppm_projects lists the projects you can read).")
     elif not err:
         active = cfg.get("active_database")
         entry = next((d for d in cfg["databases"] if d.get("name") == active), None)

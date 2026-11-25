@@ -524,7 +524,7 @@ def _gated(fn: Callable) -> Callable:
                     extra = f", confirmation_text=\"{res['confirmation_text_required']}\""
                 res["next"] = (f"Show this plan to the user. Only after their explicit yes, call {name} again with the "
                                f"same arguments plus dry_run=false, confirmation_token=\"{g.token}\"{extra}."
-                               + ("" if settings_only else " P6 must be closed."))
+                               + ("" if settings_only or SETTINGS.eppm else " P6 must be closed."))
             return res
         if destructive:
             want = _confirm_text(name, params)
@@ -8311,7 +8311,9 @@ def p6_diagnose() -> dict:
                             "pulled_at": m.get("pulled_at"), "route": m.get("route"),
                             "projects": [p["project_id"] for p in m.get("projects", [])],
                             "warnings": m.get("warnings", [])[:10],
-                            "note": "Read only in this version. Pull with p6_eppm_pull; see p6_eppm_status."}
+                            "note": "Tools read the working copy (p6_eppm_pull). Edits change only that copy: "
+                                    "p6_eppm_push sends them, p6_eppm_schedule schedules on the server; "
+                                    "p6_eppm_status lists the pending changes."}
     if not DB_PATH:
         out["database_problem"] = st.db_problem or _config.NO_DB_MESSAGE
         return out
@@ -8350,7 +8352,8 @@ def _commit(con: sqlite3.Connection, plan: list[str], confirm: bool, projects: I
     if not confirm:
         con.rollback(); con.close()
         return {"dry_run": True, "would_do": plan,
-                "next": "Call again with confirm=True to apply (P6 must be closed)."}
+                "next": "Call again with confirm=True to apply"
+                        + (" (the local working copy only)." if SETTINGS.eppm else " (P6 must be closed).")}
     if mismatch:
         con.rollback(); con.close()
         return {"applied": False, "error": mismatch}
