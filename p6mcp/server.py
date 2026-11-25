@@ -12659,6 +12659,8 @@ def p6_eppm_status(check_server: bool = True) -> dict:
                 for x in m["projects"]:
                     rows = s.read("activity", ["ObjectId", "LastUpdateDate"],
                                   f"ProjectObjectId :eq: {int(x['object_id'])} :and: LastUpdateDate:gt:'{stamp}'")
+                    # the server keeps fractions of a second: the activity whose change is the stamp matches gt
+                    rows = [r for r in rows if _srv_time(r.get("LastUpdateDate")) > stamp]
                     own = [r for r in rows if str(int(r["ObjectId"])) in mine
                            and _srv_time(r.get("LastUpdateDate")) <= mine[str(int(r["ObjectId"]))]]
                     changed[x["project_id"]] = len(rows) - len(own)

@@ -147,8 +147,10 @@ def make_handler(db, xer: bytes = b"", baseline: str = ""):
                     want = set(re.findall(r"ObjectId :eq: (\d+)", filt))
                     rows = [r for r in rows if r["ObjectId"] in want]
                 return self._send(200, rows)
-            if entity == "activity":
-                return self._send(200, [{"ObjectId": "1"}])
+            if entity == "activity":  # one activity, changed on the server after the pull (11:00 > 10:00)
+                changed = "LastUpdateDate:gt:" in filt
+                return self._send(200, [{"ObjectId": "1", "LastUpdateDate": "2026-01-06T11:00:00-08:00" if changed
+                                         else "2026-01-06T09:00:00-08:00"}])
             return self._send(404, {"message": "no"})
     return H
 

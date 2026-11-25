@@ -254,13 +254,19 @@ def _server_info(sess, wanted: set[str], include_baseline: bool) -> tuple[list, 
     for p in projects:
         rows = sess.read("scheduleOptions", SCHED_FIELDS, f"ProjectObjectId :eq: {p['object_id']}")
         sched_rows[p["object_id"]] = rows[0] if rows else None
+        # the latest activity change, read before the copy: an activity edit does not change the project's
+        # LastUpdateDate, so that alone would start p6_eppm_status's comparison too early (an activity changed
+        # before the pull, already in the copy, counted as changed since; seen on P6 EPPM 25.12)
+        acts = sess.read("activity", ["ObjectId", "LastUpdateDate"], f"ProjectObjectId :eq: {p['object_id']}")
+        p["_stamp"] = max((str(a.get("LastUpdateDate") or "")[:19] for a in acts), default="")
     return listed, projects, sched_rows
 
 
 def _write(profile: dict, tmp: str, route: str, started: datetime, listed: list, projects: list[dict],
            counts: dict, warnings: list[str]) -> dict:
     oids = {p["object_id"] for p in projects}
-    stamp = max((str(p.get("LastUpdateDate") or "") for p in listed if int(p["ObjectId"]) in oids), default="")
+    stamp = max([str(p.get("LastUpdateDate") or "")[:19] for p in listed if int(p["ObjectId"]) in oids]
+                + [p.pop("_stamp", "") for p in projects], default="")
     manifest = {"store_version": STORE_VERSION, "server": profile["base_url"], "profile": profile["name"],
                 "route": route, "pulled_at": started.isoformat(timespec="seconds"),
                 "pulled_ts": started.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],  # edit log precision (pending changes)

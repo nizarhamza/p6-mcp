@@ -168,8 +168,9 @@ def make_handler(db):
                 cs = conds(filt)
                 rows = list(H.live[entity].values())
                 gt = re.search(r"LastUpdateDate:gt:'([^']+)'", filt)
-                if gt:
-                    rows = [r for r in rows if str(r.get("LastUpdateDate") or "").replace("T", " ")[:19] > gt[1]]
+                if gt:  # as P6 EPPM: the stored date has fractions of a second (.4), the filter whole seconds
+                    rows = [r for r in rows if str(r.get("LastUpdateDate") or "").replace("T", " ")[:19] + ".4"
+                            > gt[1]]
                 if " :and: " in filt:
                     rows = [r for r in rows if all(r.get(f) == v for f, v in cs)]
                 else:
@@ -278,6 +279,19 @@ def test_status_counts_own_pushes_apart_from_server_changes(push_env):
     H.live["activity"][str(ids[a])]["LastUpdateDate"] = "2026-01-07T11:00:01-08:00"
     st = p6.call("p6_eppm_status")["changed_on_server"]
     assert st["activities"] == {"DEMO-A": 2} and st["pushed_by_you"] == {"DEMO-A": 0}
+
+
+def test_status_starts_from_the_latest_activity_change_of_the_pull(push_env):
+    # an activity edit leaves the project's LastUpdateDate as it was (P6 EPPM 25.12): an activity changed before
+    # the pull, so already in the copy, must not count as changed since the pull
+    p6, H = push_env
+    first = next(iter(H.live["activity"].values()))
+    first["LastUpdateDate"] = "2026-01-06T12:00:00-08:00"  # after the project's 10:00
+    assert p6.call("p6_eppm_status")["changed_on_server"]["activities"] == {"DEMO-A": 1}  # after the old pull
+    p6.call("p6_eppm_pull", projects=["DEMO-A"])
+    st = p6.call("p6_eppm_status")["changed_on_server"]
+    assert st["activities"] == {"DEMO-A": 0} and st["since_server_clock"] == "2026-01-06 12:00:00"
+    assert "_stamp" not in p6.call("p6_eppm_status", check_server=False)["projects"][0]
 
 
 def test_conflicts_refuse_the_push(push_env):
