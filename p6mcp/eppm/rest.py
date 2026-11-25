@@ -14,8 +14,10 @@ the user that never contains the password.
 from __future__ import annotations
 
 import base64
+import html
 import http.cookiejar
 import json
+import re
 import ssl
 import time
 import urllib.error
@@ -104,6 +106,8 @@ class Session:
         return text[:300]
 
     def _detail(self, raw: bytes) -> str:
+        """The server's error as one line of plain text: JSON message, else the text of an HTML page (P6 answers
+        some errors with a page of headings and a Java stack trace)."""
         text = raw.decode("utf-8", "replace").strip()
         try:
             obj = json.loads(text)
@@ -111,6 +115,9 @@ class Session:
                 text = str(obj.get("message") or obj.get("error") or obj.get("detail") or text)
         except ValueError:
             pass
+        if "<" in text and ">" in text:
+            text = html.unescape(re.sub(r"<[^>]*>", " ", text))
+            text = re.split(r"(?i)\bstack\s*trace\b", text)[0]  # the Java stack is not for the user
         return self._clean(" ".join(text.split()))
 
     # -- sign in and out
@@ -146,6 +153,10 @@ class Session:
         if status == 404:
             return EppmError("The server answered 404: check the server address and the context (usually p6ws), "
                              "and that P6 EPPM Web Services is deployed.")
+        if self.mode == "oauth" and status >= 500:  # measured on an on-premises 25.12: IDCS not configured
+            return EppmError("OAuth sign-in is not set up on this server (it is for P6 EPPM on Oracle Cloud). For a "
+                             "server on premises, set Sign-in to Automatic or Session sign-in. The server said: "
+                             + self._detail(raw))
         return EppmError(f"Sign-in failed (HTTP {status}): {self._detail(raw)}")
 
     def close(self) -> None:

@@ -40,6 +40,7 @@ def profile(**kw):
 class Fake(BaseHTTPRequestHandler):
     sessions: set = set()
     seen: list = []
+    oauth_broken = False
 
     def log_message(self, *a):  # quiet
         pass
@@ -68,6 +69,16 @@ class Fake(BaseHTTPRequestHandler):
             self.sessions.add(sid)
             return self._send(200, {"message": "Login successful."}, {"Set-Cookie": f"JSESSIONID={sid}; Path=/p6ws"})
         if u.path == "/p6ws/oauth/token":
+            if Fake.oauth_broken:  # what an on-premises P6 EPPM 25.12 without IDCS answered
+                page = (b"<h2>Token Generation Failed</h2> <h3>Reason:Cannot invoke &quot;String.toCharArray()&quot; "
+                        b"because &quot;this.m_secret&quot; is null</h3> <h6>Stacktrace:</h6> <p>java.lang."
+                        b"NullPointerException at com.primavera.infr.idcs.IDCSServiceImpl.requestOAuthTo</p>")
+                self.send_response(500)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(page)))
+                self.end_headers()
+                self.wfile.write(page)
+                return
             want = base64.b64encode(f"{USER}:{PW}".encode()).decode()
             if self.headers.get("authToken") != want:
                 return self._send(401, {"message": "bad credentials"})
@@ -89,7 +100,7 @@ class Fake(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def server():
-    Fake.sessions, Fake.seen = set(), []
+    Fake.sessions, Fake.seen, Fake.oauth_broken = set(), [], False
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
@@ -131,6 +142,7 @@ def test_load_in_eppm_mode_reports_what_is_missing(clean_env):
                          encoding="utf-8")
     st = config.load()
     assert st.eppm == "test" and st.db_path == "" and "no project pulled" in st.db_problem
+    assert "later version" not in st.db_problem and "p6_eppm_pull" in st.db_problem
     assert st.allow_writes is True  # the setting holds: EPPM writes change the local working copy only
 
 
@@ -194,6 +206,13 @@ def test_oauth_bearer(server):
     assert Fake.seen[1][2].get("Authorization") == "Bearer tok-123"
     assert rest.auth_mode("https://abc.p6.oraclecloud.com", "auto") == "oauth"
     assert rest.auth_mode("https://p6.example.com", "auto") == "login"
+
+
+def test_oauth_on_a_server_without_it_says_what_to_do(server):
+    Fake.oauth_broken = True
+    err = rest.test_connection(profile(base_url=server, auth="oauth"), PW)["error"]
+    assert "OAuth sign-in is not set up on this server" in err and "Session sign-in" in err
+    assert "<" not in err and "java.lang" not in err and "Token Generation Failed" in err  # plain text, no stack
 
 
 def test_refusals_never_show_the_password(server):

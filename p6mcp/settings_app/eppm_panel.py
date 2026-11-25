@@ -114,11 +114,13 @@ class EppmPanel(QWidget):
         self.test_btn.clicked.connect(self.run_test)
         self.state = QLabel()
         self.state.setWordWrap(True)
+        self.state.setTextFormat(Qt.TextFormat.PlainText)
         trow.addWidget(self.test_btn)
         trow.addWidget(self.state, 1)
         dl.addLayout(trow)
         self.result = QLabel()
         self.result.setWordWrap(True)
+        self.result.setTextFormat(Qt.TextFormat.PlainText)  # server messages are never rendered as HTML
         self.result.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         dl.addWidget(self.result)
         urow = QHBoxLayout()

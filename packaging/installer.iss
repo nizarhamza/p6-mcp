@@ -32,7 +32,7 @@ OutputDir=dist
 OutputBaseFilename=P6MCP-Setup-{#AppVersion}
 SetupIconFile=..\assets\brand\ico\p6mcp.ico
 UninstallDisplayIcon={app}\p6mcp.ico
-WizardSmallImageFile=..\assets\brand\png\p6mcp-icon-256.png
+; no image at the top right of the inner pages (removed in 3.0.0 at the user's request): hidden in InitializeWizard
 UninstallDisplayName=MCP for Primavera P6
 Compression=lzma2/max
 SolidCompression=yes
@@ -41,7 +41,8 @@ AppMutex=P6MCP-Tray
 ; held while setup runs: both programs exit at once when they see it (runtime.setup_running), so a start
 ; during an update cannot lock a file setup is replacing
 SetupMutex=P6MCP-Setup
-CloseApplications=yes
+; force: a process Windows cannot close politely (a console program such as p6mcp-server.exe) is ended too
+CloseApplications=force
 RestartApplications=no
 #ifexist "..\LICENSE"
 LicenseFile=..\LICENSE
@@ -135,4 +136,24 @@ end;
 procedure InitializeWizard;
 begin
   WizardForm.WelcomeLabel2.Caption := WizardForm.WelcomeLabel2.Caption + #13#10#13#10 + CustomMessage('Privacy');
+  { no image at the top right of the inner pages (Inno would show its own default one): the titles take its width }
+  WizardForm.WizardSmallBitmapImage.Visible := False;
+  WizardForm.PageNameLabel.Width := WizardForm.MainPanel.ClientWidth - WizardForm.PageNameLabel.Left - ScaleX(16);
+  WizardForm.PageDescriptionLabel.Width := WizardForm.MainPanel.ClientWidth - WizardForm.PageDescriptionLabel.Left
+                                           - ScaleX(16);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Code: Integer;
+begin
+  { MCP clients (Claude Desktop, Cursor, VS Code...) start p6mcp-server.exe themselves: the tray app's mutex does
+    not cover those servers, and a running one locks the files setup replaces ("DeleteFile failed; code 5", seen
+    on 3.0.0). Stop the ones run from this installation folder only; the clients start the new one on restart. }
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -NonInteractive -Command "Get-Process -Name p6mcp-server -ErrorAction SilentlyContinue | ' +
+       'Where-Object { $_.Path -like ''' + ExpandConstant('{app}') + '\*'' } | Stop-Process -Force"',
+       '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Sleep(500);  { let Windows release the files }
+  Result := '';
 end;

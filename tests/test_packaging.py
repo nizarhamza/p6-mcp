@@ -116,3 +116,6 @@ def test_installer_script_is_consistent():
     assert f"AppMutex={MUTEX}" in text and "PrivilegesRequired=lowest" in text
     from p6mcp.runtime import SETUP_MUTEX
     assert f"SetupMutex={SETUP_MUTEX}" in text
+    # servers started by MCP clients lock the files setup replaces: setup stops the ones of this installation
+    assert "CloseApplications=force" in text and "function PrepareToInstall" in text
+    assert "Get-Process -Name p6mcp-server" in text and "ExpandConstant('{app}')" in text
