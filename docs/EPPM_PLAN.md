@@ -278,6 +278,16 @@ push and schedule. `INSTRUCTIONS` (ASCII, under 1 KB) gets one line on pull, edi
    (`%LOCALAPPDATA%\P6MCP\eppm\<profile>\working.db`, every pulled project in it, rebuilt as a whole by each
    pull) instead of one file per project, so the tools that compare projects keep working; and relationships to
    projects that were not pulled are left out with a warning (pull both projects to keep them).
+   Milestone 3 done (REST pull, `store.pull_rest`, `route` auto / sql / rest on `p6_eppm_pull`): the projects
+   come from one XER export (`/export/exportXERProject`, ids = ObjectIds) built by `xerstore.build`, then the
+   REST schedule options. Measured on the test server: P6 EPPM 25.12 refuses to export a baseline ("Could not
+   load Project with id"), but reads its objects, so each baseline is rebuilt from REST object reads
+   (`p6mcp/eppm/mapping.py`: baselineProject, WBS, activity, relationship, resourceAssignment to PROJECT,
+   PROJWBS, TASK, TASKPRED, TASKRSRC with P6 codes; its copied calendars take the working time of the calendar
+   of the same name). On DEMO-SS225 the REST route gives the same results as the SQL route (match rate 1.0,
+   baseline finish, 36 working days of variance, planned units 54.5059 %, SPI 0.8473) in under 1 s. A pull by
+   object reads alone (a server without the XER export) is not built: the export exists on every release this
+   product targets.
 2. SQL pull, working copy, read tools on it, `p6_eppm_projects`, `p6_eppm_status`.
 3. REST pull (calendar rebuild, schedule options).
 4. Local writes on the working copy, pending changes in `p6_eppm_status`.

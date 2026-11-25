@@ -149,6 +149,15 @@ stay outside this repository.
   then `os.replace`). Server: `_refresh` points `DB_PATH` at the copy (`EPPM_MANIFEST`), writes refused with
   `EPPM_READ_ONLY` until the push exists, tools `p6_eppm_projects` / `p6_eppm_pull` (FILE) / `p6_eppm_status`
   (in `NO_DB_TOOLS`), `p6_diagnose` `eppm_mode`. Tests: `tests/test_eppm_pull.py` (sqlite3 as the SQL driver).
+  Milestone 3 (REST route): `store.pull(route=auto|sql|rest)`; `pull_rest` exports the projects in one XER
+  (`/export/exportXERProject`, ids = ObjectIds), builds with `xerstore.build`, adds each baseline from REST
+  object reads (`eppm/mapping.py`: the server refuses a baseline export; `ACTIVITY` / `RELATIONSHIP` / `WBS` /
+  `ASSIGNMENT` / `BASELINE_PROJECT` specs of (REST field, column, kind), `value()` (text to number, date
+  without 'T' or offset, enum to P6 code), `fields()` keeps the fields the server lists, `insert()` widens
+  tables, `_calendars` copies the same-named calendar's working time), links it by `sum_base_proj_id` /
+  `orig_proj_id`, then `_finish` (REST schedule options; `row_factory = sqlite3.Row` for the server's
+  writers). Manifest route `rest`. Test: the baseline's REST objects are generated from the synthetic database
+  (`rest_objects`), and the pull must give its column values back.
 
 - Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (copies the brand icon, version
   resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`

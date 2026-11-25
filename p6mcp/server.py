@@ -12484,27 +12484,39 @@ def p6_eppm_projects(search: str = "", offset: int = 0, limit: int = 100) -> dic
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
-def p6_eppm_pull(projects: list[str], include_baseline: bool = True) -> dict:
+def p6_eppm_pull(projects: list[str], include_baseline: bool = True,
+                 route: Literal["auto", "sql", "rest"] = "auto") -> dict:
     """P6 EPPM mode: copy projects from the server into the local working copy that every other tool
     reads (the projects pulled before are refreshed too). Reads the server only: nothing is changed there.
     projects: Project IDs (see p6_eppm_projects). include_baseline: also copy each project's current
     baseline (needed by baseline variance, BEI and milestones vs baseline).
-    Version 1 pulls through the server's read-only SQL account (set in MCP for Primavera P6 Settings)."""
+    route: sql (the read-only SQL account set in MCP for Primavera P6 Settings: every table as stored),
+    rest (the server's XER export, for servers without a SQL account), auto = sql when it is set up and
+    its driver installed, else rest."""
     from p6mcp import credentials
     from p6mcp.eppm import rest, sql
     p = _eppm_profile()
     if not projects:
         raise ValueError("Name at least one project (Project ID, see p6_eppm_projects).")
-    if not p.get("sql"):
-        raise ValueError("This server has no read-only SQL account: version 1 pulls by SQL. Add it in MCP for "
-                         "Primavera P6 Settings (Database); the pull by REST alone comes in a later version.")
-    if sql.driver_module(p["sql"]["driver"]) is None:
-        raise ValueError(f"The {sql.DRIVERS[p['sql']['driver']]} driver is not installed: install it from MCP for "
-                         "Primavera P6 Settings (Database, Test connection).")
+    if route not in _eppm_store.ROUTES:
+        raise ValueError(f"route must be one of {list(_eppm_store.ROUTES)}")
+    spw = None
+    if route == "sql" or (route == "auto" and p.get("sql")):
+        if not p.get("sql"):
+            raise ValueError("This server has no read-only SQL account: use route='rest', or add the account in MCP "
+                             "for Primavera P6 Settings (Database).")
+        driver_ok = sql.driver_module(p["sql"]["driver"]) is not None
+        if route == "sql" and not driver_ok:
+            raise ValueError(f"The {sql.DRIVERS[p['sql']['driver']]} driver is not installed: install it from MCP "
+                             "for Primavera P6 Settings (Database, Test connection), or use route='rest'.")
+        if driver_ok:
+            spw = _eppm_secret(credentials.eppm_sql_key(p["name"]), "SQL password")
+        route = "sql" if driver_ok else "rest"
+    elif route == "auto":
+        route = "rest"
     pw = _eppm_secret(credentials.eppm_key(p["name"]), "P6 password")
-    spw = _eppm_secret(credentials.eppm_sql_key(p["name"]), "SQL password")
     try:
-        m = _eppm_store.pull_sql(p, projects, pw, spw, include_baseline, server_module=sys.modules[__name__])
+        m = _eppm_store.pull(p, projects, pw, spw, include_baseline, route, server_module=sys.modules[__name__])
     except (rest.EppmError, sql.SqlError, _eppm_store.PullError) as e:
         raise ValueError(str(e)) from None
     except OSError as e:

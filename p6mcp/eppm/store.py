@@ -8,7 +8,9 @@ the pulled projects (Project ID, ObjectId, baseline), the pull time and the larg
 A pull rebuilds the whole file for the set of pulled projects (the new one added): a temporary file is filled and
 checked, then replaces the old one, so a failed pull leaves the previous copy intact. Ids are the server's
 (SQL task_id = REST ObjectId). The SQL route copies rows as stored; the schedule options are not in the PMDB, so
-they come from REST `scheduleOptions` into PROJPROP 'scheduling' through the server's own writer.
+they come from REST `scheduleOptions` into PROJPROP 'scheduling' through the server's own writer. The REST route
+(no SQL account) builds the copy from the server's XER export with the XER mode's builder, then adds the schedule
+options and the baseline links the same way.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sqlite3
 import tempfile
 from datetime import date, datetime
@@ -183,54 +186,111 @@ def sched_values(row: dict, task_ids: Callable[[str], Optional[int]]) -> tuple[d
     return vals, (lpl or None), warn
 
 
-def pull_sql(profile: dict, project_ids: Iterable[str], password: str, sql_password: str,
-             include_baseline: bool = True, rest_opener: Optional[Callable] = None, sql_module: Any = None,
-             server_module: Any = None) -> dict:
-    """Pull the given projects (Project IDs, plus the ones already pulled) by SQL, with REST for the project list
-    (the user's rights) and the schedule options. Returns the manifest written to pull.json."""
+SCHED_FIELDS = list(SCHED_FLAGS) + list(SCHED_NUMS) + [
+    "IgnoreOtherProjectRelationships", "OutOfSequenceScheduleType", "ComputeTotalFloatType", "RelationshipLagCalendar",
+    "MultipleFloatPathsEndingActivityShortName", "PriorityList", "ProjectObjectId"]
+ROUTES = ("auto", "sql", "rest")
+
+
+def _session(profile: dict, password: str, rest_opener: Optional[Callable] = None):
     from p6mcp.eppm import rest
-    if not profile.get("sql"):
-        raise PullError("This server has no SQL account: the pull by REST alone comes in a later version. Add the "
-                        "read-only SQL account in MCP for Primavera P6 Settings (Database).")
-    sqlcfg = profile["sql"]
+    return rest.Session(profile["base_url"], profile.get("user", ""), password, profile.get("database") or "",
+                        profile.get("auth", "auto"), profile.get("context") or rest.DEFAULT_CONTEXT,
+                        profile.get("ca_bundle") or None, int(profile.get("timeout_s", 120)),
+                        opener=rest_opener() if rest_opener else None)
+
+
+def _wanted(profile: dict, project_ids: Iterable[str]) -> set[str]:
     old = read_manifest(profile["name"]) or {}
     wanted = {str(p).strip() for p in project_ids if str(p).strip()}
     wanted |= {p["project_id"] for p in old.get("projects", [])}
     if not wanted:
         raise PullError("Name at least one project (its Project ID).")
-    started = datetime.now()
-    sess = rest.Session(profile["base_url"], profile.get("user", ""), password, profile.get("database") or "",
-                        profile.get("auth", "auto"), profile.get("context") or rest.DEFAULT_CONTEXT,
-                        profile.get("ca_bundle") or None, int(profile.get("timeout_s", 120)),
-                        opener=rest_opener() if rest_opener else None)
-    with sess:
-        listed = sess.read("project", ["ObjectId", "Id", "Name", "CurrentBaselineProjectObjectId", "DataDate",
-                                       "LastUpdateDate"])
-        by_id = {str(p.get("Id", "")).lower(): p for p in listed}
-        missing = sorted(w for w in wanted if w.lower() not in by_id)
-        if missing:
-            raise PullError(f"Not found among the projects this P6 user can read: {', '.join(missing)}")
-        projects = []
-        for w in sorted(wanted, key=str.lower):
-            p = by_id[w.lower()]
-            bl = p.get("CurrentBaselineProjectObjectId")
-            projects.append({"project_id": p["Id"], "object_id": int(p["ObjectId"]), "name": p.get("Name"),
-                             "baseline_object_id": int(bl) if include_baseline and bl not in (None, "") else None})
-        oids = [p["object_id"] for p in projects]
-        sched_rows = {}
-        for oid in oids:
-            rows = sess.read("scheduleOptions", list(SCHED_FLAGS) + list(SCHED_NUMS) + [
-                "IgnoreOtherProjectRelationships", "OutOfSequenceScheduleType", "ComputeTotalFloatType",
-                "RelationshipLagCalendar", "MultipleFloatPathsEndingActivityShortName", "PriorityList",
-                "ProjectObjectId"], f"ProjectObjectId :eq: {oid}")
-            sched_rows[oid] = rows[0] if rows else None
-    id_set = sorted(set(oids) | {p["baseline_object_id"] for p in projects if p["baseline_object_id"]})
-    ids = ",".join(str(int(i)) for i in id_set)
+    return wanted
 
+
+def _server_info(sess, wanted: set[str], include_baseline: bool) -> tuple[list, list[dict], dict]:
+    """(project list, the pulled projects, their REST schedule options), read with the user's own rights."""
+    listed = sess.read("project", ["ObjectId", "Id", "Name", "CurrentBaselineProjectObjectId", "DataDate",
+                                   "LastUpdateDate"])
+    by_id = {str(p.get("Id", "")).lower(): p for p in listed}
+    missing = sorted(w for w in wanted if w.lower() not in by_id)
+    if missing:
+        raise PullError(f"Not found among the projects this P6 user can read: {', '.join(missing)}")
+    projects = []
+    for w in sorted(wanted, key=str.lower):
+        p = by_id[w.lower()]
+        bl = p.get("CurrentBaselineProjectObjectId")
+        projects.append({"project_id": p["Id"], "object_id": int(p["ObjectId"]), "name": p.get("Name"),
+                         "baseline_object_id": int(bl) if include_baseline and bl not in (None, "") else None})
+    sched_rows = {}
+    for p in projects:
+        rows = sess.read("scheduleOptions", SCHED_FIELDS, f"ProjectObjectId :eq: {p['object_id']}")
+        sched_rows[p["object_id"]] = rows[0] if rows else None
+    return listed, projects, sched_rows
+
+
+def _write(profile: dict, tmp: str, route: str, started: datetime, listed: list, projects: list[dict],
+           counts: dict, warnings: list[str]) -> dict:
+    oids = {p["object_id"] for p in projects}
+    stamp = max((str(p.get("LastUpdateDate") or "") for p in listed if int(p["ObjectId"]) in oids), default="")
+    manifest = {"store_version": STORE_VERSION, "server": profile["base_url"], "profile": profile["name"],
+                "route": route, "pulled_at": started.isoformat(timespec="seconds"),
+                "seconds": round((datetime.now() - started).total_seconds(), 2),
+                "server_stamp": stamp[:19], "projects": projects, "rows": counts, "warnings": warnings}
+    os.replace(tmp, store_path(profile["name"]))
+    with open(os.path.join(store_dir(profile["name"]), MANIFEST_FILE), "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, indent=2)
+    return manifest
+
+
+def _temp(profile: dict) -> str:
     folder = store_dir(profile["name"])
     os.makedirs(folder, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".working.", suffix=".db", dir=folder)
     os.close(fd)
+    return tmp
+
+
+def _drop(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def pull(profile: dict, project_ids: Iterable[str], password: str, sql_password: Optional[str] = None,
+         include_baseline: bool = True, route: str = "auto", **kw) -> dict:
+    """Pull by SQL when the profile has a SQL account with a password and its driver (route auto), else by REST."""
+    if route not in ROUTES:
+        raise PullError(f"route must be one of {list(ROUTES)}")
+    if route == "auto":
+        sqlcfg = profile.get("sql")
+        usable = bool(sqlcfg and sql_password and (kw.get("sql_module") or _sql.driver_module(sqlcfg["driver"])))
+        route = "sql" if usable else "rest"
+    if route == "sql":
+        return pull_sql(profile, project_ids, password, sql_password or "", include_baseline, **kw)
+    kw.pop("sql_module", None)
+    return pull_rest(profile, project_ids, password, include_baseline, **kw)
+
+
+def pull_sql(profile: dict, project_ids: Iterable[str], password: str, sql_password: str,
+             include_baseline: bool = True, rest_opener: Optional[Callable] = None, sql_module: Any = None,
+             server_module: Any = None) -> dict:
+    """Pull the given projects (Project IDs, plus the ones already pulled) by SQL, with REST for the project list
+    (the user's rights) and the schedule options. Returns the manifest written to pull.json."""
+    if not profile.get("sql"):
+        raise PullError("This server has no SQL account: pull by REST (route 'rest'), or add the read-only SQL "
+                        "account in MCP for Primavera P6 Settings (Database).")
+    sqlcfg = profile["sql"]
+    wanted = _wanted(profile, project_ids)
+    started = datetime.now()
+    with _session(profile, password, rest_opener) as sess:
+        listed, projects, sched_rows = _server_info(sess, wanted, include_baseline)
+    oids = [p["object_id"] for p in projects]
+    id_set = sorted(set(oids) | {p["baseline_object_id"] for p in projects if p["baseline_object_id"]})
+    ids = ",".join(str(int(i)) for i in id_set)
+    tmp = _temp(profile)
     warnings: list[str] = []
     counts: dict[str, int] = {}
     out: Optional[sqlite3.Connection] = None
@@ -270,26 +330,85 @@ def pull_sql(profile: dict, project_ids: Iterable[str], password: str, sql_passw
                 out.close()
             except sqlite3.Error:
                 pass
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+        _drop(tmp)
         raise
-    stamp = max((str(p.get("LastUpdateDate") or "") for p in listed if int(p["ObjectId"]) in oids), default="")
-    manifest = {"store_version": STORE_VERSION, "server": profile["base_url"], "profile": profile["name"],
-                "route": "sql", "pulled_at": started.isoformat(timespec="seconds"),
-                "seconds": round((datetime.now() - started).total_seconds(), 2),
-                "server_stamp": stamp[:19], "projects": projects, "rows": counts, "warnings": warnings}
-    os.replace(tmp, store_path(profile["name"]))
-    with open(os.path.join(folder, MANIFEST_FILE), "w", encoding="utf-8") as fh:
-        json.dump(manifest, fh, indent=2)
-    return manifest
+    return _write(profile, tmp, "sql", started, listed, projects, counts, warnings)
+
+
+def _export(sess, oids: list[int], folder: str, name: str) -> str:
+    """POST /export/exportXERProject for these ObjectIds; the XER is in the answer (measured on 25.12)."""
+    from p6mcp.eppm import rest
+    st, raw = sess._send("POST", sess.rest + "/export/exportXERProject",
+                         body={"FileType": "XER", "ProjectObjectId": oids}, name="export xer")
+    if st != 200 or not raw.lstrip().startswith(b"ERMHDR"):
+        detail = sess._detail(raw) if raw[:2] != b"PK" else "a zip file (not handled yet)"
+        raise rest.EppmError(f"XER export refused (HTTP {st}): {detail}")
+    path = os.path.join(folder, name)
+    with open(path, "wb") as fh:
+        fh.write(raw)
+    return path
+
+
+def pull_rest(profile: dict, project_ids: Iterable[str], password: str, include_baseline: bool = True,
+              rest_opener: Optional[Callable] = None, server_module: Any = None) -> dict:
+    """Pull by REST alone: the server's XER export of the projects (one file, so the ids stay the ObjectIds), built
+    by the XER mode's store builder; their baselines from REST object reads (P6 EPPM refuses to export a baseline,
+    measured on 25.12; p6mcp.eppm.mapping); then the schedule options from REST."""
+    from p6mcp import xerstore
+    from p6mcp.eppm import mapping, rest
+    wanted = _wanted(profile, project_ids)
+    started = datetime.now()
+    tmp = _temp(profile)
+    work = tempfile.mkdtemp(prefix=".export.", dir=store_dir(profile["name"]))
+    warnings: list[str] = []
+    out: Optional[sqlite3.Connection] = None
+    try:
+        with _session(profile, password, rest_opener) as sess:
+            listed, projects, sched_rows = _server_info(sess, wanted, include_baseline)
+            xer = _export(sess, [p["object_id"] for p in projects], work, "projects.xer")
+            manifest = xerstore.build([xer], tmp)
+            warnings += manifest["files"][0]["warnings"]
+            counts = dict(manifest["files"][0]["rows"])
+            out = sqlite3.connect(tmp)
+            cols = {r[1].lower() for r in out.execute("PRAGMA table_info(PROJECT)")}
+            if "sum_base_proj_id" not in cols:
+                out.execute("ALTER TABLE PROJECT ADD COLUMN sum_base_proj_id INTEGER")
+            done: set[int] = set()
+            for p in projects:
+                bl = p["baseline_object_id"]
+                if not bl:
+                    continue
+                try:
+                    if bl not in done:
+                        for t, n in mapping.baseline(sess, out, bl, p["object_id"], warnings).items():
+                            counts[f"baseline {t}"] = counts.get(f"baseline {t}", 0) + n
+                        done.add(bl)
+                    out.execute("UPDATE PROJECT SET sum_base_proj_id = ? WHERE proj_id = ?", (bl, p["object_id"]))
+                except (rest.EppmError, ValueError, sqlite3.Error) as e:
+                    warnings.append(f"{p['project_id']}: baseline not pulled: {e}")
+                    p["baseline_object_id"] = None
+        _finish(out, profile, projects, sched_rows, warnings, server_module)
+        out.commit()
+        out.close()
+        out = None
+    except BaseException:
+        if out is not None:
+            try:
+                out.close()
+            except sqlite3.Error:
+                pass
+        _drop(tmp)
+        raise
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return _write(profile, tmp, "rest", started, listed, projects, counts, warnings)
 
 
 def _finish(out: sqlite3.Connection, profile: dict, projects: list[dict], sched_rows: dict, warnings: list[str],
             server_module: Any) -> None:
     """Support tables, indexes and the schedule options of the working copy."""
     from p6mcp import xerstore
+    out.row_factory = sqlite3.Row  # the server's writers read rows by column name
     xerstore._support_tables(out, None)
     have = {r[0].upper() for r in out.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     for t, c in INDEXES:
