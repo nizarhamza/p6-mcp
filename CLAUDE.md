@@ -162,8 +162,15 @@ stay outside this repository.
   with `_eppm_refusal`; `_write_refusal` skips the schema gate; `_guard_write` skips PM.exe; `_commit` next =
   `EPPM_NEXT`); `config.load` keeps `allow_writes` in EPPM mode. Store file `eppm_<profile>.db` (STORE_VERSION
   2), NEXTKEY `TASKPRED_task_pred_id` = `LOCAL_ID_BASE`, manifest `pulled_ts` (ms). `_eppm_pending()` =
-  `pending.net(pending.entries_since(log, pulled_ts, undone, pushed_commits))`; `p6_eppm_status` `pending`,
-  `p6_eppm_pull(discard_pending=)` (destructiveHint True).
+  `pending.net(pending.entries_since(log, pulled_ts, undone, pushed_entries))` (entry identity
+  `pending.ident` = commit + table + key; changes carry `entries` and `refs`); `p6_eppm_status` `pending` and
+  `last_push`, `p6_eppm_pull(discard_pending=)` (destructiveHint True).
+  Milestone 5 (push): `eppm/push.py` `plan(sess, changes)` (live reads by ObjectId, `same()` compares dates to the
+  minute, `PUSHED` column -> REST field, `TEXT` P6 codes -> REST text, `ORDER`) and `apply(sess, calls, journal)`;
+  `p6_eppm_push(confirm)` DESTRUCTIVE (`_confirm_text` `PUSH TO <server>`, `_plan_gate` on the call list),
+  `store.update_manifest(pushed_entries=, push=)`, local TASKPRED ids replaced by the server's. UDF tools are out
+  of `EPPM_EDIT_TOOLS` until their REST calls are checked. Tests: `tests/test_eppm_push.py` (fake server with a
+  live state, `fail_on`).
 
 - Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (copies the brand icon, version
   resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`

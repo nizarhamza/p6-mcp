@@ -9,6 +9,7 @@ then deleted locally drops out; an object updated then deleted becomes a delete.
 
 from __future__ import annotations
 
+import json
 from typing import Callable, Iterable, Optional
 
 # edit log operation -> what it does to its object (the push supports these in version 1)
@@ -26,12 +27,17 @@ def _stamp(ts: str) -> str:
     return str(ts or "").replace("T", " ")[:23]
 
 
+def ident(e: dict) -> str:
+    """One edit log entry's identity (a commit can hold several objects: a batch tool)."""
+    return f"{e.get('commit')}|{e.get('table')}|{json.dumps(_key(e))}"
+
+
 def entries_since(entries: Iterable[dict], pulled_at: str, undone: Callable[[dict], bool],
                   pushed: Iterable[str] = ()) -> list[dict]:
-    """The edit log entries that count: made after the pull, not undone, not pushed, of a supported operation."""
+    """The edit log entries that count: made after the pull, not undone, not pushed (by identity), supported."""
     since, done = _stamp(pulled_at), set(pushed)
     return [e for e in entries if _stamp(e.get("ts")) >= since and not undone(e)
-            and e.get("commit") not in done and e.get("operation") in OPERATIONS]
+            and ident(e) not in done and e.get("operation") in OPERATIONS]
 
 
 def _key(e: dict) -> Optional[tuple]:
@@ -62,6 +68,7 @@ def net(entries: Iterable[dict]) -> list[dict]:
                                          if n in REF_KEYS and v is not None and n not in o["keys"]})
         o["edits"] += 1
         o["last_ts"] = e.get("ts")
+        o.setdefault("entries", []).append(ident(e))
         if kind == "delete":
             o["deleted"] = True
             for f, v in before.items():  # the values the object had (for the conflict check of a delete)
@@ -101,7 +108,8 @@ def net(entries: Iterable[dict]) -> list[dict]:
         out.append({"table": o["table"], "action": action, "keys": o["keys"], "refs": o.get("refs", {}),
                     "labels": o["labels"],
                     "project": o["project"], "proj_id": o["proj_id"], "fields": fields, "edits": o["edits"],
-                    "first_edit": str(o["first_ts"])[:19], "last_edit": str(o["last_ts"])[:19]})
+                    "first_edit": str(o["first_ts"])[:19], "last_edit": str(o["last_ts"])[:19],
+                    "entries": o["entries"]})
     return out
 
 

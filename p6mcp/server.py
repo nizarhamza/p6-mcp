@@ -334,11 +334,12 @@ EPPM_MANIFEST: Optional[dict] = None  # P6 EPPM mode: pull.json of the working c
 EPPM_TOOLS = ("p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status")
 # Edits allowed on a P6 EPPM working copy: the ones the push can send (docs/EPPM_PLAN.md 4.1), plus the local backups
 EPPM_EDIT_TOOLS = frozenset({
-    "p6_update_activity", "p6_update_assignment", "p6_update_assignments", "p6_update_udf", "p6_update_udfs",
+    "p6_update_activity", "p6_update_assignment", "p6_update_assignments",
     "p6_add_relationship", "p6_add_relationships", "p6_update_relationship", "p6_update_relationships",
-    "p6_delete_relationship", "p6_delete_relationships", "p6_backup_database", "p6_restore_backup"})
-EPPM_NEXT = ("Changed in the local working copy only: nothing is sent to the P6 EPPM server until a push (a later "
-             "version). p6_eppm_status lists the pending changes.")
+    "p6_delete_relationship", "p6_delete_relationships", "p6_backup_database", "p6_restore_backup",
+    "p6_eppm_push"})
+EPPM_NEXT = ("Changed in the local working copy only: nothing is sent to the P6 EPPM server until p6_eppm_push "
+             "(dry run first, then the user's yes). p6_eppm_status lists the pending changes.")
 
 
 def _eppm_refusal(tool: str) -> str:
@@ -346,7 +347,7 @@ def _eppm_refusal(tool: str) -> str:
         return ("Activities are not deleted through a P6 EPPM working copy in this version: delete it in P6 EPPM, "
                 "then pull again.")
     return (f"{tool} is not available on a P6 EPPM working copy: the push to the server supports activity, "
-            "relationship, assignment and UDF edits only. Do it in P6 EPPM, then pull again.")
+            "relationship and assignment edits only. Do it in P6 EPPM, then pull again.")
 TOOL_HINTS: dict[str, dict[str, bool]] = {}
 HINT_KEYS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")  # MCP tool annotations, in order
 REGISTERED: dict[str, Callable] = {}  # tool -> what a client call runs (policy gate + two-step write flow)
@@ -461,6 +462,8 @@ def _confirm_text(tool: str, params: dict) -> str:
         return f"DELETE ACTIVITY {params.get('project')} {params.get('task_code')}"
     if tool == "p6_restore_backup":
         return f"RESTORE {params.get('name')}"
+    if tool == "p6_eppm_push":
+        return f"PUSH TO {SETTINGS.eppm}"
     raise KeyError(tool)
 
 
@@ -12475,7 +12478,7 @@ def _eppm_pending() -> list[dict]:
         return []
     es = _log_entries()
     return pending.net(pending.entries_since(es, m.get("pulled_ts") or m["pulled_at"], _undone_fn(es),
-                                             m.get("pushed_commits", [])))
+                                             m.get("pushed_entries", [])))
 
 
 def _eppm_session(p: dict):
@@ -12584,8 +12587,11 @@ def p6_eppm_status(check_server: bool = True) -> dict:
                projects=m["projects"], rows=m["rows"], warnings=m["warnings"])
     from p6mcp.eppm import pending
     changes = _eppm_pending()
-    out["pending"] = {"count": len(changes), "by_table": pending.summary(changes), "changes": changes[:50],
+    out["pending"] = {"count": len(changes), "by_table": pending.summary(changes),
+                      "changes": [{k: v for k, v in c.items() if k != "entries"} for c in changes[:50]],
                       "truncated": len(changes) > 50}
+    if m.get("pushes"):
+        out["last_push"] = m["pushes"][-1]
     if check_server and m.get("server_stamp"):
         from p6mcp.eppm import rest
         stamp = m["server_stamp"].replace("T", " ")
@@ -12599,6 +12605,83 @@ def p6_eppm_status(check_server: bool = True) -> dict:
             out["changed_on_server"] = {"since": stamp, "activities": changed}
         except rest.EppmError as e:
             out["changed_on_server"] = {"error": str(e)}
+    return out
+
+
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True})
+def p6_eppm_push(confirm: bool = False) -> dict:
+    """P6 EPPM mode: send the pending changes of the working copy to the server (see p6_eppm_status).
+    The dry run reads every changed object on the server and lists the calls; a change made on the
+    server since the pull is a conflict and refuses the push (pull again, or drop the local change).
+    Calls go one object at a time (relationship deletes, activity updates, new relationships,
+    relationship updates, assignments) and the first failure stops the push: the result and the journal
+    say what reached the server, and a new push sends the rest. The server is not rescheduled: dates move
+    when the project is scheduled in P6 EPPM."""
+    from p6mcp.eppm import push as _push
+    from p6mcp.eppm import rest
+    p = _eppm_profile()
+    m = EPPM_MANIFEST
+    if not m:
+        raise ValueError("Nothing pulled yet: there is nothing to push.")
+    changes = _eppm_pending()
+    if not changes:
+        return {"dry_run": not confirm, "would_refuse": True, "refuse_reasons": ["No pending change to push."],
+                "would_do": ["Nothing to send."]} if not confirm else {"applied": False,
+                                                                    "error": "No pending change to push."}
+    try:
+        with _eppm_session(p) as sess:
+            pl = _push.plan(sess, changes, _eppm_store.LOCAL_ID_BASE)
+            view = {"calls": len(pl["calls"]),
+                    "already_done": [{"what": x["label"], "why": x["reason"]} for x in pl["already_done"]],
+                    "conflicts": [{"what": x["label"], "why": x["reason"]} for x in pl["conflicts"]],
+                    "unsupported": [f"{c['table']} {c['action']}" for c in pl["unsupported"]],
+                    "not_sent_fields": {x["label"]: x["not_sent"] for x in pl["calls"] if x.get("not_sent")}}
+            reasons = ([f"conflict: {x['what']}: {x['why']}" for x in view["conflicts"]]
+                       + [f"not supported by the push: {u}" for u in view["unsupported"]])
+            mismatch = _plan_gate(pl["plan"], confirm)
+            if not confirm:
+                out = {"dry_run": True, "server": p["name"], "would_do": pl["plan"], **view}
+                if reasons:
+                    out.update(would_refuse=True, refuse_reasons=reasons)
+                return out
+            if mismatch:
+                return {"applied": False, "error": mismatch}
+            if reasons:
+                return {"applied": False, "error": "The push is refused: " + "; ".join(reasons)}
+            journal = os.path.join(_eppm_store.store_dir(p["name"]), f"push_{datetime.now():%Y%m%d_%H%M%S}.jsonl")
+            res = _push.apply(sess, pl["calls"], journal)
+    except rest.EppmError as e:
+        raise ValueError(str(e)) from None
+    # what reached the server (or was there already) no longer counts as pending; new relationships take their ids
+    created = dict(res["created"])
+    created.update({x["object_id"]: x["server_id"] for x in pl["already_done"] if x.get("server_id")})
+    if created:
+        with closing(_connect(readonly=False)) as con:
+            for local, server_id in created.items():
+                con.execute("UPDATE TASKPRED SET task_pred_id = ? WHERE task_pred_id = ?", (server_id, local))
+            con.commit()
+    done = [e for x in res["sent"] + pl["already_done"] for e in x["change"]["entries"]]
+    record = {"at": datetime.now().isoformat(timespec="seconds"), "sent": len(res["sent"]),
+              "already_done": len(pl["already_done"]), "failed": (res["failed"] or {}).get("label"),
+              "journal": journal}
+    _eppm_store.update_manifest(p["name"], pushed_entries=done, push=record)
+    try:
+        _log_write([{"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(DB_PATH),
+                     "tool": "p6_eppm_push", "operation": "push_eppm", "project": None, "proj_id": None,
+                     "table": None, "keys": {"server": p["name"]}, "before": None, "after": record,
+                     "summary": f"pushed {len(res['sent'])} change(s) to {p['name']}"}])
+    except OSError:
+        pass
+    _refresh()
+    out = {"applied": res["failed"] is None, "server": p["name"], "sent": [x["label"] for x in res["sent"]],
+           "already_done": [x["label"] for x in pl["already_done"]], "journal": journal,
+           "new_ids": {str(k): v for k, v in created.items()},
+           "next": "The server is not rescheduled: schedule the project in P6 EPPM, then pull it again to read the "
+                   "new dates."}
+    if res["failed"]:
+        out["failed"] = {"what": res["failed"]["label"], "error": res["failed"].get("error")}
+        out["next"] = ("The push stopped at the first failure; the changes listed in sent reached the server. Fix "
+                       "the cause, then push again: only the rest is sent.")
     return out
 
 

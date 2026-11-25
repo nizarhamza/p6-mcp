@@ -387,7 +387,7 @@ def test_pending_net_rules():
     assert not [k for k in out if k[0] == "UDFVALUE"]  # set where none was pulled, then cleared: nothing to send
     assert out[("TASKRSRC", "update")]["fields"] == {"remain_qty": {"pulled": 8.0, "local": 16.0}}  # no rollups
     assert out[("TASKPRED", "delete")]["fields"]["lag_hr_cnt"]["pulled"] == 0.0  # the pulled value, not the edit's
-    assert pending.entries_since(es, "3", lambda e: e["ts"] == "4", pushed=["5"]) == [es[2]]
+    assert pending.entries_since(es, "3", lambda e: e["ts"] == "4", pushed=[pending.ident(es[4])]) == [es[2]]
 
 
 # ----------------------------------------------------------------- driver install

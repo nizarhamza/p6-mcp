@@ -113,6 +113,22 @@ def read_manifest(profile_name: str) -> Optional[dict]:
     return m
 
 
+def update_manifest(profile_name: str, pushed_entries: Iterable[str] = (), push: Optional[dict] = None) -> dict:
+    """Record a push in pull.json: the edit log entries it sent (no longer pending) and a short summary."""
+    m = read_manifest(profile_name)
+    if m is None:
+        raise PullError("No working copy to update.")
+    m["pushed_entries"] = list(dict.fromkeys(list(m.get("pushed_entries", [])) + list(pushed_entries)))
+    if push:
+        m["pushes"] = (m.get("pushes", []) + [push])[-20:]
+    path = os.path.join(store_dir(profile_name), MANIFEST_FILE)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(m, fh, indent=2)
+    os.replace(tmp, path)
+    return m
+
+
 def _value(v: Any) -> Any:
     """A driver value -> what the standalone database stores (dates as 'YYYY-MM-DD HH:MM:SS' text)."""
     if isinstance(v, datetime):

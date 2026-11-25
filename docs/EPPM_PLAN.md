@@ -299,6 +299,19 @@ push and schedule. `INSTRUCTIONS` (ASCII, under 1 KB) gets one line on pull, edi
    `refs` keep the ids a creation needs). `p6_eppm_status` lists them; `p6_eppm_pull` refuses over them unless
    `discard_pending=True` (so the tool is marked destructive). Checked on the test server: an edit and a new link
    on DEMO-SS225 are pending locally while the server keeps its values.
+   Milestone 5 done (`p6mcp/eppm/push.py`, tool `p6_eppm_push`, destructive, confirmation text
+   `PUSH TO <server>`): `push.plan` reads every changed object live and classifies each change (sent, already
+   done, conflict; unsupported tables refuse), the token is bound to the call list through `_plan_gate`; `apply`
+   sends one object per call in the order of 4.3 and stops at the first failure, a journal line per call in
+   `push_<stamp>.jsonl`; the edit log entries sent or already done go into `pull.json` `pushed_entries` (so they
+   are no longer pending and a new push resumes), new relationships take the server's ObjectId in the working
+   copy, and a `push_eppm` edit log entry records the push. Sent fields: activity name, durations, primary
+   constraint, actual dates, physical %, status; relationship type and lag; assignment budgeted, actual and
+   remaining units (P6 recomputes costs and rollups). UDF edits are not allowed in P6 EPPM mode yet: the UDF
+   REST calls were not checked on a server. Checked on the test server: a duration change and a new link pushed,
+   read back over REST, then the reverse changes pushed, leaving DEMO-SS225 as it was. After a push the
+   working copy keeps the local values while P6 may derive others (a not started activity's original duration
+   follows its remaining one): pull again after scheduling on the server.
 2. SQL pull, working copy, read tools on it, `p6_eppm_projects`, `p6_eppm_status`.
 3. REST pull (calendar rebuild, schedule options).
 4. Local writes on the working copy, pending changes in `p6_eppm_status`.

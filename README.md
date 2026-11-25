@@ -164,7 +164,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 ## Tools
 
 <!-- tools:start -->
-61 tools: 39 read-only (11 of them in the Basic profile), 3 that write a file, 18 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
+62 tools: 39 read-only (11 of them in the Basic profile), 3 that write a file, 19 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
 
 **Projects and structure**
 
@@ -241,7 +241,8 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 |---|---|---|---|
 | `p6_eppm_projects` | Lists the projects the P6 user can read on the P6 EPPM server | Read |  |
 | `p6_eppm_pull` | Copies projects and their baselines from the P6 EPPM server into the local working copy | Writes a file |  |
-| `p6_eppm_status` | Working copy of the P6 EPPM server: projects, pull time, changes on the server since | Read |  |
+| `p6_eppm_status` | Working copy of the P6 EPPM server: projects, pull time, pending local changes, changes on the server since | Read |  |
+| `p6_eppm_push` | Sends the pending local changes to the P6 EPPM server after a conflict check and your yes | Delete or replace |  |
 
 **Edits (off by default)**
 

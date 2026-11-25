@@ -47,6 +47,7 @@ TOOL_KIND: dict[str, str] = {
     "p6_set_schedule_options": WRITE, "p6_backup_database": WRITE,
     # destructive
     "p6_delete_activity": DESTRUCTIVE, "p6_delete_project": DESTRUCTIVE, "p6_restore_backup": DESTRUCTIVE,
+    "p6_eppm_push": DESTRUCTIVE,  # writes to the P6 EPPM server
     # MCP for Primavera P6 settings
     "p6_shop_install": CONFIG,
 }

@@ -88,7 +88,8 @@ Facts an assistant should get right:
 
 - `p6_eppm_projects`: Lists the projects the P6 user can read on the P6 EPPM server (read)
 - `p6_eppm_pull`: Copies projects and their baselines from the P6 EPPM server into the local working copy (writes a file)
-- `p6_eppm_status`: Working copy of the P6 EPPM server: projects, pull time, changes on the server since (read)
+- `p6_eppm_status`: Working copy of the P6 EPPM server: projects, pull time, pending local changes, changes on the server since (read)
+- `p6_eppm_push`: Sends the pending local changes to the P6 EPPM server after a conflict check and your yes (delete or replace)
 
 ### Edits (off by default)
 
