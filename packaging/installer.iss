@@ -44,6 +44,9 @@ SetupMutex=P6MCP-Setup
 ; force: a process Windows cannot close politely (a console program such as p6mcp-server.exe) is ended too
 CloseApplications=force
 RestartApplications=no
+; every manual install writes %TEMP%\Setup Log <date> #<n>.txt (a 3.0.0 install that copied no file left no trace);
+; automatic updates pass /LOG (updates.py), which writes the log in the updates folder instead
+SetupLogging=yes
 #ifexist "..\LICENSE"
 LicenseFile=..\LICENSE
 #endif

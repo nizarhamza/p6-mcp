@@ -169,7 +169,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 ## Tools
 
 <!-- tools:start -->
-63 tools: 39 read-only (11 of them in the Basic profile), 3 that write a file, 20 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
+65 tools: 39 read-only (11 of them in the Basic profile), 3 that write a file, 22 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
 
 **Projects and structure**
 
@@ -247,6 +247,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 | `p6_eppm_projects` | Lists the projects the P6 user can read on the P6 EPPM server | Read |  |
 | `p6_eppm_pull` | Copies projects and their baselines from the P6 EPPM server into the local working copy | Writes a file |  |
 | `p6_eppm_status` | Working copy of the P6 EPPM server: projects, pull time, pending local changes, changes on the server since | Read |  |
+| `p6_eppm_discard` | Drops pending local changes of the P6 EPPM working copy, one by one or all, without a new pull | Write |  |
 | `p6_eppm_push` | Sends the pending local changes to the P6 EPPM server after a conflict check and your yes | Delete or replace |  |
 | `p6_eppm_schedule` | Schedules projects on the P6 EPPM server (P6's own F9), returns its log, then pulls them again | Write |  |
 
@@ -255,6 +256,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 | Tool | What it does | Access | Basic |
 |---|---|---|---|
 | `p6_update_activity` | Edits an activity: name, durations, constraint, actual dates, physical % complete | Write |  |
+| `p6_update_activities` | Edits many activities in one all-or-nothing change (a progress update) | Write |  |
 | `p6_update_assignment` | Sets budgeted, actual or remaining units of one resource assignment | Write |  |
 | `p6_update_assignments` | Sets the units of many assignments in one all-or-nothing change | Write |  |
 | `p6_update_udf` | Sets or clears one activity UDF value | Write |  |
@@ -315,7 +317,7 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
 
 ![Settings: tools and safety](docs/images/settings-tools.png)
 
-- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 63).
+- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 65).
 - **Writes are off by default.** With the Full profile and "Allow write operations", every write takes two calls:
   a dry run that shows the plan and returns a single-use confirmation token, then, after your explicit yes, the
   same call with that token. Deleting a project or an activity and restoring a backup also need a confirmation
@@ -470,7 +472,7 @@ working copy (do them in P6 EPPM, then pull again). Tested against P6 EPPM 25.12
 
 **What is an MCP server for Primavera P6?**
 MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant
-63 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
+65 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
 computed from the schedule rather than guessed by the model.
 
 **Can the AI change my schedule?**
@@ -540,6 +542,9 @@ Yes, under the Apache License 2.0.
 - **"Unknown P6 schema"**: your P6 version was not tested; reads work. You can trust the schema under Database
   (after a backup).
 - **HTTP server error**: Server shows the last error (often a port in use: pick another one).
+- **An install or update did not take effect** (`p6_diagnose` still shows the old behaviour): Setup writes a log
+  of each install in `%TEMP%` (`Setup Log <date> #<n>.txt`; an automatic update writes
+  `%LOCALAPPDATA%\P6MCP\updates\setup.log`). It lists every file replaced and any error.
 - Logs: **Logs and updates > Open log folder** (`%LOCALAPPDATA%\P6MCP\logs`). Settings live in
   `%APPDATA%\P6MCP\config.json`; backups, edit log and XER copies in `%LOCALAPPDATA%\P6MCP`.
 

@@ -78,7 +78,7 @@
           "name": "What is an MCP server for Primavera P6?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "MCP (Model Context Protocol) is the open standard AI assistants use to call tools. MCP for Primavera P6 gives an assistant 63 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model."
+            "text": "MCP (Model Context Protocol) is the open standard AI assistants use to call tools. MCP for Primavera P6 gives an assistant 65 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model."
           }
         },
         {
@@ -181,7 +181,7 @@
         <p class="ov-name">MCP for Primavera P6</p>
         <p>Local server and Settings app</p>
         <ul class="ov-stats">
-          <li><b data-count="63">63</b>tools</li>
+          <li><b data-count="65">65</b>tools</li>
           <li><b data-count="15">15</b>core skills</li>
         </ul>
         <div class="ov-gates">
@@ -253,7 +253,7 @@
 </section>
 
 <section class="doc-section" id="tools" aria-labelledby="tools-h">
-  <h2 id="tools-h"><a class="anchor" href="#tools" aria-hidden="true" tabindex="-1">[[i:link]]</a>63 tools, grouped by job</h2>
+  <h2 id="tools-h"><a class="anchor" href="#tools" aria-hidden="true" tabindex="-1">[[i:link]]</a>65 tools, grouped by job</h2>
   <p>37 read-only tools (11 of them in the Basic profile, for small local models), 2 that write a file, 18 write tools that stay off until you allow them, and 1 that changes the app's own settings. Pick a tool to see what it does.</p>
   [[toolmap]]
 </section>
@@ -587,7 +587,7 @@
 <section class="doc-section" id="faq" aria-labelledby="faq-h">
   <h2 id="faq-h"><a class="anchor" href="#faq" aria-hidden="true" tabindex="-1">[[i:link]]</a>FAQ</h2>
   <div class="faq">
-    <details><summary>What is an MCP server for Primavera P6?</summary><div><p>MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant 63 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model.</p></div></details>
+    <details><summary>What is an MCP server for Primavera P6?</summary><div><p>MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant 65 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model.</p></div></details>
     <details><summary>Can the AI change my P6 schedule?</summary><div><p>Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9.</p></div></details>
     <details><summary>Does my schedule leave my PC?</summary><div><p>The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio.</p></div></details>
     <details><summary>Are the dates computed by the AI?</summary><div><p>No. Dates and float come from P6's last schedule run. What-if and risk use the server's CPM engine, and <code>p6_cpm_validate</code> shows how closely it matches P6's own dates on your project before you rely on it.</p></div></details>

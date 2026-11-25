@@ -3,6 +3,24 @@
 All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `p6_update_activities`: many activity edits in one change, all or nothing, for a progress update (actual dates,
+  remaining durations, physical %, names, constraints): one dry run and one confirmation instead of one per
+  activity. Each item follows the rules of `p6_update_activity`; one edit log entry per activity. Works on a P6
+  Professional database and on a P6 EPPM working copy (the edits become pending changes).
+- `p6_eppm_discard`: drops pending changes of a P6 EPPM working copy one by one, by the id `p6_eppm_status` now
+  shows for each change (and a push dry run gives with each conflict), or all of them. Each object gets back the
+  values it had at the pull; the other changes stay pending, and the server is not touched. Before, the only way
+  out of a conflict was a new pull that dropped every local change.
+
+### Changed
+
+- Setup writes a log of every install in `%TEMP%` (`Setup Log <date> #<n>.txt`), as automatic updates already did
+  in `%LOCALAPPDATA%\P6MCP\updates\setup.log`: a 3.0.0 install that replaced no file left nothing to read.
+
 ## [3.0.0] - 2026-11-25
 
 ### Added

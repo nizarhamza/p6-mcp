@@ -89,12 +89,14 @@ Facts an assistant should get right:
 - `p6_eppm_projects`: Lists the projects the P6 user can read on the P6 EPPM server (read)
 - `p6_eppm_pull`: Copies projects and their baselines from the P6 EPPM server into the local working copy (writes a file)
 - `p6_eppm_status`: Working copy of the P6 EPPM server: projects, pull time, pending local changes, changes on the server since (read)
+- `p6_eppm_discard`: Drops pending local changes of the P6 EPPM working copy, one by one or all, without a new pull (write)
 - `p6_eppm_push`: Sends the pending local changes to the P6 EPPM server after a conflict check and your yes (delete or replace)
 - `p6_eppm_schedule`: Schedules projects on the P6 EPPM server (P6's own F9), returns its log, then pulls them again (write)
 
 ### Edits (off by default)
 
 - `p6_update_activity`: Edits an activity: name, durations, constraint, actual dates, physical % complete (write)
+- `p6_update_activities`: Edits many activities in one all-or-nothing change (a progress update) (write)
 - `p6_update_assignment`: Sets budgeted, actual or remaining units of one resource assignment (write)
 - `p6_update_assignments`: Sets the units of many assignments in one all-or-nothing change (write)
 - `p6_update_udf`: Sets or clears one activity UDF value (write)
