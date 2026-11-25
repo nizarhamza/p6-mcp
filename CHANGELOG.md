@@ -3,7 +3,7 @@
 All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
-## [3.0.0] - Unreleased
+## [3.0.0] - 2026-11-25
 
 ### Added
 
