@@ -320,6 +320,12 @@ push and schedule. `INSTRUCTIONS` (ASCII, under 1 KB) gets one line on pull, edi
    `schedule_eppm` edit log entry. Checked on the test server: DEMO-SS225 scheduled in 12 s, pulled again, match
    rate 1.0. Found there: the pull wrote the schedule options with the pull time, which the staleness check read
    as an edit after the last F9; they are now stamped with the project's last schedule date.
+   Milestone 7 prepared on the branch: README (P6 EPPM server section, tool counts, FAQ), site source and pages,
+   CHANGELOG 3.0.0 (Unreleased), version 3.0.0 in `p6mcp/__init__.py` and `server.json`, the release checklist,
+   and an instruction line sent to clients in P6 EPPM mode only (`instructions.EPPM_LINE`: push and schedule where
+   a tool or skill says press F9 in P6; `data_source` joined the restart keys). The core skills themselves live
+   in the skill shop catalog and are unchanged. Not done: the release (tag, build, publication), which follows
+   the merge to main and the user's decision.
 2. SQL pull, working copy, read tools on it, `p6_eppm_projects`, `p6_eppm_status`.
 3. REST pull (calendar rebuild, schedule options).
 4. Local writes on the working copy, pending changes in `p6_eppm_status`.

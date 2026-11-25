@@ -14,7 +14,8 @@ from typing import Optional
 from p6mcp import config, instructions, policy, skills
 
 RESTART_KEYS = ("tool_profile", "allow_writes", "transport", "http_port", "instructions_disabled",
-                "custom_instructions", "skills_disabled", "custom_skills", "shop_enabled")  # read at server start
+                "custom_instructions", "skills_disabled", "custom_skills", "shop_enabled",
+                "data_source")  # read at server start (data_source: the P6 EPPM line of the instructions)
 
 
 def _dbs(data: dict) -> list[dict]:

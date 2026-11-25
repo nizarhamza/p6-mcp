@@ -248,6 +248,7 @@
   "xer.failed": "The files could not be loaded: {err}",
   "xer.renamed": "(Project ID {name} in the file)",
   "xer.counts": "activities: {tasks}, relationships: {links}",
+  "restart.data_source": "data source",
   "db.source.eppm": "A P6 EPPM server (REST API, optional read-only SQL)",
   "eppm.install": "Install the SQL driver",
   "eppm.install.ask": "Download the {driver} driver from PyPI (pypi.org) and install it for MCP for Primavera P6? Each file is checked against the checksum PyPI publishes.",

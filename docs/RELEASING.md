@@ -87,6 +87,11 @@ On a clean Windows 10 or 11 user account, with no Python installed:
 - [ ] Local HTTP: switch the transport, Save; the tray icon shows the server running; a client with the
       HTTP entry connects; a request without the token gets 401.
 - [ ] XER-only mode: load two XER files, compare the two updates.
+- [ ] P6 EPPM mode, against a test server only (never a customer server): Test connection with a wrong then the
+      right password (only the right one is stored), Install the SQL driver, pull a project with its baseline by
+      SQL and by REST (`p6_cpm_validate` match rate 1.0 on both), an edit and a new relationship pending, a push
+      refused on a change made in P6 EPPM meanwhile, then a push that succeeds and its reverse, `p6_eppm_schedule`
+      with its log. Check in P6 EPPM that the server ends as it started.
 - [ ] Run at startup: sign out and in, the tray icon is there (minimized).
 - [ ] Upgrade over the previous version while the tray app runs: setup asks to close it; settings kept.
 - [ ] Uninstall: the p6mcp client entries and the startup entry are gone; settings, backups and logs stay.

@@ -134,6 +134,14 @@ def test_load_in_eppm_mode_reports_what_is_missing(clean_env):
     assert st.allow_writes is True  # the setting holds: EPPM writes change the local working copy only
 
 
+def test_instructions_name_the_eppm_tools_in_eppm_mode_only():
+    from p6mcp import instructions
+    text = instructions.build({"data_source": "eppm"})
+    assert "p6_eppm_push" in text and "p6_eppm_schedule" in text and text.isascii() and "--" not in text
+    assert "p6_eppm" not in instructions.build(None) and "p6_eppm" not in instructions.build({"data_source": "xer"})
+    assert "data_source" in settings_logic.RESTART_KEYS  # the server reads its instructions at start
+
+
 def test_migration_from_3_adds_the_eppm_keys(clean_env):
     clean_env.write_text(json.dumps({"schema_version": 3}), encoding="utf-8")
     data, steps = config.read_file()

@@ -247,6 +247,7 @@
   "xer.failed": "Impossible de charger les fichiers : {err}",
   "xer.renamed": "(identifiant de projet {name} dans le fichier)",
   "xer.counts": "activités : {tasks}, relations : {links}",
+  "restart.data_source": "source de données",
   "db.source.eppm": "Un serveur P6 EPPM (API REST, compte SQL en lecture seule facultatif)",
   "eppm.install": "Installer le pilote SQL",
   "eppm.install.ask": "Télécharger le pilote {driver} depuis PyPI (pypi.org) et l'installer pour MCP for Primavera P6 ? Chaque fichier est vérifié avec l'empreinte publiée par PyPI.",

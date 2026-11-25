@@ -3,6 +3,46 @@
 All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - Unreleased
+
+### Added
+
+- **P6 EPPM servers.** A third data source next to the P6 Professional database and XER files: a live P6 EPPM
+  server, on premises or on Oracle Cloud. In the Settings app, Database page, choose "A P6 EPPM server", add its
+  address, the database name of P6's sign-in page, your P6 user and password, and click Test connection (a
+  session sign-in on premises, an OAuth token on Oracle Cloud; it counts the projects you can read). A password
+  is kept in the Windows Credential Manager only once a test shows it works. An optional read-only SQL account
+  (SQL Server or Oracle) reads every table as stored; its driver (pymssql or oracledb) is downloaded from PyPI
+  only when you click Install the SQL driver, and each file is checked against the SHA-256 PyPI publishes.
+- `p6_eppm_projects` lists the projects your P6 user can read. `p6_eppm_pull` copies the projects you name, with
+  their current baseline, into a local working copy that every other tool reads (by SQL, or by REST alone: the
+  project from P6's XER export, the baseline from REST objects since P6 EPPM does not export a baseline, the
+  schedule options from REST). `route` chooses sql, rest or auto.
+- Edits in P6 EPPM mode change only the working copy: activity fields, relationships and assignment units, each
+  with its dry run and your confirmation. `p6_eppm_status` lists the pending changes, netted per object and
+  field, and counts the activities changed on the server since the pull. A pull refuses to drop pending changes
+  unless `discard_pending=True`.
+- `p6_eppm_push` sends the pending changes. It reads every changed object on the server and refuses on any
+  change made there since the pull (the server has no lock of its own), then, after your yes and the
+  confirmation text `PUSH TO <server>`, sends one object per call in a fixed order and stops at the first
+  failure. A journal records each call; what reached the server is no longer pending, so a new push sends the
+  rest. New relationships take the server's ObjectId.
+- `p6_eppm_schedule` runs P6 EPPM's own scheduler (optionally with a new data date), waits for the job, returns
+  P6's scheduling log with a short summary and pulls the projects again. It never runs by itself after a push.
+- In P6 EPPM mode, the instructions sent to MCP clients add one line: use `p6_eppm_push` and `p6_eppm_schedule`
+  where a tool or skill says to press F9 in P6.
+
+### Changed
+
+- Config schema 4 (`data_source: eppm`, `eppm_profiles`, `eppm_active`); an older version refuses the file
+  rather than misread it. Changing the data source now asks for a restart of the MCP client, since the
+  instructions depend on it.
+
+### Not in this version
+
+- Through a P6 EPPM working copy: deleting activities, UDF edits (their REST calls are not checked yet), schedule
+  options, EPS and other structure changes. Do them in P6 EPPM, then pull again.
+
 ## [2.2.0] - 2026-11-19
 
 ### Added
