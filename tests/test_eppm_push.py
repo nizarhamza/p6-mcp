@@ -59,7 +59,7 @@ def conds(filt: str) -> list[tuple[str, str]]:
 def make_handler(db):
     con = sqlite3.connect(db)
     projects = [{"ObjectId": "2", "Id": "DEMO-A", "Name": "Demo", "CurrentBaselineProjectObjectId": "",
-                 "LastUpdateDate": "2026-01-06T10:00:00-08:00"}]
+                 "LastUpdateDate": "2026-01-06T10:00:00-08:00", "DataDate": "2026-01-05T08:00:00"}]
     con.close()
     state = live_objects(db)
     seq = {"n": 900000}
@@ -68,6 +68,9 @@ def make_handler(db):
         live = state
         calls: list = []
         fail_on: set = set()  # (method, entity) answered 500
+        jobs: list = []
+        job_polls = 0
+        job_state = "Running"
 
         def log_message(self, *a):
             pass
@@ -95,6 +98,17 @@ def make_handler(db):
                 return self._send(200 if ok else 401, {"message": "ok"})
             if u.path.endswith("/logout"):
                 return self._send(200, {"message": "bye"})
+            if u.path.endswith("/job/schedule"):
+                body = self._body()
+                H.jobs.append(body)
+                H.job_polls = 0
+                return self._send(201, [{"JobId": "1:7", "JobStatus": "Pending"}])
+            if u.path.endswith("/job/readJobLog"):
+                return self._send(201, [{"JobLog": "Primavera P6 Scheduling Log\nStatistics\n  Number of Activities: "
+                                                   "7\nErrors\n  Activities that have invalid relationship loops\n"
+                                                   "    none\nScheduling Results\n  Earliest Data Date: January-05-2026"
+                                                   "\n  Latest Early Finish Date: March-02-2026 05:00 PM\nExceptions\n"
+                                                   "  Critical Activities: 3\n"}])
             entity = u.path.rsplit("/", 1)[1]
             body = self._body()
             H.calls.append(("POST", entity, body))
@@ -134,6 +148,9 @@ def make_handler(db):
                 return self._send(401, {"message": "not signed in"})
             entity = u.path.rsplit("/", 1)[1]
             filt = parse_qs(u.query).get("Filter", [""])[0]
+            if entity == "readJobStatus":
+                H.job_polls += 1
+                return self._send(200, {"JobStatus": "Complete" if H.job_polls > 1 else H.job_state})
             if entity == "fields":
                 return self._send(404, {"message": "no"})
             if entity == "project":
@@ -264,6 +281,36 @@ def test_first_failure_stops_and_a_new_push_resumes(push_env):
     _dry, res = push(p6)
     assert res["applied"] and len(res["sent"]) == 2 and [m for m, _e, _b in H.calls] == ["PUT", "PUT"]
     assert H.live["activity"][str(ta)]["Name"] == "First" and H.live["activity"][str(tb)]["Name"] == "Second"
+
+
+def test_schedule_on_the_server_then_pull(push_env, monkeypatch):
+    from p6mcp.eppm import jobs
+    monkeypatch.setattr(jobs, "POLL_S", 0.01)
+    p6, H = push_env
+    dry = p6.call("p6_eppm_schedule")
+    assert dry["would_do"][0].startswith("Schedule DEMO-A on srv (data date 2026-01-05 08:00, unchanged)")
+    assert "confirmation_text_required" not in dry and dry.get("confirmation_token")
+    res = p6.call("p6_eppm_schedule", dry_run=False, confirmation_token=dry["confirmation_token"])
+    assert res["applied"] and H.jobs == [{"ProjectObjectId": [2]}] and res["job"]["status"] == "Complete"
+    assert res["log_facts"] == {"activities": 7, "critical": 3, "data_date": "January-05-2026",
+                                "latest_early_finish": "March-02-2026 05:00 PM", "loops": False}
+    assert res["pull"]["rows"]["TASK"] == 7
+    # a new data date is sent as such
+    dry = p6.call("p6_eppm_schedule", new_data_date="2026-02-02 08:00", pull_after=False)
+    assert "-> 2026-02-02 08:00" in dry["would_do"][0]
+    p6.call("p6_eppm_schedule", new_data_date="2026-02-02 08:00", pull_after=False, dry_run=False,
+            confirmation_token=dry["confirmation_token"])
+    assert H.jobs[-1] == {"ProjectObjectId": [2], "NewDataDate": "2026-02-02T08:00:00"}
+    # local changes pending: scheduling then pulling would drop them, so it is refused
+    code = rows(store.store_path("srv"), "SELECT task_code FROM TASK WHERE proj_id = 2 ORDER BY task_id")[0][0]
+    p6.apply("p6_update_activity", project="DEMO-A", task_code=code, task_name="Not pushed")
+    dry = p6.call("p6_eppm_schedule")
+    assert dry["would_refuse"] and "pending" in dry["refuse_reasons"][0] and "confirmation_token" not in dry
+    # a job that fails is reported with its log, and nothing is pulled
+    H.job_state = "Failed"  # the first status read answers it
+    dry = p6.call("p6_eppm_schedule", pull_after=False)
+    res = p6.call("p6_eppm_schedule", pull_after=False, dry_run=False, confirmation_token=dry["confirmation_token"])
+    assert res["applied"] is False and res["job"]["status"] == "Failed" and "pull" not in res
 
 
 def test_push_needs_the_confirmation_text_and_writes_allowed(push_env):

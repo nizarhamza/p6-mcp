@@ -463,6 +463,15 @@ def _finish(out: sqlite3.Connection, profile: dict, projects: list[dict], sched_
                 vals = {k: (v if k == "key_activity_for_multiple_longest_paths"
                             else s._norm_opt("scheduling", k, v, lenient=True)[0]) for k, v in vals.items()}
                 s._set_props(out, p["object_id"], "scheduling", vals, lpl, now)
+                # a copy of the server's options, not an edit: stamped with the project's last schedule, so the
+                # staleness check (rows changed after the last F9) does not count the pull itself
+                cols = {r[1].lower() for r in out.execute("PRAGMA table_info(PROJPROP)")}
+                lsd = out.execute("SELECT last_schedule_date FROM PROJECT WHERE proj_id = ?",
+                                  (p["object_id"],)).fetchone()
+                for c in ("update_date", "create_date"):
+                    if c in cols:
+                        out.execute(f"UPDATE PROJPROP SET {c} = ? WHERE proj_id = ? AND prop_name = 'scheduling'",
+                                    (lsd[0] if lsd else None, p["object_id"]))
             except (ValueError, sqlite3.Error) as e:
                 warnings.append(f"{p['project_id']}: schedule options not stored: {e}")
     finally:

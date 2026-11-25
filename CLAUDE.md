@@ -171,6 +171,11 @@ stay outside this repository.
   `store.update_manifest(pushed_entries=, push=)`, local TASKPRED ids replaced by the server's. UDF tools are out
   of `EPPM_EDIT_TOOLS` until their REST calls are checked. Tests: `tests/test_eppm_push.py` (fake server with a
   live state, `fail_on`).
+  Milestone 6 (server schedule): `eppm/jobs.py` `schedule(sess, oids, new_data_date)` (`POLL_S`, `TIMEOUT_S`,
+  terminal / running status patterns, log capped at `LOG_MAX`) and `log_facts`; `p6_eppm_schedule(projects,
+  new_data_date, pull_after, confirm)` WRITE kind, refused while changes are pending when it pulls after, then
+  `_eppm_pull_now` (shared with `p6_eppm_pull`). The pull stamps PROJPROP 'scheduling' with the project's
+  `last_schedule_date` (a copy, not an edit, for `_stale_f9`).
 
 - Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (copies the brand icon, version
   resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`

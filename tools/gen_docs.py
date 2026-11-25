@@ -34,7 +34,8 @@ GROUPS: list[tuple[str, list[str]]] = [
     ("Comparison, what-if and risk", ["p6_compare_projects", "p6_update_integrity", "p6_cpm_validate",
                                       "p6_schedule_whatif", "p6_schedule_risk"]),
     ("XER files", ["p6_inspect_xer", "p6_import_xer", "p6_export_xer"]),
-    ("P6 EPPM server", ["p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status", "p6_eppm_push"]),
+    ("P6 EPPM server", ["p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status", "p6_eppm_push",
+                        "p6_eppm_schedule"]),
     ("Edits (off by default)", ["p6_update_activity", "p6_update_assignment", "p6_update_assignments",
                                 "p6_update_udf", "p6_update_udfs", "p6_add_relationship", "p6_add_relationships",
                                 "p6_update_relationship", "p6_update_relationships", "p6_delete_relationship",
@@ -94,6 +95,8 @@ SUMMARY = {
     "p6_eppm_status": "Working copy of the P6 EPPM server: projects, pull time, pending local changes, changes on "
                       "the server since",
     "p6_eppm_push": "Sends the pending local changes to the P6 EPPM server after a conflict check and your yes",
+    "p6_eppm_schedule": "Schedules projects on the P6 EPPM server (P6's own F9), returns its log, then pulls them "
+                        "again",
     "p6_update_activity": "Edits an activity: name, durations, constraint, actual dates, physical % complete",
     "p6_update_assignment": "Sets budgeted, actual or remaining units of one resource assignment",
     "p6_update_assignments": "Sets the units of many assignments in one all-or-nothing change",

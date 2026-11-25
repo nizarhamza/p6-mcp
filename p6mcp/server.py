@@ -337,7 +337,7 @@ EPPM_EDIT_TOOLS = frozenset({
     "p6_update_activity", "p6_update_assignment", "p6_update_assignments",
     "p6_add_relationship", "p6_add_relationships", "p6_update_relationship", "p6_update_relationships",
     "p6_delete_relationship", "p6_delete_relationships", "p6_backup_database", "p6_restore_backup",
-    "p6_eppm_push"})
+    "p6_eppm_push", "p6_eppm_schedule"})
 EPPM_NEXT = ("Changed in the local working copy only: nothing is sent to the P6 EPPM server until p6_eppm_push "
              "(dry run first, then the user's yes). p6_eppm_status lists the pending changes.")
 
@@ -12527,16 +12527,24 @@ def p6_eppm_pull(projects: list[str], include_baseline: bool = True,
     its driver installed, else rest.
     A pull rebuilds the working copy: it is refused while local edits are pending (see p6_eppm_status)
     unless discard_pending=True, which drops them (ask the user first)."""
-    from p6mcp import credentials
-    from p6mcp.eppm import rest, sql
     p = _eppm_profile()
     if not projects:
         raise ValueError("Name at least one project (Project ID, see p6_eppm_projects).")
     waiting = _eppm_pending()
     if waiting and not discard_pending:
         raise ValueError(f"{len(waiting)} local change(s) are pending in the working copy and a pull would drop them. "
-                         "Push them first (a later version), or pull with discard_pending=True if the user agrees to "
+                         "Push them first (p6_eppm_push), or pull with discard_pending=True if the user agrees to "
                          "lose them. See p6_eppm_status.")
+    out = _eppm_pull_now(p, projects, include_baseline, route)
+    if waiting:
+        out["discarded_changes"] = len(waiting)
+    return out
+
+
+def _eppm_pull_now(p: dict, projects: list[str], include_baseline: bool = True, route: str = "auto") -> dict:
+    """Pull into the working copy (the checks on pending changes are the caller's)."""
+    from p6mcp import credentials
+    from p6mcp.eppm import rest, sql
     if route not in _eppm_store.ROUTES:
         raise ValueError(f"route must be one of {list(_eppm_store.ROUTES)}")
     spw = None
@@ -12563,14 +12571,10 @@ def p6_eppm_pull(projects: list[str], include_baseline: bool = True,
     _cols_cache.clear()
     _schema_cache.clear()
     _refresh()
-    out = {"server": p["name"], "pulled_at": m["pulled_at"], "seconds": m["seconds"], "route": m["route"],
-           "projects": m["projects"], "rows": m["rows"], "warnings": m["warnings"],
-           "next": "Every tool now reads the working copy. Edits change the copy only (p6_eppm_status lists them); "
-                   "the push to the server comes in a later version."}
-    if waiting:
-        out["discarded_changes"] = len(waiting)
-    return out
-
+    return {"server": p["name"], "pulled_at": m["pulled_at"], "seconds": m["seconds"], "route": m["route"],
+            "projects": m["projects"], "rows": m["rows"], "warnings": m["warnings"],
+            "next": "Every tool now reads the working copy. Edits change the copy only (p6_eppm_status lists them) "
+                    "until p6_eppm_push."}
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
 def p6_eppm_status(check_server: bool = True) -> dict:
@@ -12682,6 +12686,77 @@ def p6_eppm_push(confirm: bool = False) -> dict:
         out["failed"] = {"what": res["failed"]["label"], "error": res["failed"].get("error")}
         out["next"] = ("The push stopped at the first failure; the changes listed in sent reached the server. Fix "
                        "the cause, then push again: only the rest is sent.")
+    return out
+
+
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True})
+def p6_eppm_schedule(projects: Optional[list[str]] = None, new_data_date: Optional[DateTimeStr] = None,
+                     pull_after: bool = True, confirm: bool = False) -> dict:
+    """P6 EPPM mode: schedule projects on the server with P6's own scheduler (F9 in P6), wait for the job,
+    return P6's scheduling log, then pull them again so the tools read the new dates.
+    projects: Project IDs (default: the pulled ones). new_data_date: move the data date (YYYY-MM-DD
+    [HH:MM]); omitted, the data date stays. It rewrites the dates of every activity on the server: ask the
+    user first. With pull_after, it is refused while local changes are pending (push them first)."""
+    from p6mcp.eppm import jobs, rest
+    p = _eppm_profile()
+    m = EPPM_MANIFEST or {}
+    names = [str(x).strip() for x in (projects or [x["project_id"] for x in m.get("projects", [])]) if str(x).strip()]
+    if not names:
+        raise ValueError("Name the projects to schedule (Project IDs, see p6_eppm_projects).")
+    dd = None
+    if new_data_date:
+        dd = _parse_dt(new_data_date, "new_data_date")[0].strftime("%Y-%m-%dT%H:%M:%S")
+    waiting = _eppm_pending() if pull_after else []
+    try:
+        with _eppm_session(p) as sess:
+            listed = {str(r.get("Id", "")).lower(): r for r in sess.read("project", ["ObjectId", "Id", "DataDate"])}
+            missing = [n for n in names if n.lower() not in listed]
+            if missing:
+                raise ValueError(f"Not found among the projects this P6 user can read: {', '.join(missing)}")
+            targets = [listed[n.lower()] for n in names]
+            plan = [f"Schedule {t['Id']} on {p['name']} (data date "
+                    + (f"{(t.get('DataDate') or '')[:16].replace('T', ' ')} -> {dd[:16].replace('T', ' ')}" if dd
+                       else f"{(t.get('DataDate') or '?')[:16].replace('T', ' ')}, unchanged") + ")" for t in targets]
+            if pull_after:
+                plan.append("Then pull them again into the working copy")
+            mismatch = _plan_gate(plan, confirm)
+            if not confirm:
+                out = {"dry_run": True, "would_do": plan,
+                       "note": "P6 rewrites the early and late dates and the float of every activity of these "
+                               "projects on the server."}
+                if waiting:
+                    out.update(would_refuse=True, refuse_reasons=[
+                        f"{len(waiting)} local change(s) are pending: push them (p6_eppm_push) before scheduling, or "
+                        "schedule with pull_after=False"])
+                return out
+            if mismatch:
+                return {"applied": False, "error": mismatch}
+            if waiting:
+                return {"applied": False, "error": f"{len(waiting)} local change(s) are pending: push them first."}
+            job = jobs.schedule(sess, [int(t["ObjectId"]) for t in targets], dd)
+    except (rest.EppmError, jobs.JobError) as e:
+        raise ValueError(str(e)) from None
+    out = {"applied": job["finished"], "server": p["name"], "projects": [t["Id"] for t in targets],
+           "job": {k: job[k] for k in ("job_id", "status", "seconds")}, "log_facts": jobs.log_facts(job["log"]),
+           "log": job["log"], "log_truncated": job["log_truncated"]}
+    try:
+        _log_write([{"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(DB_PATH or "eppm"),
+                     "tool": "p6_eppm_schedule", "operation": "schedule_eppm", "project": ", ".join(out["projects"]),
+                     "proj_id": None, "table": None, "keys": {"server": p["name"]}, "before": None,
+                     "after": {"job": out["job"], "new_data_date": dd}, "summary": "; ".join(plan)}])
+    except OSError:
+        pass
+    if not job["finished"]:
+        out["next"] = (f"The schedule job ended as {job['status']!r}: read the log, fix the cause in P6 EPPM, then "
+                       "schedule again.")
+        return out
+    if pull_after:
+        pulled = _eppm_pull_now(p, sorted({x["project_id"] for x in m.get("projects", [])} | set(out["projects"])),
+                                route=m.get("route") if m.get("route") in ("sql", "rest") else "auto")
+        out["pull"] = {k: pulled[k] for k in ("pulled_at", "seconds", "route", "rows", "warnings")}
+        out["next"] = "Scheduled on the server and pulled again: the tools read P6's new dates."
+    else:
+        out["next"] = "Scheduled on the server. Pull again (p6_eppm_pull) to read the new dates."
     return out
 
 

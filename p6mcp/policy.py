@@ -45,6 +45,7 @@ TOOL_KIND: dict[str, str] = {
     "p6_update_relationship": WRITE, "p6_update_relationships": WRITE, "p6_delete_relationship": WRITE,
     "p6_delete_relationships": WRITE, "p6_create_eps": WRITE, "p6_import_xer": WRITE,
     "p6_set_schedule_options": WRITE, "p6_backup_database": WRITE,
+    "p6_eppm_schedule": WRITE,  # schedules on the P6 EPPM server (two-step flow), then pulls
     # destructive
     "p6_delete_activity": DESTRUCTIVE, "p6_delete_project": DESTRUCTIVE, "p6_restore_backup": DESTRUCTIVE,
     "p6_eppm_push": DESTRUCTIVE,  # writes to the P6 EPPM server

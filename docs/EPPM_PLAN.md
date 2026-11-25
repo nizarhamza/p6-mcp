@@ -312,6 +312,14 @@ push and schedule. `INSTRUCTIONS` (ASCII, under 1 KB) gets one line on pull, edi
    read back over REST, then the reverse changes pushed, leaving DEMO-SS225 as it was. After a push the
    working copy keeps the local values while P6 may derive others (a not started activity's original duration
    follows its remaining one): pull again after scheduling on the server.
+   Milestone 6 done (`p6mcp/eppm/jobs.py`, tool `p6_eppm_schedule`, a write tool with the two-step flow):
+   `jobs.schedule` posts `/job/schedule` (`NewDataDate` only when asked), follows `readJobStatus` until a final
+   status, reads the log (`readJobLog`, `log_facts`: activities, critical count, data date, finish, loops),
+   then the tool pulls the projects again (same route) unless `pull_after=False`; it is refused while local
+   changes are pending (the pull would drop them), never runs after a push by itself (D6), and records a
+   `schedule_eppm` edit log entry. Checked on the test server: DEMO-SS225 scheduled in 12 s, pulled again, match
+   rate 1.0. Found there: the pull wrote the schedule options with the pull time, which the staleness check read
+   as an edit after the last F9; they are now stamped with the project's last schedule date.
 2. SQL pull, working copy, read tools on it, `p6_eppm_projects`, `p6_eppm_status`.
 3. REST pull (calendar rebuild, schedule options).
 4. Local writes on the working copy, pending changes in `p6_eppm_status`.

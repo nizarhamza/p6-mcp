@@ -235,6 +235,8 @@ def test_server_tools_in_eppm_mode(p6, eppm_env, monkeypatch):
     assert [r["proj_short_name"] for r in p6.call("p6_list_projects")["rows"]] == ["DEMO-A"]
     v = p6.call("p6_cpm_validate", project="DEMO-A")
     assert v["match_rate"] is not None
+    # the schedule options the pull writes are a copy, not an edit after the last F9
+    assert (v.get("stale_f9_detail") or {}).get("schedule_options_changed") is None
     with pytest.raises(ValueError, match="not available on a P6 EPPM working copy"):
         p6.call("p6_import_xer", path="x.xer")
     st = p6.call("p6_eppm_status")
