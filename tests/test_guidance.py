@@ -105,6 +105,18 @@ def test_offered_with_turned_off_and_custom_commands():
     assert skills.offered("full", True) == skills.offered("full", True, config.DEFAULTS)
 
 
+def test_eppm_mode_hides_the_skills_whose_write_tools_the_working_copy_refuses(server, monkeypatch):
+    core = [s.name for s in core_skills.bundled_skills()]
+    raw = config.validate(dict(config.DEFAULTS, tool_profile="full", allow_writes=True))
+    for eppm, expected in ((None, core), ("srv", [n for n in core if n != "update-import-safely"])):
+        monkeypatch.setattr(server, "STARTUP", dataclasses.replace(server.STARTUP, raw=raw, tool_profile="full",
+                                                                   allow_writes=True, eppm=eppm))
+        monkeypatch.setattr(server, "PROMPTS", {})
+        monkeypatch.setattr(server, "mcp", server.FastMCP("primavera-p6", instructions=instructions.build(raw)))
+        server._register_prompts()
+        assert sorted(server.PROMPTS) == sorted(expected)
+
+
 def test_server_registers_custom_prompts_and_instructions(server, monkeypatch):
     core = [s.name for s in core_skills.bundled_skills()]  # offered until the core set is installed
     raw = config.validate(settings_logic.put_instruction(settings_logic.put_skill(

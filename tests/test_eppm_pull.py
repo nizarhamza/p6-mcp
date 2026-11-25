@@ -147,8 +147,10 @@ def make_handler(db, xer: bytes = b"", baseline: str = ""):
                     want = set(re.findall(r"ObjectId :eq: (\d+)", filt))
                     rows = [r for r in rows if r["ObjectId"] in want]
                 return self._send(200, rows)
-            if entity == "activity":
-                return self._send(200, [{"ObjectId": "1"}])
+            if entity == "activity":  # one activity, changed on the server after the pull (11:00 > 10:00)
+                changed = "LastUpdateDate:gt:" in filt
+                return self._send(200, [{"ObjectId": "1", "LastUpdateDate": "2026-01-06T11:00:00-08:00" if changed
+                                         else "2026-01-06T09:00:00-08:00"}])
             return self._send(404, {"message": "no"})
     return H
 
@@ -246,6 +248,7 @@ def test_server_tools_in_eppm_mode(p6, eppm_env, monkeypatch):
     assert p6.call("p6_eppm_projects", search="demo")["rows"][0]["pulled"] is True
     d = p6.call("p6_diagnose")
     assert d["eppm_mode"]["projects"] == ["DEMO-A"] and "p6_eppm_push" in d["eppm_mode"]["note"]
+    assert d["schema"]["label"] == "P6 EPPM working copy" and d["schema"]["writable"] and d["writes"] == "allowed"
     dry = p6.call("p6_update_activity", project="DEMO-A", task_code="A1000", task_name="x")
     assert dry["confirmation_token"] and "P6 must be closed" not in dry["next"]  # P6 never opens the copy
     vault.clear()

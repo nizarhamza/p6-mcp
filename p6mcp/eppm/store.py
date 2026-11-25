@@ -113,12 +113,17 @@ def read_manifest(profile_name: str) -> Optional[dict]:
     return m
 
 
-def update_manifest(profile_name: str, pushed_entries: Iterable[str] = (), push: Optional[dict] = None) -> dict:
-    """Record a push in pull.json: the edit log entries it sent (no longer pending) and a short summary."""
+def update_manifest(profile_name: str, pushed_entries: Iterable[str] = (), push: Optional[dict] = None,
+                    pushed_activities: Optional[dict] = None) -> dict:
+    """Record a push in pull.json: the edit log entries it sent (no longer pending), a short summary and
+    pushed_activities = {activity ObjectId: its server LastUpdateDate read just after the push}, so that
+    p6_eppm_status does not report the user's own push as a change made by someone else on the server."""
     m = read_manifest(profile_name)
     if m is None:
         raise PullError("No working copy to update.")
     m["pushed_entries"] = list(dict.fromkeys(list(m.get("pushed_entries", [])) + list(pushed_entries)))
+    if pushed_activities:
+        m["pushed_activities"] = {**m.get("pushed_activities", {}), **pushed_activities}
     if push:
         m["pushes"] = (m.get("pushes", []) + [push])[-20:]
     path = os.path.join(store_dir(profile_name), MANIFEST_FILE)
@@ -249,13 +254,19 @@ def _server_info(sess, wanted: set[str], include_baseline: bool) -> tuple[list, 
     for p in projects:
         rows = sess.read("scheduleOptions", SCHED_FIELDS, f"ProjectObjectId :eq: {p['object_id']}")
         sched_rows[p["object_id"]] = rows[0] if rows else None
+        # the latest activity change, read before the copy: an activity edit does not change the project's
+        # LastUpdateDate, so that alone would start p6_eppm_status's comparison too early (an activity changed
+        # before the pull, already in the copy, counted as changed since; seen on P6 EPPM 25.12)
+        acts = sess.read("activity", ["ObjectId", "LastUpdateDate"], f"ProjectObjectId :eq: {p['object_id']}")
+        p["_stamp"] = max((str(a.get("LastUpdateDate") or "")[:19] for a in acts), default="")
     return listed, projects, sched_rows
 
 
 def _write(profile: dict, tmp: str, route: str, started: datetime, listed: list, projects: list[dict],
            counts: dict, warnings: list[str]) -> dict:
     oids = {p["object_id"] for p in projects}
-    stamp = max((str(p.get("LastUpdateDate") or "") for p in listed if int(p["ObjectId"]) in oids), default="")
+    stamp = max([str(p.get("LastUpdateDate") or "")[:19] for p in listed if int(p["ObjectId"]) in oids]
+                + [p.pop("_stamp", "") for p in projects], default="")
     manifest = {"store_version": STORE_VERSION, "server": profile["base_url"], "profile": profile["name"],
                 "route": route, "pulled_at": started.isoformat(timespec="seconds"),
                 "pulled_ts": started.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],  # edit log precision (pending changes)

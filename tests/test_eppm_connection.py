@@ -150,6 +150,10 @@ def test_instructions_name_the_eppm_tools_in_eppm_mode_only():
     from p6mcp import instructions
     text = instructions.build({"data_source": "eppm"})
     assert "p6_eppm_push" in text and "p6_eppm_schedule" in text and text.isascii() and "--" not in text
+    # nothing of P6 Professional: no SQLite header, no "P6 must be closed", no XER import of new activities
+    assert text.startswith(instructions.EPPM_HEADER) and "standalone SQLite" not in text
+    assert "P6 must be closed" not in text and "p6_import_xer" not in text and "dry_run=true" in text
+    assert "P6 must be closed" in instructions.build(None)
     assert "p6_eppm" not in instructions.build(None) and "p6_eppm" not in instructions.build({"data_source": "xer"})
     assert "data_source" in settings_logic.RESTART_KEYS  # the server reads its instructions at start
 

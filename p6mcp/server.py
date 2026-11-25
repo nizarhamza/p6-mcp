@@ -619,11 +619,19 @@ def _tool(annotations: Mapping[str, bool]):
 PROMPTS: dict[str, Callable[..., str]] = {}  # P6 skill -> its MCP prompt function (offered under the settings)
 
 
+def _eppm_skill_ok(cmd) -> bool:
+    """A skill works on a P6 EPPM working copy unless one of its tools is a write tool the copy refuses."""
+    return not any(_policy.is_write(t) and t not in EPPM_EDIT_TOOLS for t in cmd.tools())
+
+
 def _register_prompts() -> None:
     """Offer the P6 skills (p6mcp.skills.offered: the skills installed and turned on, from the shop or the
     user's own; the bundled core set until the first start has installed it) whose tools are all offered,
-    as MCP prompts (reference files inline)."""
+    as MCP prompts (reference files inline). On a P6 EPPM server, a skill that needs a write tool the working copy
+    refuses (update-import-safely: p6_import_xer) is not offered."""
     for cmd in _skills.offered(STARTUP.tool_profile, STARTUP.allow_writes, STARTUP.raw):
+        if STARTUP.eppm and not _eppm_skill_ok(cmd):
+            continue
         def fn(_cmd=cmd, **values) -> str:
             return _skills.prompt_text(_cmd, values)
         P = inspect.Parameter
@@ -8277,6 +8285,18 @@ def p6_sql_select(sql: str, offset: Offset = 0, limit: Limit = 200) -> dict:
     return res
 
 
+def _diag_schema(info: dict) -> dict:
+    """The schema block of p6_diagnose. A P6 EPPM working copy is built by p6_eppm_pull, not by P6 Professional: its
+    fingerprint is never a known one and the schema write check does not apply to it (_write_refusal)."""
+    out = {k: info[k] for k in ("label", "p6_version", "fingerprint", "known", "trusted", "readable", "writable",
+                                "missing", "tables")}
+    if SETTINGS.eppm:
+        out.update(label="P6 EPPM working copy", writable=not info["missing"],
+                   note="Built by p6_eppm_pull from the server, not by P6 Professional: no known P6 fingerprint, "
+                        "and the P6 Professional schema check does not apply (writes: see writes).")
+    return out
+
+
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_diagnose() -> dict:
     """Start here when a tool reports a configuration problem. Shows the server settings in force
@@ -8325,8 +8345,7 @@ def p6_diagnose() -> dict:
         info = _schema_info()
         out.update({
             "db_path": DB_PATH,
-            "schema": {k: info[k] for k in ("label", "p6_version", "fingerprint", "known", "trusted", "readable",
-                                            "writable", "missing", "tables")},
+            "schema": _diag_schema(info),
             "writes": _write_refusal() or "allowed",
             "tables": {t: sorted(_cols(con, t))[:60] for t in ("TASK", "TASKPRED", "PROJECT", "CALENDAR")},
             "nextkey_rows": nk,
@@ -9714,7 +9733,8 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
         return {"applied": False, "error": mismatch, **base}
     if not confirm:
         return {"dry_run": True, "would_do": plan, **base,
-                "next": "Call again with confirm=True to restore (P6 must be closed)."}
+                "next": "Call again with confirm=True to restore"
+                        + (" (the local working copy only)." if SETTINGS.eppm else " (P6 must be closed).")}
     err = _guard_write()
     if err:
         raise RuntimeError(err)
@@ -12579,11 +12599,41 @@ def _eppm_pull_now(p: dict, projects: list[str], include_baseline: bool = True, 
             "next": "Every tool now reads the working copy. Edits change the copy only (p6_eppm_status lists them) "
                     "until p6_eppm_push."}
 
+def _srv_time(v: Any) -> str:
+    """A server LastUpdateDate as 'YYYY-MM-DD HH:MM:SS' on the server's clock (offset dropped, as the filters take it)."""
+    return str(v or "").replace("T", " ")[:19]
+
+
+def _eppm_pushed_stamps(sess, sent: list[dict]) -> dict[str, str]:
+    """{activity ObjectId: server LastUpdateDate} read back just after a push, for the activities its calls touched
+    (updated ones, both ends of a relationship, the activity of an assignment). p6_eppm_status leaves an activity
+    out of the server changes while its LastUpdateDate is still this one. A read failure only loses that filter."""
+    from p6mcp.eppm import rest
+    ids: set[int] = set()
+    for x in sent:
+        if x["table"] == "TASK":
+            ids.add(int(x["object_id"]))
+        for k in ("task_id", "pred_task_id"):
+            v = (x["change"].get("refs") or {}).get(k)
+            if v is not None:
+                ids.add(int(v))
+    out: dict[str, str] = {}
+    todo = sorted(ids)
+    try:
+        for i in range(0, len(todo), 100):
+            for r in sess.read("activity", ["ObjectId", "LastUpdateDate"],
+                               " :or: ".join(f"ObjectId :eq: {x}" for x in todo[i:i + 100])):
+                out[str(int(r["ObjectId"]))] = _srv_time(r.get("LastUpdateDate"))
+    except rest.EppmError:
+        return {}
+    return out
+
+
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
 def p6_eppm_status(check_server: bool = True) -> dict:
     """P6 EPPM mode: the working copy (server, pull time, route, projects, rows, warnings) and, with
-    check_server, how many activities of each pulled project changed on the server since the pull
-    (one read per project: pull again to bring them in)."""
+    check_server, how many activities of each pulled project someone changed on the server since the pull
+    (one read per project: pull again to bring them in); the user's own pushes are counted apart."""
     p = _eppm_profile()
     m = EPPM_MANIFEST
     out: dict[str, Any] = {"server": p["name"], "address": p["base_url"], "pulled": m is not None}
@@ -12602,14 +12652,24 @@ def p6_eppm_status(check_server: bool = True) -> dict:
     if check_server and m.get("server_stamp"):
         from p6mcp.eppm import rest
         stamp = m["server_stamp"].replace("T", " ")
-        changed = {}
+        mine = m.get("pushed_activities") or {}
+        changed, yours = {}, {}
         try:
             with _eppm_session(p) as s:
                 for x in m["projects"]:
-                    rows = s.read("activity", ["ObjectId"],
+                    rows = s.read("activity", ["ObjectId", "LastUpdateDate"],
                                   f"ProjectObjectId :eq: {int(x['object_id'])} :and: LastUpdateDate:gt:'{stamp}'")
-                    changed[x["project_id"]] = len(rows)
-            out["changed_on_server"] = {"since": stamp, "activities": changed}
+                    # the server keeps fractions of a second: the activity whose change is the stamp matches gt
+                    rows = [r for r in rows if _srv_time(r.get("LastUpdateDate")) > stamp]
+                    own = [r for r in rows if str(int(r["ObjectId"])) in mine
+                           and _srv_time(r.get("LastUpdateDate")) <= mine[str(int(r["ObjectId"]))]]
+                    changed[x["project_id"]] = len(rows) - len(own)
+                    yours[x["project_id"]] = len(own)
+            out["changed_on_server"] = {
+                "since": m["pulled_at"], "since_server_clock": stamp, "activities": changed, "pushed_by_you": yours,
+                "note": "activities = changed on the server by someone else since the pull (since: the pull, on this "
+                        "PC's clock; since_server_clock: where the server comparison starts, on the server's clock). "
+                        "pushed_by_you = activities your own pushes changed: the working copy already has them."}
         except rest.EppmError as e:
             out["changed_on_server"] = {"error": str(e)}
     return out
@@ -12657,6 +12717,7 @@ def p6_eppm_push(confirm: bool = False) -> dict:
                 return {"applied": False, "error": "The push is refused: " + "; ".join(reasons)}
             journal = os.path.join(_eppm_store.store_dir(p["name"]), f"push_{datetime.now():%Y%m%d_%H%M%S}.jsonl")
             res = _push.apply(sess, pl["calls"], journal)
+            mine = _eppm_pushed_stamps(sess, res["sent"])
     except rest.EppmError as e:
         raise ValueError(str(e)) from None
     # what reached the server (or was there already) no longer counts as pending; new relationships take their ids
@@ -12671,7 +12732,7 @@ def p6_eppm_push(confirm: bool = False) -> dict:
     record = {"at": datetime.now().isoformat(timespec="seconds"), "sent": len(res["sent"]),
               "already_done": len(pl["already_done"]), "failed": (res["failed"] or {}).get("label"),
               "journal": journal}
-    _eppm_store.update_manifest(p["name"], pushed_entries=done, push=record)
+    _eppm_store.update_manifest(p["name"], pushed_entries=done, push=record, pushed_activities=mine)
     try:
         _log_write([{"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(DB_PATH),
                      "tool": "p6_eppm_push", "operation": "push_eppm", "project": None, "proj_id": None,
