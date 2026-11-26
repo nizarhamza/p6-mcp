@@ -31,6 +31,8 @@ TTL_SECONDS = 15 * 60
 MAX_TOKENS = 200  # oldest dropped beyond this (a client looping on dry runs cannot grow memory)
 PLAN_SKIP = ("Backup: ", "Safety backup: ")  # plan lines that only exist when applying
 OWNER: ContextVar[Optional[str]] = ContextVar("p6_confirm_owner", default=None)  # caller of the running call
+# Who made the running call, for the edit log: {"transport": "remote", "grant": ..., "app": ...} (None: local)
+CLIENT: ContextVar[Optional[dict]] = ContextVar("p6_confirm_client", default=None)
 
 
 def canonical(params: dict) -> str:

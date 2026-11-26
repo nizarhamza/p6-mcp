@@ -32,11 +32,12 @@ import socket
 from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import urlencode, urlparse
 
+import anyio
 from mcp.server.auth.provider import AccessToken
 
 from p6mcp import i18n
-from p6mcp.remote import READ_SCOPE, WRITE_SCOPE
-from p6mcp.remote.store import APPROVAL_SECONDS, Store
+from p6mcp.remote import READ_SCOPE, WRITE_SCOPE, audit
+from p6mcp.remote.store import APPROVAL_SECONDS, Store, TooManyRequests
 
 log = logging.getLogger("p6mcp.remote.auth")
 SCOPES = [READ_SCOPE, WRITE_SCOPE]
@@ -72,7 +73,7 @@ class StoreVerifier:
         self.store = store
 
     async def verify_token(self, token: str) -> Optional[AccessToken]:
-        g = self.store.check_access(token)
+        g = await anyio.to_thread.run_sync(self.store.check_access, token)  # SQLite off the event loop
         if g is None:
             return None
         return AccessToken(token=token, client_id=g["client_id"], scopes=g["scopes"], expires_at=g["exp"],
@@ -112,7 +113,11 @@ async def resolve_client(client_id: str, store: Store, fetch: Optional[Fetcher] 
     if c is not None:
         return c
     u = urlparse(client_id)
-    if u.scheme != "https" or u.hostname not in CIMD_HOSTS or u.port not in (None, 443) or not u.path.strip("/"):
+    try:
+        port = u.port
+    except ValueError:  # https://claude.ai:abc/x
+        return None
+    if u.scheme != "https" or u.hostname not in CIMD_HOSTS or port not in (None, 443) or not u.path.strip("/"):
         return None
     doc = store.cimd_get(client_id)
     if doc is None:
@@ -193,9 +198,14 @@ def _message(key: str, status: int = 400):
     return _page(i18n.tr("remote.page.title_error"), f"<p>{html.escape(i18n.tr(key))}</p>", status=status)
 
 
+def _event(what: str, **fields) -> None:
+    audit.write("oauth", what=what, ip=audit.CLIENT_IP.get(), **fields)
+
+
 def _oauth_error(status: int, error: str, desc: str = ""):
     from starlette.responses import JSONResponse
     log.info("oauth error %s: %s", error, desc)
+    _event("error", error=error, detail=desc[:200])
     return JSONResponse({"error": error, "error_description": desc}, status_code=status, headers=NO_STORE)
 
 
@@ -234,8 +244,9 @@ def add_routes(srv: Any, issuer: str, resource: str, store: Store, extra_redirec
         if bad:
             return _oauth_error(400, "invalid_redirect_uri", f"redirect URI not allowed: {bad[0]}")
         name = str(body.get("client_name") or urlparse(uris[0]).hostname or "client")[:80]
-        cid = store.add_client(name, uris)
+        cid = await anyio.to_thread.run_sync(store.add_client, name, uris)
         log.info("client registered (DCR): %s", name)
+        _event("registered", app=name, hosts=sorted({urlparse(u).hostname for u in uris}))
         return JSONResponse({"client_id": cid, "client_name": name, "redirect_uris": uris,
                              "token_endpoint_auth_method": "none", "response_types": ["code"],
                              "grant_types": ["authorization_code", "refresh_token"]}, status_code=201, headers=NO_STORE)
@@ -266,14 +277,20 @@ def add_routes(srv: Any, issuer: str, resource: str, store: Store, extra_redirec
         if any(s not in SCOPES for s in asked):
             return back(error="invalid_scope", error_description=f"scopes: {' '.join(SCOPES)}", state=state)
         scopes = [READ_SCOPE] + [s for s in asked if s == WRITE_SCOPE]
-        req = store.add_pending(client, redirect, state, challenge, scopes, resource)
-        log.info("connection request from %s (%s), code %s", client["client_name"], client["via"], req["pair"])
+        try:
+            req = await anyio.to_thread.run_sync(store.add_pending, client, redirect, state, challenge, scopes,
+                                                 resource)
+        except TooManyRequests:
+            _event("busy", app=client["client_name"])
+            return _message("remote.page.busy", 429)
+        log.info("connection request from %s (%s)", client["client_name"], client["via"])
+        _event("request", app=client["client_name"], via=client["via"], host=urlparse(redirect).hostname)
         return RedirectResponse(f"/authorize/wait?id={req['id']}", status_code=302, headers=NO_STORE)
 
     @srv.custom_route("/authorize/wait", methods=["GET"])
     async def authorize_wait(request: Request) -> Response:
         rid = request.query_params.get("id", "")
-        out = store.finish_pending(rid) if _RID.match(rid) else None
+        out = await anyio.to_thread.run_sync(store.finish_pending, rid) if _RID.match(rid) else None
         if out is None:
             return _message("remote.page.unknown", 404)
         req = out["request"]
@@ -281,12 +298,14 @@ def add_routes(srv: Any, issuer: str, resource: str, store: Store, extra_redirec
         sep = "&" if "?" in redirect else "?"
         if out["status"] == "approved":
             log.info("connection approved: %s, grant %s", req["client_name"], out["grant"])
+            _event("approved", app=req["client_name"], grant=out["grant"], scopes=req["scopes"])
             params = {"code": out["code"], "iss": issuer}
             if req["state"] is not None:
                 params["state"] = req["state"]
             return RedirectResponse(redirect + sep + urlencode(params), status_code=302, headers=NO_STORE)
         if out["status"] in ("denied", "expired"):
             log.info("connection %s: %s", out["status"], req["client_name"])
+            _event(out["status"], app=req["client_name"])
             params = {"error": "access_denied", "iss": issuer}
             if req["state"] is not None:
                 params["state"] = req["state"]
@@ -310,7 +329,7 @@ def add_routes(srv: Any, issuer: str, resource: str, store: Store, extra_redirec
         if res and str(res).rstrip("/") != resource:
             return _oauth_error(400, "invalid_target", "resource mismatch")
         if gt == "authorization_code":
-            rec = store.take_code(str(form.get("code", "")))
+            rec = await anyio.to_thread.run_sync(store.take_code, str(form.get("code", "")))
             if rec is None:
                 return _oauth_error(400, "invalid_grant", "unknown or expired code")
             if form.get("redirect_uri") != rec["redirect_uri"]:
@@ -320,11 +339,16 @@ def add_routes(srv: Any, issuer: str, resource: str, store: Store, extra_redirec
             if not pkce_ok(str(form.get("code_verifier", "")), rec["challenge"]):
                 store.revoke(rec["grant_id"])
                 return _oauth_error(400, "invalid_grant", "PKCE verification failed")
-            return JSONResponse(store.issue(rec["grant_id"]), headers=NO_STORE)
+            _event("token", grant=rec["grant_id"])
+            return JSONResponse(await anyio.to_thread.run_sync(store.issue, rec["grant_id"]), headers=NO_STORE)
         if gt == "refresh_token":
-            out, why = store.refresh(str(form.get("refresh_token", "")), str(cid) if cid else None)
+            out, why = await anyio.to_thread.run_sync(store.refresh, str(form.get("refresh_token", "")),
+                                                      str(cid) if cid else None)
             if out is None:
+                if why and "reused" in why:
+                    _event("reuse", app=str(cid) if cid else None)
                 return _oauth_error(400, "invalid_grant", why or "invalid refresh token")
+            _event("refresh")
             return JSONResponse(out, headers=NO_STORE)
         return _oauth_error(400, "unsupported_grant_type", str(gt))
 
@@ -334,9 +358,10 @@ def add_routes(srv: Any, issuer: str, resource: str, store: Store, extra_redirec
             form = await request.form()
         except Exception:
             return _oauth_error(400, "invalid_request", "form body required")
-        gid = store.revoke_token(str(form.get("token", "")))
+        gid = await anyio.to_thread.run_sync(store.revoke_token, str(form.get("token", "")))
         if gid:
             log.info("connection revoked by its client: grant %s", gid)
+            _event("revoked", grant=gid)
         return Response(status_code=200, headers=NO_STORE)
 
 

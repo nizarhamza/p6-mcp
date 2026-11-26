@@ -31,6 +31,8 @@ ACCESS_TTL = 3600
 REFRESH_TTL = 30 * 86400
 CODE_TTL = 60
 APPROVAL_SECONDS = 300
+MAX_OPEN = 3  # connection requests waiting at once (a flood of approval windows is refused at /authorize)
+CLIENT_KEEP = 30 * 86400  # DCR clients without a live connection are forgotten after this
 CIMD_CACHE = 86400
 PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I: read on one screen, typed on another
 SCHEMA = """
@@ -65,6 +67,10 @@ def _now() -> int:
     return int(time.time())
 
 
+class TooManyRequests(RuntimeError):
+    """MAX_OPEN connection requests are already waiting for a decision."""
+
+
 class Store:
     def __init__(self, path: Optional[str] = None):
         self.path = path or default_path()
@@ -83,6 +89,8 @@ class Store:
     def add_client(self, name: str, redirect_uris: list[str]) -> str:
         cid = "p6c-" + uuid.uuid4().hex
         with closing(self._con()) as con:
+            con.execute("DELETE FROM clients WHERE created < ? AND client_id NOT IN "
+                        "(SELECT client_id FROM grants WHERE revoked IS NULL)", (_now() - CLIENT_KEEP,))
             con.execute("INSERT INTO clients VALUES (?, ?, ?, ?)", (cid, name, json.dumps(redirect_uris), _now()))
         return cid
 
@@ -111,11 +119,18 @@ class Store:
         rid = secrets.token_urlsafe(18)
         pair = "".join(secrets.choice(PAIR_ALPHABET) for _ in range(6))
         with closing(self._con()) as con:
+            con.execute("BEGIN IMMEDIATE")
             con.execute("DELETE FROM pending WHERE created < ?", (_now() - 3600,))
+            n = con.execute("SELECT COUNT(*) FROM pending WHERE status = 'pending' AND created >= ?",
+                            (_now() - APPROVAL_SECONDS,)).fetchone()[0]
+            if n >= MAX_OPEN:
+                con.execute("ROLLBACK")
+                raise TooManyRequests(f"{n} connection requests are already waiting")
             con.execute("INSERT INTO pending (id, pair, client_id, client_name, via, redirect_uri, state, challenge, "
                         "scopes, resource, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (rid, pair, client["client_id"], client["client_name"], client["via"], redirect_uri, state,
                          challenge, json.dumps(scopes), resource, _now()))
+            con.execute("COMMIT")
         return self.pending(rid)
 
     def pending(self, rid: str) -> Optional[dict]:
@@ -151,9 +166,27 @@ class Store:
             con.execute("COMMIT")
         return self.pending(r["id"])
 
+    def decide_request(self, rid: str, typed_code: str, approve: bool, edits: bool = False) -> Optional[dict]:
+        """The approval window's decision, by request id. Approving needs the code the user's own browser shows,
+        typed on the PC: a request started by someone else shows its code in their browser, not the user's.
+        Returns the request (status approved / denied), {"mismatch": True} for a wrong code, None when the request
+        is no longer waiting."""
+        req = self.pending(rid)
+        if req is None or req["status"] != "pending" or req["expires_in"] <= 0:
+            return None
+        if approve and (typed_code or "").strip().upper() != req["pair"]:
+            return {"mismatch": True}
+        return self.decide(req["pair"], approve, edits)
+
     def finish_pending(self, rid: str) -> Optional[dict]:
         """The browser came back for a decided (or expired) request: an approved one becomes a grant and an
         authorization code. Returns {status, code?, grant?, request} once, None when unknown or already finished."""
+        with closing(self._con()) as con:  # the browser polls every 2 s: a plain read first, the write lock after
+            r = con.execute("SELECT status, created FROM pending WHERE id = ?", (rid,)).fetchone()
+        if r is None:
+            return None
+        if r["status"] == "pending" and r["created"] >= _now() - APPROVAL_SECONDS:
+            return {"status": "pending", "request": self.pending(rid)}
         with closing(self._con()) as con:
             con.execute("BEGIN IMMEDIATE")
             r = con.execute("SELECT * FROM pending WHERE id = ?", (rid,)).fetchone()

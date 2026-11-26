@@ -20,17 +20,19 @@ from p6mcp import config, credentials
 from p6mcp.clients.base import launch
 from p6mcp.supervisor import DISABLED, ERROR, RUNNING, State, Supervisor
 
+WAITING = State("starting", error=None)  # tunnel state while the server is not running yet
+
 TUNNEL_TOKEN_KEY = "remote:tunnel_token"  # Credential Manager
 CLOUDFLARED_ENV = "P6MCP_CLOUDFLARED"     # development: path of a cloudflared.exe to use
 log = logging.getLogger("p6mcp.remote.supervise")
 
 
 def cloudflared_path() -> Optional[str]:
-    """The bundled cloudflared.exe (installed beside the app), else P6MCP_CLOUDFLARED, else one on PATH."""
+    """The bundled cloudflared.exe (installed beside the app). Development only (not frozen): P6MCP_CLOUDFLARED,
+    else one on PATH. An installed app never runs another cloudflared: it would receive the tunnel token."""
     if getattr(sys, "frozen", False):
         p = os.path.join(os.path.dirname(sys.executable), "cloudflared", "cloudflared.exe")
-        if os.path.isfile(p):
-            return p
+        return p if os.path.isfile(p) else None
     p = os.environ.get(CLOUDFLARED_ENV)
     if p and os.path.isfile(p):
         return p
@@ -98,13 +100,16 @@ class RemoteHost:
                                  label="tunnel connector", out_log="tunnel.out.log",
                                  env=lambda st: {"TUNNEL_TOKEN": self._token or ""}, **kw)
         self._token: Optional[str] = None
+        self._server_up = False
         self.state = RemoteState(State(DISABLED), State(DISABLED))
 
     def _want_server(self, st: config.Settings):
         return int(st.remote_port) if remote_wanted(st) else None
 
     def _want_tunnel(self, st: config.Settings):
-        if not remote_wanted(st) or not self._token:
+        # only behind our own server: if another program held the port, the tunnel would hand it the relay secret
+        # and the clients' tokens
+        if not remote_wanted(st) or not self._token or not self._server_up:
             return None
         # a new token (repair) restarts the connector; the key is logged, so a digest, never the token
         return f"{st.remote_public_host} {hashlib.sha256(self._token.encode()).hexdigest()[:8]}"
@@ -116,7 +121,12 @@ class RemoteHost:
         if remote_wanted(st) and not self._token:
             problem = ("The tunnel token is missing: run the Cloudflare setup again (Repair) in MCP for Primavera P6 "
                        "Settings (Remote access).")
-        self.state = RemoteState(self.server.tick(), self.tunnel.tick(), problem)
+        server = self.server.tick()
+        self._server_up = server.state == RUNNING
+        tunnel = self.tunnel.tick()
+        if remote_wanted(st) and self._token and not self._server_up:
+            tunnel = WAITING
+        self.state = RemoteState(server, tunnel, problem)
         want_awake = bool(st.raw.get("remote_keep_awake", True)) and self.state.server.state != DISABLED
         if want_awake != self.awake_on:
             self.awake(want_awake)

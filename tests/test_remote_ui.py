@@ -221,20 +221,38 @@ def test_french_page(qtbot, env):
 REQ = {"id": "r1", "pair": "ABC234", "client_name": "Claude", "redirect_uri": "https://claude.ai/api/mcp/auth_callback"}
 
 
-def test_approval_dialog(qtbot):
+def test_approval_dialog_needs_the_typed_code(qtbot):
+    from PySide6.QtWidgets import QLabel
     calls = []
-    d = ApprovalDialog(REQ, True, lambda pair, ok, edits: calls.append((pair, ok, edits)) or {"status": "approved"})
+
+    def decide(rid, code, ok, edits):
+        calls.append((rid, code, ok, edits))
+        if ok and code.upper() != REQ["pair"]:
+            return {"mismatch": True}
+        return {"status": "approved" if ok else "denied"}
+    d = ApprovalDialog(REQ, True, decide)
     qtbot.addWidget(d)
-    assert d.code.text() == "ABC234" and "claude.ai" in d.findChildren(type(d.code))[0].text()
-    assert d.deny_btn.isDefault() and d.edits.isEnabled()
+    texts = " ".join(lab.text() for lab in d.findChildren(QLabel))
+    assert REQ["pair"] not in texts and "claude.ai" in texts  # the PC never shows the code: it is typed
+    assert d.deny_btn.isDefault() and d.edits.isEnabled() and not d.approve_btn.isEnabled()
+    d.code.setText("WRONG1")
+    d.approve_btn.click()
+    assert d.error.isVisibleTo(d) and "Tries left: 2" in d.error.text() and d.code.text() == ""
+    d.code.setText("abc234")
     d.edits.setChecked(True)
     d.approve_btn.click()
-    assert calls == [("ABC234", True, True)] and d.result_text == "approved"
-    d2 = ApprovalDialog(REQ, False, lambda pair, ok, edits: calls.append((pair, ok, edits)) or {"status": "denied"})
+    assert calls[-1] == ("r1", "abc234", True, True) and d.result_text == "approved"
+    d2 = ApprovalDialog(dict(REQ, via="dcr"), False, decide)
     qtbot.addWidget(d2)
-    assert not d2.edits.isEnabled()
+    assert not d2.edits.isEnabled() and "not verified" in " ".join(lab.text() for lab in d2.findChildren(QLabel))
     d2.deny_btn.click()
-    assert calls[-1] == ("ABC234", False, False)
+    assert calls[-1] == ("r1", "", False, False) and d2.result_text == "denied"
+    d3 = ApprovalDialog(REQ, True, decide)
+    qtbot.addWidget(d3)
+    for _ in range(3):  # three wrong codes deny the request
+        d3.code.setText("ZZZZZZ")
+        d3.approve_btn.click()
+    assert d3.result_text == "denied" and calls[-1] == ("r1", "", False, False)
 
 
 class FakeRemote:
@@ -281,7 +299,8 @@ def test_tray_approvals_and_stop(qtbot, env, monkeypatch):
         app.poll_approvals()
         dlg = app.approvals[req["id"]]
         qtbot.addWidget(dlg)
-        assert dlg.code.text() == req["pair"] and dlg.edits.isEnabled()
+        assert dlg.edits.isEnabled() and not dlg.approve_btn.isEnabled()
+        dlg.code.setText(req["pair"])  # as read in the user's browser
         dlg.edits.setChecked(True)
         dlg.approve_btn.click()
         assert store.pending(req["id"])["status"] == "approved" and "p6:write" in store.pending(req["id"])["scopes"]

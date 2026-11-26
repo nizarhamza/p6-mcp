@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import ntpath
 import re
-from typing import Any
+from typing import Any, Optional
 
 MAX_CHARS = 100_000
 _WHOLE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/])")
@@ -34,16 +34,43 @@ def _name(path: str) -> str:
     return ntpath.basename(path.rstrip("\\/")) or path
 
 
-def redact(obj: Any) -> Any:
-    """A copy of obj with every absolute local path reduced to its file name."""
+def known_roots(folders: dict) -> list[tuple[str, str]]:
+    """(folder, label) pairs, longest first: a folder inside a sentence becomes its label even when it has spaces
+    ("C:\\Users\\John Smith\\...\\backups" -> "backups"); the user profile becomes "~"."""
+    out = []
+    for path, label in folders.items():
+        if path and len(path) > 3:
+            out.append((ntpath.normpath(path).rstrip("\\/"), label or _name(path)))
+    return sorted(out, key=lambda p: -len(p[0]))
+
+
+def _roots_sub(text: str, roots: list[tuple[str, str]]) -> str:
+    low = text.lower()
+    for path, label in roots:
+        i = low.find(path.lower())
+        while i >= 0:
+            end = i + len(path)
+            if end == len(text) or text[end] in "\\/ ,;:.'\")":
+                text = text[:i] + label + text[end:]
+                low = text.lower()
+                i = low.find(path.lower(), i + len(label))
+            else:
+                i = low.find(path.lower(), end)
+    return text
+
+
+def redact(obj: Any, roots: Optional[list[tuple[str, str]]] = None) -> Any:
+    """A copy of obj with every absolute local path reduced to its file name (known folders to their label)."""
     if isinstance(obj, str):
         if _WHOLE.match(obj):
             return _name(obj)
+        if roots:
+            obj = _roots_sub(obj, roots)
         return _INNER.sub(lambda m: _name(m.group(0)), obj) if ("\\" in obj or ":/" in obj) else obj
     if isinstance(obj, dict):
-        return {k: redact(v) for k, v in obj.items()}
+        return {k: redact(v, roots) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
-        return [redact(v) for v in obj]
+        return [redact(v, roots) for v in obj]
     return obj
 
 
@@ -81,6 +108,6 @@ def fit(obj: Any, limit: int = MAX_CHARS) -> Any:
     raise TooLarge(TOO_LARGE.format(size=n, limit=limit))
 
 
-def shape(obj: Any, limit: int = MAX_CHARS) -> Any:
+def shape(obj: Any, limit: int = MAX_CHARS, roots: Optional[list[tuple[str, str]]] = None) -> Any:
     """Redacted, then fitted to the budget."""
-    return fit(redact(obj), limit)
+    return fit(redact(obj, roots), limit)

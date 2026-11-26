@@ -50,7 +50,15 @@ stay outside this repository.
   `TUNNEL_TOKEN` in its environment, never on the command line; `SetThreadExecutionState` keep-awake), ticked and
   stopped by the tray. `supervisor.Supervisor` is generic (`want`, `status`, `label`, `out_log`, `env`).
   `packaging/cloudflared.py` pins and fetches cloudflared.exe (version + SHA-256) for the build; the spec puts it in
-  `P6MCP\cloudflared\`. Remote rules: never
+  `P6MCP\cloudflared\` (an installed app never runs another cloudflared). `audit.py`: `remote\audit_*.jsonl`
+  (http, tool, oauth events; never values, tokens, codes or query strings; argument digests keyed by
+  `remote\audit.key`; 90 days), `audit.CLIENT_IP`; `limits.py`: per-IP token buckets (`LIMITS`, /authorize/wait
+  included) and the optional allowlist (Anthropic ranges, OpenAI's chatgpt-connectors.json, daily, last good copy;
+  only /mcp, /token, /register, /revoke). Approval needs the code typed on the PC (`Store.decide_request`, the PC
+  never shows it; at most `MAX_OPEN` waiting requests); the tunnel starts only once our remote server reports
+  running; remote `p6_sql_select` reads password columns as NULL (`_SQL_SECRET_COL`); `confirm.CLIENT` puts the
+  remote connection in the edit log; `--remote` needs mcp 2.x. Remote tests set their own LOCALAPPDATA (the audit
+  log must never reach the real profile). Remote rules: never
   `REMOTE_NEVER` (local path tools, destructive, config, shop), writes need `remote_allow_writes` plus scope
   `p6:write`. A new tool needs a remote decision (`tests/test_remote.py`).
 - `p6mcp/schema.py`: schema fingerprint (SHA-256 of table.column names), `KNOWN_SCHEMAS`, P6 version from

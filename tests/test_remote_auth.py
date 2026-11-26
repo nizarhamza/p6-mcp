@@ -38,6 +38,12 @@ DOCS = {CLAUDE: {"client_id": CLAUDE, "client_name": "Claude", "redirect_uris": 
 FETCHED = []
 
 
+@pytest.fixture(autouse=True)
+def _own_localappdata(tmp_path, monkeypatch):
+    """The remote access server writes its audit log under LOCALAPPDATA: never the real profile in tests."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+
+
 async def fake_fetch(url):
     FETCHED.append(url)
     if url in DOCS:

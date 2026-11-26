@@ -19,7 +19,6 @@ identifier the tokens are bound to.
 from __future__ import annotations
 
 import argparse
-import contextvars
 import functools
 import hmac
 import logging
@@ -30,8 +29,10 @@ from p6mcp import config, credentials, policy, runtime
 from p6mcp import confirm as _confirm
 from p6mcp.remote import (CLIENT_IP_HEADER, PATH, READ_SCOPE, RELAY_HEADER, RELAY_SECRET_KEY, public_url,
                           resource_url, shaping)
+from p6mcp.remote import audit
 from p6mcp.remote import auth as _auth
 from p6mcp.remote.auth import grant_of
+from p6mcp.remote.limits import FILTERED, Allowlist, RateLimiter
 from p6mcp.remote.store import Store
 
 HOST = "127.0.0.1"
@@ -39,7 +40,7 @@ BODY_CAP = 1_048_576  # bytes of one request body (an MCP call is a few KB)
 STATUS = "remote"
 REMOTE_LINE = ("Remote session (claude.ai or ChatGPT): file import and export tools are not available here; edits, "
                "when allowed, need a connection approved with edits on the PC.")
-CLIENT_IP: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("p6_remote_client_ip", default=None)
+CLIENT_IP = audit.CLIENT_IP
 log = logging.getLogger("p6mcp.remote")
 
 
@@ -60,30 +61,60 @@ def _remote_tool(name: str, gated: Callable, tool_error: Optional[type],
     def fail(msg: str):
         raise (tool_error or ValueError)(msg)
 
+    writes = policy.remote_kind(name) == "write"
+
+    def roots():
+        return _local_roots(S)
+
     @functools.wraps(gated)
     def call(*a, **k):
         tok = get_access_token()
-        st = S._refresh()
-        why = policy.remote_refusal(name, st.tool_profile, st.allow_writes, st.remote_allow_writes,
-                                    tok.scopes if tok else None, S._shop_on(st), args=k)
-        if why:
-            fail(why)
-        owner = _confirm.OWNER.set(grant_of(tok))
+        claims = getattr(tok, "claims", None) or {}
+        grant, app = grant_of(tok), claims.get("client_name") or (tok.client_id if tok else None)
+        timer, state = audit.Timer(), {"result": "error", "chars": None}
         try:
-            res = gated(*a, **k)
-        except Exception as e:
-            if tool_error is not None and isinstance(e, tool_error):
-                raise
-            fail(shaping.redact(str(e) if isinstance(e, (ValueError, RuntimeError)) else f"{type(e).__name__}: {e}"))
+            st = S._refresh()
+            why = policy.remote_refusal(name, st.tool_profile, st.allow_writes, st.remote_allow_writes,
+                                        tok.scopes if tok else None, S._shop_on(st), args=k)
+            if why:
+                state["result"] = "refused"
+                fail(why)
+            owner = _confirm.OWNER.set(grant)
+            client = _confirm.CLIENT.set({"transport": "remote", "grant": grant, "app": app})
+            try:
+                res = gated(*a, **k)
+            except Exception as e:
+                if tool_error is not None and isinstance(e, tool_error):
+                    raise
+                fail(shaping.redact(str(e) if isinstance(e, (ValueError, RuntimeError))
+                                    else f"{type(e).__name__}: {e}", roots()))
+            finally:
+                _confirm.CLIENT.reset(client)
+                _confirm.OWNER.reset(owner)
+            if name == "p6_diagnose" and isinstance(res, dict):
+                res = _remote_diagnose(res, st, tok, listed)
+            try:
+                out = shaping.shape(res, roots=roots())
+            except shaping.TooLarge as e:
+                state["result"] = "too_large"
+                fail(str(e))
+            state.update(result="ok", chars=shaping.size(out))
+            return out
         finally:
-            _confirm.OWNER.reset(owner)
-        if name == "p6_diagnose" and isinstance(res, dict):
-            res = _remote_diagnose(res, st, tok, listed)
-        try:
-            return shaping.shape(res)
-        except shaping.TooLarge as e:
-            fail(str(e))
+            audit.write("tool", tool=name, grant=grant, app=app, ip=CLIENT_IP.get(), args=audit.digest(k),
+                        dry_run=not (k.get("confirm") or k.get("dry_run") is False) if writes else None,
+                        result=state["result"], ms=timer.ms(), chars=state["chars"])
     return call
+
+
+def _local_roots(S) -> list[tuple[str, str]]:
+    """The folders of this PC that results may name: database, backups, edit log, app data, user profile."""
+    import os
+    st = S.SETTINGS
+    folders = {os.path.dirname(S.DB_PATH) if S.DB_PATH else "": None, st.backup_dir: None, st.edit_log_dir: None,
+               config.localdata_dir(): None, config.appdata_dir(): None,
+               os.environ.get("USERPROFILE", ""): "~"}
+    return shaping.known_roots(folders)
 
 
 def _remote_diagnose(res: dict, st: config.Settings, tok: Any, listed: Optional[list[str]]) -> dict:
@@ -124,15 +155,18 @@ def instructions() -> str:
 def build_mcp(st: config.Settings, verifier: Any, store: Optional[Store] = None, fetch: Any = None):
     """A FastMCP/MCPServer of its own for remote clients: OAuth resource server for https://<host>/mcp, the
     remote tool set (no prompts in this version) and, with a store, the authorization server's routes."""
+    from mcp.server.auth.provider import AccessToken
     from mcp.server.auth.settings import AuthSettings
     from p6mcp import server as S
+    if "validate_token_resource" not in AuthSettings.model_fields or "claims" not in AccessToken.model_fields:
+        raise SetupError("Remote access needs the mcp package 2.x (token resource check and connection ids): "
+                         "update MCP for Primavera P6.")
     if not st.remote_public_host:
         raise SetupError("Remote access is not set up: no public address. Run the Cloudflare setup in MCP for "
                          "Primavera P6 Settings (Remote access).")
     host = st.remote_public_host
     auth_kw = dict(issuer_url=public_url(host), resource_server_url=resource_url(host), required_scopes=[READ_SCOPE])
-    if "validate_token_resource" in AuthSettings.model_fields:  # mcp 2.x: refuse tokens of another resource
-        auth_kw["validate_token_resource"] = True
+    auth_kw["validate_token_resource"] = True  # refuse tokens issued for another resource
     srv = S.FastMCP("primavera-p6", instructions=instructions(), token_verifier=verifier,
                     auth=AuthSettings(**auth_kw), **S._version_kw)
     if store is not None:
@@ -151,10 +185,11 @@ def build_mcp(st: config.Settings, verifier: Any, store: Optional[Store] = None,
 # ----------------------------------------------------------------- guard and app
 
 class RemoteGuard:
-    """ASGI middleware in front of the SDK app: relay secret (relay mode) or Host (domain mode), body cap, and the
-    caller's IP (as the relay reports it) in CLIENT_IP for the audit log."""
+    """ASGI middleware in front of the SDK app: relay secret (relay mode) or Host (domain mode), the optional IP
+    allowlist, rate limits, body cap, the caller's IP in CLIENT_IP and one audit line per request."""
 
-    def __init__(self, app, mode: str, public_host: str, relay_secret: Optional[str]):
+    def __init__(self, app, mode: str, public_host: str, relay_secret: Optional[str],
+                 limiter: Optional[RateLimiter] = None, allowlist: Optional[Allowlist] = None):
         if mode == "relay" and not relay_secret:
             raise SetupError("Remote access is not set up: the relay secret is missing. Run the Cloudflare setup "
                              "again (Repair) in MCP for Primavera P6 Settings (Remote access).")
@@ -162,18 +197,36 @@ class RemoteGuard:
         self.mode = mode
         self.host = public_host.lower()
         self.secret = (relay_secret or "").encode("utf-8")
+        self.limiter = limiter or RateLimiter()
+        self.allowlist = allowlist
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":  # lifespan: the SDK's session manager starts and stops here
             await self.app(scope, receive, send)
             return
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        path = scope.get("path", "")
         if self.mode == "relay":
             if not hmac.compare_digest(headers.get(RELAY_HEADER, "").encode("utf-8"), self.secret):
                 await _reply(send, 403, "Forbidden")
                 return
+            ip = headers.get(CLIENT_IP_HEADER) or None
         elif headers.get("host", "").lower() != self.host:
             await _reply(send, 421, "Invalid Host header")
+            return
+        else:
+            ip = headers.get("cf-connecting-ip") or None  # set by Cloudflare's edge in front of the tunnel
+        timer = audit.Timer()
+        if self.allowlist is not None and path in FILTERED:
+            self.allowlist.refresh_if_old()
+            if not self.allowlist.allows(ip):
+                audit.write("http", method=scope["method"], path=path, status=403, ip=ip, reason="allowlist")
+                await _reply(send, 403, "Not from an allowed AI service (the IP allowlist is on)")
+                return
+        ok, wait = self.limiter.allow(path, ip)
+        if not ok:
+            audit.write("http", method=scope["method"], path=path, status=429, ip=ip, reason="rate limit")
+            await _reply(send, 429, "Too many requests", {"retry-after": str(wait)})
             return
         try:
             length = int(headers.get("content-length") or 0)
@@ -193,18 +246,29 @@ class RemoteGuard:
                     raise ValueError("request body too large")
             return msg
 
-        tok = CLIENT_IP.set(headers.get(CLIENT_IP_HEADER) or None)
+        info = {"status": None, "bytes": 0}
+
+        async def counted_send(msg):
+            if msg["type"] == "http.response.start":
+                info["status"] = msg["status"]
+            elif msg["type"] == "http.response.body":
+                info["bytes"] += len(msg.get("body", b""))
+            await send(msg)
+
+        tok = CLIENT_IP.set(ip)
         try:
-            await self.app(scope, capped_receive, send)
+            await self.app(scope, capped_receive, counted_send)
         finally:
             CLIENT_IP.reset(tok)
+            audit.write("http", method=scope["method"], path=path, status=info["status"], bytes=info["bytes"],
+                        ms=timer.ms(), ip=ip)
 
 
-async def _reply(send, status: int, text: str) -> None:
+async def _reply(send, status: int, text: str, extra: Optional[dict] = None) -> None:
     body = text.encode("utf-8")
-    await send({"type": "http.response.start", "status": status,
-                "headers": [(b"content-type", b"text/plain; charset=utf-8"),
-                            (b"content-length", str(len(body)).encode())]})
+    hdrs = [(b"content-type", b"text/plain; charset=utf-8"), (b"content-length", str(len(body)).encode())]
+    hdrs += [(k.encode(), v.encode()) for k, v in (extra or {}).items()]
+    await send({"type": "http.response.start", "status": status, "headers": hdrs})
     await send({"type": "http.response.body", "body": body})
 
 
@@ -228,7 +292,10 @@ def build_app(st: config.Settings, verifier: Any = None, relay_secret: Optional[
         allowed_hosts=sorted({host, f"{HOST}:{port}", f"{HOST}:*", "localhost:*"}),
         allowed_origins=sorted({public_url(host)}))
     app = srv.streamable_http_app(streamable_http_path=PATH, transport_security=security, host=HOST)
-    return RemoteGuard(app, st.remote_mode, host, relay_secret)
+    allowlist = Allowlist() if st.raw.get("remote_ip_allowlist") else None
+    if allowlist is not None:
+        allowlist.refresh_if_old()
+    return RemoteGuard(app, st.remote_mode, host, relay_secret, allowlist=allowlist)
 
 
 # ----------------------------------------------------------------- process

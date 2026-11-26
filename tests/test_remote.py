@@ -30,6 +30,12 @@ INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
 HDR = {"accept": "application/json, text/event-stream", "content-type": "application/json"}
 
 
+@pytest.fixture(autouse=True)
+def _own_localappdata(tmp_path, monkeypatch):
+    """The remote access server writes its audit log under LOCALAPPDATA: never the real profile in tests."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+
+
 class StubVerifier:
     """Tokens of TOKENS, bound to the test's resource (what the authorization server of M2 will issue)."""
 

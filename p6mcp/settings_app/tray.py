@@ -228,11 +228,11 @@ class TrayApp(QObject):
                 continue
             from p6mcp.settings_app.approval import ApprovalDialog
             dlg = ApprovalDialog(req, bool(st.remote_allow_writes),
-                                 lambda pair, ok, edits: self._store().decide(pair, ok, edits))
+                                 lambda rid, code, ok, edits: self._store().decide_request(rid, code, ok, edits))
             self.approvals[rid] = dlg
             if self.tray is not None:
                 self.tray.showMessage(tr("remote.approve.title"), tr("remote.approve.notify",
-                                                                     client=req["client_name"], code=req["pair"]),
+                                                                     client=req["client_name"]),
                                       QSystemTrayIcon.MessageIcon.Information, 8000)
             dlg.show()
             dlg.raise_()

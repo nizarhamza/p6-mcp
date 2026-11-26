@@ -316,17 +316,46 @@ def sleeper(tmp_path, name):
     return lambda key: [sys.executable, "-c", code], out
 
 
+def running_server(tmp_path):
+    """A child that reports itself running in the remote status file (as the remote access server does)."""
+    import p6mcp
+    root = os.path.dirname(os.path.dirname(p6mcp.__file__))
+    code = (f"import sys,time; sys.path.insert(0, r'{root}'); from p6mcp import runtime; "
+            "runtime.write_status('running', 41990, name='remote'); time.sleep(60)")
+    return lambda port: [sys.executable, "-c", code]
+
+
+def test_tunnel_waits_for_our_server(child_env):
+    tmp = child_env
+    tun_cmd, tun_env = sleeper(tmp, "tunnel-early")
+    srv_cmd, _ = sleeper(tmp, "silent-server")  # alive, but never reports running (another program has the port)
+    host = supervise.RemoteHost(settings=_settings(tmp), token=lambda: "tok", server_cmd=srv_cmd,
+                                tunnel_cmd=tun_cmd, awake=lambda on: None)
+    try:
+        for _ in range(3):
+            st = host.tick()
+            time.sleep(0.3)
+        assert host.tunnel.proc is None and st.tunnel.state == "starting" and not tun_env.exists()
+    finally:
+        host.stop()
+
+
 def test_remote_host_runs_both_and_keeps_awake(child_env):
     tmp = child_env
     settings = _settings(tmp)
-    srv_cmd, _ = sleeper(tmp, "server")
+    srv_cmd = running_server(tmp)
     tun_cmd, tun_env = sleeper(tmp, "tunnel")
     awake = []
     host = supervise.RemoteHost(settings=settings, token=lambda: "tunnel-token-123", server_cmd=srv_cmd,
                                 tunnel_cmd=tun_cmd, awake=awake.append)
     try:
         st = host.tick()
-        assert st.server.state != DISABLED and st.tunnel.state != DISABLED and awake == [True]
+        assert st.server.state != DISABLED and awake == [True]
+        deadline = time.monotonic() + 20
+        while host.tick().server.state != RUNNING:  # the tunnel starts once our server reports running
+            assert time.monotonic() < deadline
+            time.sleep(0.2)
+        host.tick()
         deadline = time.monotonic() + 15
         while not tun_env.exists() or not tun_env.read_text():
             assert time.monotonic() < deadline
@@ -362,6 +391,7 @@ def test_tunnel_key_never_holds_the_token(child_env):
     host = supervise.RemoteHost(settings=_settings(child_env), token=lambda: "secret-tunnel-token",
                                 server_cmd=lambda p: ["x"], tunnel_cmd=lambda k: ["x"], awake=lambda on: None)
     host._token = "secret-tunnel-token"
+    host._server_up = True
     key = host._want_tunnel(config.load())
     assert "secret" not in key and key.startswith("p6mcp-pc.x.workers.dev ")
 

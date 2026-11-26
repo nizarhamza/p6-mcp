@@ -1,8 +1,9 @@
 """The approval window of remote access: a connection request from claude.ai or ChatGPT, decided on this PC.
 
-The browser page of the request shows a pairing code; this window shows the same code, the app and its return
-host, and asks Approve or Deny (with "Allow edits" when edits from remote clients are on). It closes on its own
-when the request is decided elsewhere (command line) or expires after 5 minutes.
+The browser page of the request shows a pairing code; approving needs that code typed here. A request that someone
+else started (with the connector address) shows its code in their browser, not in the user's, so it cannot be
+approved by a click on a window that looks like the user's own. The window closes on its own when the request is
+decided elsewhere (command line) or expires after 5 minutes; three wrong codes deny it.
 """
 
 from __future__ import annotations
@@ -11,34 +12,43 @@ from typing import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QCheckBox, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QCheckBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
 from p6mcp.i18n import tr
-from p6mcp.settings_app.common import note
+from p6mcp.settings_app.common import note, pill
+
+MAX_TRIES = 3
 
 
 class ApprovalDialog(QDialog):
-    def __init__(self, request: dict, edits_allowed: bool, decide: Callable[[str, bool, bool], object]):
+    def __init__(self, request: dict, edits_allowed: bool, decide: Callable[[str, str, bool, bool], object]):
+        """decide(request id, typed code, approve, edits) -> the store's answer (Store.decide_request)."""
         super().__init__()
         self.request, self.decide_fn = request, decide
-        self.result_text = None  # "approved" / "denied" once decided here
+        self.result_text = None  # "approved" / "denied" / "expired" once decided here
+        self.tries = 0
         self.setWindowTitle(tr("remote.approve.title"))
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         lay = QVBoxLayout(self)
         host = request["redirect_uri"].split("/")[2] if "://" in request["redirect_uri"] else "?"
         intro = QLabel(tr("remote.approve.text", client=request["client_name"], host=host))
         intro.setWordWrap(True)
         lay.addWidget(intro)
+        if request.get("via") == "dcr":
+            lay.addWidget(note(tr("remote.approve.unverified")))
         lay.addWidget(QLabel(tr("remote.approve.code")))
-        self.code = QLabel(request["pair"])
+        self.code = QLineEdit()
+        self.code.setMaxLength(6)
+        self.code.setPlaceholderText("ABC234")
         f = QFont(self.code.font())
-        f.setPointSizeF(f.pointSizeF() * 2.2)
+        f.setPointSizeF(f.pointSizeF() * 1.8)
         f.setBold(True)
-        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, f.pointSizeF() * 0.3)
         self.code.setFont(f)
-        self.code.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.code.textChanged.connect(self._typed)
         lay.addWidget(self.code)
+        self.error = QLabel()
+        self.error.setVisible(False)
+        lay.addWidget(self.error)
         lay.addWidget(note(tr("remote.approve.only_yours")))
         self.edits = QCheckBox(tr("remote.approve.edits"))
         self.edits.setEnabled(edits_allowed)
@@ -51,12 +61,27 @@ class ApprovalDialog(QDialog):
         self.deny_btn.clicked.connect(lambda: self._decide(False))
         self.approve_btn = QPushButton(tr("remote.approve.approve"))
         self.approve_btn.clicked.connect(lambda: self._decide(True))
-        self.deny_btn.setDefault(True)  # Enter denies: approving takes a deliberate click
+        self.approve_btn.setEnabled(False)
+        self.deny_btn.setDefault(True)  # Enter denies: approving takes the code and a deliberate click
         row.addWidget(self.deny_btn)
         row.addWidget(self.approve_btn)
         lay.addLayout(row)
 
+    def _typed(self, text: str) -> None:
+        self.approve_btn.setEnabled(len(text.strip()) == 6)
+
     def _decide(self, approve: bool) -> None:
-        res = self.decide_fn(self.request["pair"], approve, approve and self.edits.isChecked())
+        res = self.decide_fn(self.request["id"], self.code.text(), approve, approve and self.edits.isChecked())
+        if isinstance(res, dict) and res.get("mismatch"):
+            self.tries += 1
+            if self.tries >= MAX_TRIES:
+                self.decide_fn(self.request["id"], "", False, False)
+                self.result_text = "denied"
+                self.accept()
+                return
+            pill(self.error, "error", tr("remote.approve.mismatch", left=MAX_TRIES - self.tries))
+            self.error.setVisible(True)
+            self.code.clear()
+            return
         self.result_text = (res or {}).get("status") or "expired"
         self.accept()
