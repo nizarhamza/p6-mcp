@@ -29,6 +29,7 @@ CONFIG_VERSION = 4
 APP_DIR_NAME = "P6MCP"
 TOOL_PROFILES = ("basic", "full")
 TRANSPORTS = ("stdio", "http")
+REMOTE_MODES = ("relay", "domain")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 DB_KINDS = ("sqlite",)  # SQL Server / Oracle: later versions (read only)
 DATA_SOURCES = ("database", "xer", "eppm")  # xer: read-only analysis of XER files; eppm: a P6 EPPM server
@@ -75,6 +76,19 @@ DEFAULTS: dict[str, Any] = {
                                   #   source {shop, version, sha256, content_sha}}]: shop ones and the user's
     "core_skills_installed": False,  # the Settings app installed the core set (until then: the bundled copy)
     "shop_enabled": True,         # the skill shop (p6mcp.shop: reads the GitHub catalog when asked)
+    # 3.2: remote access for claude.ai and ChatGPT (p6mcp.remote). No schema_version bump: an older version keeps
+    # these keys as unknown ones and never starts the remote access server.
+    "remote_enabled": False,      # master switch (the tray app runs the remote access server and the tunnel)
+    "remote_privacy_ack": False,  # the user read what leaves the PC (first enable)
+    "remote_mode": "relay",       # relay: Worker on the user's free workers.dev address; domain: their own domain
+    "remote_public_host": None,   # public host name only (no scheme, no port), written by the Cloudflare setup
+    "remote_port": 39218,         # local port of the remote access server (127.0.0.1 only)
+    "remote_allow_writes": False,  # edits from remote clients, independent from allow_writes
+    "remote_keep_awake": True,    # keep the PC awake while remote access is on
+    "remote_ip_allowlist": False,  # accept only the published Anthropic and OpenAI ranges
+    "remote_extra_redirect_uris": [],  # Advanced: OAuth callback URLs accepted besides claude.ai and chatgpt.com
+    "remote_cf": None,            # ids of what the Cloudflare setup created (repair, removal): account_id, tunnel_id,
+                                  #   service_id, script, zone_id, dns_record_id; no token or secret
 }
 
 
@@ -246,12 +260,48 @@ def validate(d: dict) -> dict:
     if out["active_database"] is not None and out["active_database"] not in names:
         errs.append(f"active_database {out['active_database']!r} is not in databases")
     errs += _check_eppm(out)
+    errs += _check_remote(out)
     leaks = _secret_keys(out)
     if leaks:
         errs.append(f"secrets must not be stored in config.json (use the Windows Credential Manager): {leaks}")
     if errs:
         raise ConfigError("; ".join(errs))
     return out
+
+
+def remote_host_ok(host) -> bool:
+    """A public host name as the remote settings store it: letters, digits, dots and hyphens, one dot at least."""
+    import re
+    return isinstance(host, str) and len(host) <= 253 and re.fullmatch(
+        r"(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]", host) is not None
+
+
+def _check_remote(out: dict) -> list[str]:
+    errs = []
+    if out["remote_mode"] not in REMOTE_MODES:
+        errs.append(f"remote_mode must be one of {list(REMOTE_MODES)}, got {out['remote_mode']!r}")
+    for key in ("remote_enabled", "remote_privacy_ack", "remote_allow_writes", "remote_keep_awake",
+                "remote_ip_allowlist"):
+        if not isinstance(out[key], bool):
+            errs.append(f"{key} must be true or false, got {out[key]!r}")
+    port = out["remote_port"]
+    if not isinstance(port, int) or isinstance(port, bool) or not 1024 <= port <= 65535:
+        errs.append("remote_port must be a whole number between 1024 and 65535")
+    elif port == out["http_port"]:
+        errs.append("remote_port must differ from http_port")
+    host = out["remote_public_host"]
+    if host is not None and not remote_host_ok(host):
+        errs.append("remote_public_host must be a host name in lower case (no https://, no port, no path), "
+                    f"got {host!r}")
+    cf = out["remote_cf"]
+    cf_keys = ("account_id", "tunnel_id", "service_id", "script", "zone_id", "dns_record_id")
+    if cf is not None and (not isinstance(cf, dict) or set(cf) - set(cf_keys)
+                           or not all(v is None or isinstance(v, str) for v in cf.values())):
+        errs.append(f"remote_cf must be null or an object with text ids among {list(cf_keys)}")
+    uris = out["remote_extra_redirect_uris"]
+    if not isinstance(uris, list) or not all(isinstance(u, str) and u.startswith("https://") for u in uris):
+        errs.append("remote_extra_redirect_uris must be a list of https:// URLs")
+    return errs
 
 
 def _text(v, empty_ok: bool = False) -> bool:
@@ -409,6 +459,11 @@ class Settings:
     trusted_schemas: tuple[str, ...] = ()
     transport: str = "stdio"
     http_port: int = 39217
+    remote_enabled: bool = False
+    remote_mode: str = "relay"
+    remote_public_host: Optional[str] = None
+    remote_port: int = 39218
+    remote_allow_writes: bool = False
     log_level: str = "INFO"
     config_path: str = ""
     config_error: Optional[str] = None
@@ -513,6 +568,9 @@ def load() -> Settings:
         legacy_log_dir=legacy_log, block_when_p6_running=block,
         p6_user=os.environ.get("P6_USER") or cfg["p6_user"], trusted_schemas=tuple(cfg["trusted_schemas"]),
         transport=cfg["transport"], http_port=cfg["http_port"], log_level=cfg["log_level"],
+        remote_enabled=cfg["remote_enabled"], remote_mode=cfg["remote_mode"],
+        remote_public_host=cfg["remote_public_host"], remote_port=cfg["remote_port"],
+        remote_allow_writes=cfg["remote_allow_writes"],
         config_path=path, config_error=err, migrated=tuple(steps), raw=cfg)
 
 

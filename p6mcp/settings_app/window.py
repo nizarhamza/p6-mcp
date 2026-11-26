@@ -17,23 +17,26 @@ from p6mcp.settings_app.about_pages import AboutPage, LogsPage
 from p6mcp.settings_app.clients_page import ClientsPage
 from p6mcp.settings_app.guidance_pages import InstructionsPage, SkillsPage
 from p6mcp.settings_app.pages import DatabasePage, ServerPage, StartupPage, ToolsPage
+from p6mcp.settings_app.remote_page import RemotePage
 from p6mcp.settings_app.shop_page import ShopPage
 from p6mcp.settings_app.tray import app_icon
 
 PAGES = (("nav.database", DatabasePage), ("nav.startup", StartupPage), ("nav.server", ServerPage),
-         ("nav.clients", ClientsPage), ("nav.tools", ToolsPage), ("nav.instructions", InstructionsPage),
+         ("nav.remote", RemotePage), ("nav.clients", ClientsPage), ("nav.tools", ToolsPage),
+         ("nav.instructions", InstructionsPage),
          ("nav.skills", SkillsPage), ("nav.shop", ShopPage), ("nav.logs", LogsPage), ("nav.about", AboutPage))
 CLIENTS_PAGE = [cls for _k, cls in PAGES].index(ClientsPage)
 HEADER_HEIGHT = 48  # logical pixels of the logo header
 
 
 class SettingsWindow(QMainWindow):
-    def __init__(self, supervisor=None, on_close=None, auto_update_check: bool = False, updater=None):
+    def __init__(self, supervisor=None, on_close=None, auto_update_check: bool = False, updater=None, remote=None):
         """supervisor: the tray app's HTTP server supervisor (None: status read from the status file).
+        remote: the tray app's RemoteHost (remote access server and tunnel; None: status from its status file).
         on_close: called when a close is accepted; returning True hides the window instead (tray).
         updater: the tray app's Updater (automatic updates and the Update button)."""
         super().__init__()
-        self.supervisor, self.on_close, self.updater = supervisor, on_close, updater
+        self.supervisor, self.on_close, self.updater, self.remote = supervisor, on_close, updater, remote
         self.data, self.load_error = settings_logic.load_for_edit()
         self.saved: Optional[dict] = None if self.load_error else copy.deepcopy(self.data)
         self.disk = settings_logic.file_stamp()  # the config file as loaded or last saved here
@@ -205,6 +208,10 @@ class SettingsWindow(QMainWindow):
     def server_state(self, st) -> None:
         """New HTTP server state from the tray app's supervisor."""
         self.page(ServerPage).set_state(st)
+
+    def remote_state(self, st) -> None:
+        """New remote access state from the tray app's RemoteHost."""
+        self.page(RemotePage).set_state(st)
 
     def refresh_pages(self) -> None:
         for p in self.pages:

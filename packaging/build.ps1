@@ -24,6 +24,9 @@ Step "assets (icon, version resources)"
 & $py packaging\make_assets.py; Check "make_assets"
 $version = (Get-Content packaging\build\version.txt -Raw).Trim()
 
+Step "cloudflared (remote access tunnel connector, pinned)"
+& $py packaging\cloudflared.py; Check "cloudflared"
+
 Step "PyInstaller $version"
 & $py -m PyInstaller packaging\p6mcp.spec --noconfirm --distpath packaging\dist --workpath packaging\build\pyi `
     --log-level WARN; Check "PyInstaller"

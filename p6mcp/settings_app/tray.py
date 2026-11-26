@@ -95,10 +95,13 @@ def make_icon(state: str = supervisor.DISABLED) -> QIcon:
 
 
 class TrayApp(QObject):
-    def __init__(self, app: QApplication, sup: Optional[supervisor.Supervisor] = None):
+    def __init__(self, app: QApplication, sup: Optional[supervisor.Supervisor] = None, remote=None):
         super().__init__()
         self.app = app
         self.supervisor = sup or supervisor.Supervisor()
+        from p6mcp.remote.supervise import RemoteHost
+        self.remote = remote or RemoteHost()  # remote access server and tunnel (only while remote access is on)
+        self.approvals: dict = {}  # pending request id -> ApprovalDialog
         self._mutex = _named_mutex(MUTEX)
         self.window = None
         self.notified = False
@@ -118,8 +121,15 @@ class TrayApp(QObject):
             self.restart_act.triggered.connect(self.restart_server)
             self.quit_act = QAction(tr("tray.quit"), menu)
             self.quit_act.triggered.connect(self.quit)
+            self.remote_status_act = QAction("", menu)
+            self.remote_status_act.setEnabled(False)
+            self.remote_stop_act = QAction(tr("tray.remote.stop"), menu)
+            self.remote_stop_act.triggered.connect(self.stop_remote)
             for a in (self.open_act, self.status_act, self.restart_act):
                 menu.addAction(a)
+            menu.addSeparator()
+            menu.addAction(self.remote_status_act)
+            menu.addAction(self.remote_stop_act)
             menu.addSeparator()
             menu.addAction(self.quit_act)
             self.menu = menu
@@ -153,6 +163,12 @@ class TrayApp(QObject):
             st = self.supervisor.tick()
         except Exception as e:  # a supervisor bug must not kill the tray app
             st = supervisor.State(supervisor.ERROR, error=f"{type(e).__name__}: {e}")
+        try:
+            rst = self.remote.tick()
+            self._remote_ui(rst)
+            self.poll_approvals()
+        except Exception:  # nor a remote access problem
+            runtime.logging.getLogger("p6mcp.tray").exception("remote access supervisor failed")
         if self.tray is not None:
             text = self.status_text(st)
             self.status_act.setText(text)
@@ -162,6 +178,65 @@ class TrayApp(QObject):
         if self.window is not None:
             self.window.server_state(st)
         return st
+
+    # -- remote access
+    def _remote_ui(self, rst) -> None:
+        on = rst.state != supervisor.DISABLED
+        if self.tray is not None:
+            self.remote_status_act.setVisible(on)
+            self.remote_stop_act.setVisible(on)
+            if on:
+                key = {"running": "tray.remote.running", "error": "tray.remote.error"}.get(rst.state,
+                                                                                         "tray.remote.starting")
+                self.remote_status_act.setText(tr(key, err=rst.error or "?"))
+        if self.window is not None:
+            self.window.remote_state(rst)
+
+    def stop_remote(self) -> None:
+        """Stop remote access now: the tunnel and the server stop, and remote access is turned off (saved), so it
+        does not start again on the next tick."""
+        self.remote.stop()
+        st = config.load()
+        data, _steps = config.read_file(st.config_path) if st.config_path else (None, [])
+        if data is not None and data.get("remote_enabled"):
+            config.save(dict(data, remote_enabled=False))
+        if self.window is not None and not self.window.dirty():
+            self.window.reload()
+        for dlg in list(self.approvals.values()):
+            dlg.reject()
+        self.approvals.clear()
+        self.tick()
+
+    def _store(self):
+        from p6mcp.remote.store import Store
+        return Store()
+
+    def poll_approvals(self) -> None:
+        """Show an approval window for each new connection request; close the ones decided elsewhere or expired."""
+        from p6mcp.remote.supervise import remote_wanted
+        st = config.load()
+        if not remote_wanted(st):
+            return
+        store = self._store()
+        waiting = {r["id"]: r for r in store.pending_list()}
+        for rid in [r for r in self.approvals if r not in waiting]:
+            dlg = self.approvals.pop(rid)
+            if dlg.isVisible():
+                dlg.reject()
+        for rid, req in waiting.items():
+            if rid in self.approvals:
+                continue
+            from p6mcp.settings_app.approval import ApprovalDialog
+            dlg = ApprovalDialog(req, bool(st.remote_allow_writes),
+                                 lambda rid, code, ok, edits: self._store().decide_request(rid, code, ok, edits))
+            self.approvals[rid] = dlg
+            if self.tray is not None:
+                self.tray.showMessage(tr("remote.approve.title"), tr("remote.approve.notify",
+                                                                     client=req["client_name"]),
+                                      QSystemTrayIcon.MessageIcon.Information, 8000)
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
 
     def restart_server(self) -> None:
         self.supervisor.restart()
@@ -173,15 +248,16 @@ class TrayApp(QObject):
         if self.tray is None:
             return False
         st = config.load()
-        return (st.transport == "http" or bool(st.raw.get("run_at_startup"))
+        return (st.transport == "http" or bool(st.raw.get("run_at_startup")) or bool(st.remote_enabled)
                 or bool(st.raw.get("auto_update", True)))  # automatic updates run from the tray
 
     def show_window(self) -> None:
         if self.window is None:
             from p6mcp.settings_app.window import SettingsWindow
             self.window = SettingsWindow(supervisor=self.supervisor, on_close=self._window_closed,
-                                         auto_update_check=True, updater=self.updater)
+                                         auto_update_check=True, updater=self.updater, remote=self.remote)
             self.window.server_state(self.supervisor.state)
+            self.window.remote_state(self.remote.state)
         self.window.show()
         self.window.setWindowState(self.window.windowState() & ~Qt.WindowState.WindowMinimized)
         self.window.raise_()
@@ -237,6 +313,7 @@ class TrayApp(QObject):
     def _shutdown(self) -> None:
         self.timer.stop()
         self.supervisor.stop()
+        self.remote.stop()
         if self.tray is not None:
             self.tray.hide()
         self.server.close()

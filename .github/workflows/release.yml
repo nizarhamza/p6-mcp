@@ -50,6 +50,7 @@ jobs:
       - name: Build executables
         run: |
           python packaging/make_assets.py
+          python packaging/cloudflared.py
           python -m PyInstaller packaging/p6mcp.spec --noconfirm --distpath packaging/dist --workpath packaging/build/pyi --log-level WARN
 
       - name: Azure login (signing)

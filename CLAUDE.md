@@ -26,6 +26,41 @@ stay outside this repository.
   for tests): `http_token`, `db:<profile>`.
 - `p6mcp/policy.py`: `TOOL_KIND` (read / file / write / destructive) for every tool, `BASIC_TOOLS`,
   `listed()` (tool list fixed at startup), `refusal()` / `write_refusal()` (checked on every call).
+- `p6mcp/remote/` (3.2, plan in `MCP_P6\REMOTE_ACCESS_PLAN.md`, outside this repo): remote access for claude.ai and
+  ChatGPT. `server.py` = `p6mcp-server --remote` (127.0.0.1 only, own MCPServer built from `server.REGISTERED`
+  with `policy.remote_listed`, OAuth resource-server settings for `https://<remote_public_host>/mcp`,
+  `RemoteGuard`: relay secret header in relay mode or Host in domain mode, 1 MB body cap; status file
+  `remote_status.json`); every remote call checks `policy.remote_refusal` with the grant's scopes, sets
+  `confirm.OWNER` (confirmation tokens bound to the OAuth grant) and returns `shaping.shape(result)` (local
+  paths reduced to file names, 100,000-character budget: a page is cut short with `remote_note`, anything else
+  refused). `auth.py`: the OAuth 2.1 authorization server on the same app (custom routes: AS metadata, also at
+  `openid-configuration`, root protected resource metadata, `/register` DCR, `/authorize` + `/authorize/wait`
+  page with the pairing code, `/token` code and refresh grants with PKCE S256, `/revoke`; CIMD documents fetched
+  from `CIMD_HOSTS` only, redirect URIs from `REDIRECT_EXACT` / `REDIRECT_PREFIX` / `remote_extra_redirect_uris`)
+  and `StoreVerifier`; `store.py`: `%LOCALAPPDATA%\P6MCP\remote\auth.db` (hashes only; pending requests,
+  grants, codes 60 s, access 1 h, refresh 30 d rotated, a reused refresh token revokes the grant; a new public
+  host revokes the grants of the old resource); `cli.py`: `p6mcp-server remote pending|approve CODE [--edits]|
+  deny|connections|revoke|revoke-all|forget` (`forget` runs at uninstall). `cloudflare.py`: setup / repair
+  (idempotent, objects found by name `p6mcp-<machine>`) and remove in the user's own Cloudflare account from one
+  API token never stored (`TOKEN_PERMISSIONS`; relay mode: tunnel + Workers VPC Service + Worker `worker.js` on the
+  free workers.dev subdomain with bindings P6, RELAY_SECRET, P6_PORT; domain mode: tunnel ingress + proxied
+  CNAME), plain urllib with an injectable transport (tests: a fake Cloudflare API); `manage.py` stores the result
+  (Credential Manager `remote:tunnel_token` / `remote:relay_secret`, config `remote_public_host`, `remote_cf`
+  ids); `supervise.py` `RemoteHost` (two `Supervisor`s: remote server with status file `remote`, cloudflared with
+  `TUNNEL_TOKEN` in its environment, never on the command line; `SetThreadExecutionState` keep-awake), ticked and
+  stopped by the tray. `supervisor.Supervisor` is generic (`want`, `status`, `label`, `out_log`, `env`).
+  `packaging/cloudflared.py` pins and fetches cloudflared.exe (version + SHA-256) for the build; the spec puts it in
+  `P6MCP\cloudflared\` (an installed app never runs another cloudflared). `audit.py`: `remote\audit_*.jsonl`
+  (http, tool, oauth events; never values, tokens, codes or query strings; argument digests keyed by
+  `remote\audit.key`; 90 days), `audit.CLIENT_IP`; `limits.py`: per-IP token buckets (`LIMITS`, /authorize/wait
+  included) and the optional allowlist (Anthropic ranges, OpenAI's chatgpt-connectors.json, daily, last good copy;
+  only /mcp, /token, /register, /revoke). Approval needs the code typed on the PC (`Store.decide_request`, the PC
+  never shows it; at most `MAX_OPEN` waiting requests); the tunnel starts only once our remote server reports
+  running; remote `p6_sql_select` reads password columns as NULL (`_SQL_SECRET_COL`); `confirm.CLIENT` puts the
+  remote connection in the edit log; `--remote` needs mcp 2.x. Remote tests set their own LOCALAPPDATA (the audit
+  log must never reach the real profile). Remote rules: never
+  `REMOTE_NEVER` (local path tools, destructive, config, shop), writes need `remote_allow_writes` plus scope
+  `p6:write`. A new tool needs a remote decision (`tests/test_remote.py`).
 - `p6mcp/schema.py`: schema fingerprint (SHA-256 of table.column names), `KNOWN_SCHEMAS`, P6 version from
   `PREFER.database_version`; unknown schema = read only unless the user trusts it (`trusted_schemas`).
 - `p6mcp/confirm.py`: `TokenStore` (in process, 15 min, single use, bound to tool + canonical arguments +

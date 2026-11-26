@@ -13,7 +13,8 @@ ICON = os.path.join(BRAND, "ico", "p6mcp.ico")
 
 # the core skills bundled for offline first starts (p6mcp.core_skills): both exes offer them as MCP prompts
 datas = [(os.path.join(ROOT, "p6mcp", "locales", "*.json"), os.path.join("p6mcp", "locales")),
-         (os.path.join(ROOT, "p6mcp", "data", "core_skills", "*.json"), os.path.join("p6mcp", "data", "core_skills"))]
+         (os.path.join(ROOT, "p6mcp", "data", "core_skills", "*.json"), os.path.join("p6mcp", "data", "core_skills")),
+         (os.path.join(ROOT, "p6mcp", "remote", "worker.js"), os.path.join("p6mcp", "remote"))]  # relay Worker
 for dist in ("mcp", "pydantic", "pydantic_core", "uvicorn", "starlette", "anyio", "keyring", "jsonschema",
              "sse-starlette", "httpx2", "p6mcp"):
     try:
@@ -41,5 +42,11 @@ srv_exe = EXE(PYZ(srv.pure), srv.scripts, [], exclude_binaries=True, name="p6mcp
 gui_exe = EXE(PYZ(gui.pure), gui.scripts, [], exclude_binaries=True, name="p6mcp-settings", console=False,
               icon=ICON, version=os.path.join(ASSETS, "version_p6mcp-settings.txt"), upx=False)
 
-COLLECT(srv_exe, srv.binaries, srv.datas, gui_exe, gui.binaries, gui.datas, name="P6MCP", upx=False)
+# remote access (3.2): Cloudflare's tunnel connector, fetched and checked by packaging/cloudflared.py (installer only,
+# not the MCP bundle: the tray app runs it)
+CLOUDFLARED = os.path.join(SPECPATH, "build", "cloudflared", "cloudflared.exe")
+if not os.path.isfile(CLOUDFLARED):
+    raise SystemExit("run packaging/cloudflared.py first (cloudflared.exe for remote access)")
+tunnel = [(os.path.join("cloudflared", "cloudflared.exe"), CLOUDFLARED, "BINARY")]
+COLLECT(srv_exe, srv.binaries, srv.datas, gui_exe, gui.binaries, gui.datas, tunnel, name="P6MCP", upx=False)
 COLLECT(srv_exe, srv.binaries, srv.datas, name="P6MCP-server", upx=False)

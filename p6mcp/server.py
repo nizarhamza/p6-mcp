@@ -155,8 +155,14 @@ _SQL_ALLOWED = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCT
                 getattr(sqlite3, "SQLITE_RECURSIVE", 33)}
 
 
+_SQL_SECRET_COL = re.compile(r"pass(wd|word)|pwd", re.I)  # USERS.passwd, email_srv_passwd, EXTAPP, EXPPROJ...
+
+
 def _sql_authorizer(action: int, arg1, arg2, dbname, source) -> int:
-    """p6_sql_select: only reading is authorized (no write, ATTACH, schema change or PRAGMA that sets)."""
+    """p6_sql_select: only reading is authorized (no write, ATTACH, schema change or PRAGMA that sets). For a remote
+    client (claude.ai, ChatGPT) credential columns read as NULL: their values would leave the PC."""
+    if action == sqlite3.SQLITE_READ and _confirm.CLIENT.get() is not None and _SQL_SECRET_COL.search(str(arg2)):
+        return sqlite3.SQLITE_IGNORE
     if action in _SQL_ALLOWED:
         return sqlite3.SQLITE_OK
     if action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() in SQL_PRAGMAS:
@@ -515,7 +521,8 @@ def _gated(fn: Callable) -> Callable:
             finally:
                 _CALL.reset(tok)
             if isinstance(res, dict) and res.get("dry_run") and not res.get("would_refuse"):
-                g = TOKENS.issue(name, params, scope(), ctx["plan"] or _confirm.plan_digest(res.get("would_do") or []))
+                g = TOKENS.issue(name, params, scope(), ctx["plan"] or _confirm.plan_digest(res.get("would_do") or []),
+                                 owner=_confirm.OWNER.get())
                 res["confirmation_token"] = g.token
                 res["token_expires_in_s"] = int(TOKENS.ttl)
                 extra = ""
@@ -531,7 +538,7 @@ def _gated(fn: Callable) -> Callable:
             if (confirmation_text or "").strip() != want:
                 raise ValueError(f"{name} deletes or replaces data: pass confirmation_text=\"{want}\" exactly, as the "
                                  "dry run asks.")
-        g = TOKENS.check(name, params, scope(), confirmation_token)
+        g = TOKENS.check(name, params, scope(), confirmation_token, owner=_confirm.OWNER.get())
         ctx.update(token=g.token, expected_plan=g.plan)
         tok = _CALL.set(ctx)
         try:
@@ -797,6 +804,9 @@ def _log_write(entries: Sequence[dict]) -> str:
     if ctx is not None:  # a client call: record what was asked and which dry run it confirmed
         entries = [dict(e, params=ctx["params"], confirmation=(ctx.get("token") or "")[:12] or None)
                    for e in entries]
+    client = _confirm.CLIENT.get()
+    if client is not None:  # a remote client (claude.ai, ChatGPT): which connection made the change
+        entries = [dict(e, client=client) for e in entries]
     path = os.path.join(folder, f"edits_{datetime.now():%Y%m%d}.jsonl")
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("".join(json.dumps(e, ensure_ascii=False, default=str) + "\n" for e in entries))

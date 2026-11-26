@@ -39,20 +39,27 @@ def setup_logging(name: str, level: Optional[str] = None) -> logging.Logger:
 
 # ----------------------------------------------------------------- HTTP server status
 
-def status_path() -> str:
-    return os.path.join(config.localdata_dir(), "http_status.json")
+STATUS_NAMES = ("http", "remote")  # http_status.json: local HTTP server; remote_status.json: remote access server
 
 
-def write_status(state: str, port: Optional[int] = None, error: Optional[str] = None, **extra) -> None:
+def status_path(name: str = "http") -> str:
+    if name not in STATUS_NAMES:
+        raise ValueError(f"unknown status file {name!r}")
+    return os.path.join(config.localdata_dir(), f"{name}_status.json")
+
+
+def write_status(state: str, port: Optional[int] = None, error: Optional[str] = None, *, name: str = "http",
+                 **extra) -> None:
     data = {"state": state, "pid": os.getpid(), "ppid": os.getppid(), "port": port, "error": error,
             "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **extra}
-    os.makedirs(os.path.dirname(status_path()), exist_ok=True)
-    tmp = f"{status_path()}.{os.getpid()}.tmp"
+    path = status_path(name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(data, fh)
     for _attempt in range(20):  # a reader holding the file open blocks the rename on Windows for a moment
         try:
-            os.replace(tmp, status_path())
+            os.replace(tmp, path)
             return
         except PermissionError:
             time.sleep(0.05)
@@ -137,13 +144,14 @@ def port_open(port: Optional[int], host: str = "127.0.0.1", timeout: float = 0.5
         return False
 
 
-def read_status() -> dict:
+def read_status(name: str = "http") -> dict:
     """The status file checked against reality: a 'running' server whose process is gone is 'stopped'."""
     try:
-        with open(status_path(), encoding="utf-8") as fh:
+        with open(status_path(name), encoding="utf-8") as fh:
             st = json.load(fh)
     except (OSError, ValueError):
         return {"state": "stopped", "pid": None, "port": None, "error": None}
     if st.get("state") in ("running", "starting") and not pid_alive(st.get("pid")):
-        st = dict(st, state="stopped", error=st.get("error") or "The HTTP server process has ended.")
+        what = "remote access" if name == "remote" else "HTTP"
+        st = dict(st, state="stopped", error=st.get("error") or f"The {what} server process has ended.")
     return st

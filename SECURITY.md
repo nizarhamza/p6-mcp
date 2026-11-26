@@ -35,9 +35,23 @@ Planned, early and late dates and float are never written: P6 recalculates them 
   queries. XER-only mode never writes.
 - The HTTP transport listens on 127.0.0.1 only and requires a bearer token (kept in the Windows
   Credential Manager) on every request; Host and Origin headers are checked against DNS rebinding.
+- Remote access (claude.ai and ChatGPT in the browser, 3.2, off by default) goes through the user's own
+  Cloudflare account: a relay Worker adds a secret the local remote access server requires on every request (a
+  local process or a web page reaching `127.0.0.1` directly is refused), and a tunnel this PC opens (no inbound
+  port). Clients sign in with OAuth 2.1 (PKCE S256, client metadata documents fetched only from claude.ai,
+  claude.com, chatgpt.com and openai.com, redirect addresses on an allowlist, tokens bound to the connector
+  address, stored as SHA-256 hashes, refresh tokens rotated and a reused one ending the connection). Each
+  connection is approved on the PC by typing the code the browser shows. Remote clients never get delete,
+  restore, file import or export, or shop tools; they edit only with the remote edit switch and a connection
+  approved with edits, and the confirmation token of a dry run works only for the connection that asked for it.
+  Password columns read as empty in their `p6_sql_select`, local paths are reduced to file names, request rates
+  are limited, and every request, sign-in and tool call goes to an audit log (no values, tokens or query
+  strings). The Cloudflare API token is used once during setup and never stored; the tunnel token and relay
+  secret are in the Windows Credential Manager; `cloudflared` is shipped unchanged and pinned by its published
+  SHA256.
 - Registering with an MCP client edits only the `p6mcp` entry of that client's configuration file,
   after a timestamped backup, and refuses a file it cannot parse.
-- The only network requests go to GitHub, and both can be turned off: the updates (releases of this
+- Without remote access, the only network requests go to GitHub, and both can be turned off: the updates (releases of this
   repository; an update is installed only after its SHA256 matches the release's `SHA256SUMS.txt`, the
   installer is not code signed yet) and the skill shop (anonymous reads of the public catalog
   nizarhamza/p6-mcp-shop under raw.githubusercontent.com, when the Shop page or a `p6_shop_*` tool asks, at

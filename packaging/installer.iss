@@ -108,6 +108,8 @@ Filename: "{app}\p6mcp-settings.exe"; Parameters: "--minimized"; Flags: nowait; 
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients unregister --detected"; Flags: runhidden; RunOnceId: "UnregisterClients"
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients skills remove --detected"; Flags: runhidden; RunOnceId: "RemoveSkills"
 Filename: "{app}\p6mcp-server.exe"; Parameters: "setup startup off"; Flags: runhidden; RunOnceId: "StartupOff"
+; remote access: the tunnel token, the relay secret and the OAuth connections of this PC (the Cloudflare objects stay in the user's account)
+Filename: "{app}\p6mcp-server.exe"; Parameters: "remote forget"; Flags: runhidden; RunOnceId: "RemoteForget"
 
 [Code]
 var

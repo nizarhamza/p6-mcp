@@ -128,8 +128,12 @@ Then open Copilot Chat in **Agent** mode and pick the tools from the tools menu.
 
 ### ChatGPT
 
-ChatGPT cannot start a program on your PC, so there are two routes. Neither is tested by the maintainer yet:
-please report how it goes in an issue.
+- **ChatGPT in the browser** (3.2, beta, tested with the Free plan): turn on
+  [remote access](#remote-access-claudeai-and-chatgpt-in-the-browser) and add its connector address as a custom
+  MCP server. The same address works in claude.ai.
+
+ChatGPT cannot start a program on your PC, so the other routes go through Codex or a tunnel of OpenAI. Neither
+is tested by the maintainer yet: please report how it goes in an issue.
 
 - **Codex** (in the ChatGPT desktop app, or the Codex CLI) starts local MCP servers from
   `%USERPROFILE%\.codex\config.toml`:
@@ -328,6 +332,10 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
 - A **backup** is taken before every write (with a retention you choose), writes are refused while **P6 is
   running**, and every write goes to the **edit log** with its parameters.
 - Writes are refused on a P6 schema version the server was not tested with, unless you trust it explicitly.
+- **Remote access** (claude.ai, ChatGPT in the browser; off by default): each connection is approved on the PC
+  by typing the code the browser shows; remote clients never get delete, restore, file or shop tools, edit only
+  with the remote edit switch and a connection approved with edits, and every call is in the audit log. See
+  [Remote access](#remote-access-claudeai-and-chatgpt-in-the-browser).
 - These rules are enforced by the server itself on every call, not only by the Settings window.
 
 Writes go straight to the database and **bypass P6's own application logic**. The server updates the audit
@@ -345,6 +353,12 @@ can turn off under **Tools and safety** (the core set then comes from the copy s
 
 **The data returned by the tools goes to the AI model your MCP client uses**, which may be a cloud service. For
 confidential schedules, use a local model (for example in LM Studio).
+
+**Remote access** (off by default) adds one path: the tool results of claude.ai and ChatGPT pass through your own
+Cloudflare account (the relay and the tunnel; TLS ends at Cloudflare's edge) on their way to the AI vendor. The
+database and XER files are never uploaded. During the setup the app calls the Cloudflare API with your token;
+when a client connects it reads that client's public metadata document (claude.ai, chatgpt.com); with the IP
+allowlist on it reads OpenAI's published address list once a day.
 
 ## P6 skills
 
@@ -416,6 +430,47 @@ hosted by the notification area app, for clients that need HTTP or to share one 
 - every request needs `Authorization: Bearer <token>`; the token lives in the Windows Credential Manager (shown
   masked, copy, regenerate);
 - Host and Origin headers are checked to block DNS rebinding.
+
+## Remote access (claude.ai and ChatGPT in the browser)
+
+**Beta in 3.2.** Remote access lets claude.ai and ChatGPT, in the browser or on a phone, use MCP for Primavera P6
+on your PC. Off by default; turn it on under **Remote access** in the Settings window.
+
+How it works: the AI app calls an HTTPS address in **your own Cloudflare account** (free plan, no domain needed:
+`https://p6mcp-<your PC>.<your account>.workers.dev/mcp`). A small relay there passes the requests through a
+tunnel that this PC opens to Cloudflare (no inbound port, nothing to configure on your network) to a remote
+access server on this PC, which listens on `127.0.0.1` only. No server of this project is involved.
+
+1. Create a free Cloudflare account, then click **Create the API token** in the Settings window: Cloudflare opens
+   with the four permissions ticked (Account Settings Read, Cloudflare Tunnel Edit, Workers Scripts Edit,
+   Connectivity Directory Admin). Paste the token and click **Set up**. The token is used once and never saved:
+   delete it in Cloudflare afterwards. A domain of your own on Cloudflare works too.
+2. Tick **Turn on remote access** and save. The notification area app runs the remote access server and the tunnel.
+3. Copy the **connector address** and add it:
+   - **claude.ai**: Customize, Connectors, Add custom connector (works in Claude on the phone and in Claude
+     Desktop too, since the connector belongs to your account);
+   - **ChatGPT**: Settings, Apps and Connectors, Advanced settings, Developer mode, then Add custom MCP server,
+     authentication OAuth (tested with the Free plan, edits included, on 2026-11-26).
+4. Your browser shows a 6-character code and the PC shows an **Approve a connection** window: type the code
+   there (the PC never shows it, so a request started by someone else cannot be approved by a click), tick
+   **Allow edits** if you want this connection to edit, and approve.
+
+What a remote client gets:
+
+- read tools; edits only with **Allow edits from remote clients** on (Settings), **Allow write operations** on
+  (Tools and safety) and a connection approved with edits, and every edit still takes the dry run and your
+  confirmation in the chat, with a backup first and an edit log entry naming the app;
+- never: deleting, restoring a backup, importing or exporting files, the skill shop; `p6_sql_select` reads P6's
+  password columns as empty;
+- local paths shown as file names; results up to 100,000 characters (long lists continue on the next page).
+
+Connections are OAuth: an access token for an hour, renewed for 30 days of use; **Connected apps** lists them,
+with **End connection**. Every request, sign-in and tool call is written to an audit log
+(`%LOCALAPPDATA%\P6MCP\remote\audit_*.jsonl`, 90 days; no values, tokens or query strings). Optional: accept only
+Anthropic's and OpenAI's published addresses. The tray menu has **Stop remote access now**.
+
+The PC must be on, with you signed in to Windows and the notification area app running (it keeps the PC awake
+while remote access is on). When it is off, the AI app says that the PC is not reachable.
 
 ## Excel dashboard
 

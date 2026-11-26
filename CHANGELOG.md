@@ -3,6 +3,37 @@
 All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
+## [3.2.0] - 2026-11-26
+
+### Added
+
+- Remote access (beta, off by default): claude.ai and ChatGPT in the browser (and Claude on the phone) use MCP for
+  Primavera P6 on this PC through the user's own Cloudflare account, free plan, no domain needed. Settings,
+  Remote access: a Cloudflare setup from one API token used once and never saved (a relay Worker on the account's
+  workers.dev address, a Workers VPC link and a tunnel this PC opens; or a host name on the user's own domain),
+  Repair, Remove from Cloudflare, the connector address to paste in the AI app, Turn on remote access, Allow edits
+  from remote clients, Keep this PC awake, Connected apps with End connection. Tested on 2026-11-26 with claude.ai
+  and ChatGPT Free, reads and confirmed edits.
+- A remote access server (`p6mcp-server --remote`, `127.0.0.1` only, run by the notification area app with the
+  bundled `cloudflared`) with its own OAuth 2.1 sign-in: client metadata documents or dynamic registration, PKCE,
+  tokens bound to the connector address (1 hour, renewed for 30 days of use, a reused refresh token ends the
+  connection). Each connection is approved on the PC by typing the code the browser shows.
+- Remote rules: read tools; edits only with the remote edit switch, Allow write operations and a connection
+  approved with edits, still with the dry run and the confirmation in the chat; never delete, restore, file
+  import or export, or the skill shop; local paths shown as file names; password columns empty in
+  `p6_sql_select`; results up to 100,000 characters; the confirmation token of a dry run works only for the
+  connection that asked for it.
+- Audit log of remote access (`%LOCALAPPDATA%\P6MCP\remote\audit_*.jsonl`, 90 days, no values, tokens or query
+  strings), the app named in the edit log for remote edits, request rate limits, optional IP allowlist
+  (Anthropic's and OpenAI's published addresses).
+- `p6mcp-server remote pending | approve CODE [--edits] | deny | connections | revoke | revoke-all | forget`
+  (the uninstaller runs `forget`: secrets and connections of this PC removed).
+
+### Changed
+
+- The installer includes `cloudflared` 2026.11.2 (Cloudflare's tunnel connector, Apache 2.0, unchanged, pinned by
+  its published SHA256): about 55 MB more on disk.
+
 ## [3.1.1] - 2026-11-25
 
 ### Fixed
