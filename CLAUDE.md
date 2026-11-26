@@ -40,7 +40,17 @@ stay outside this repository.
   and `StoreVerifier`; `store.py`: `%LOCALAPPDATA%\P6MCP\remote\auth.db` (hashes only; pending requests,
   grants, codes 60 s, access 1 h, refresh 30 d rotated, a reused refresh token revokes the grant; a new public
   host revokes the grants of the old resource); `cli.py`: `p6mcp-server remote pending|approve CODE [--edits]|
-  deny|connections|revoke|revoke-all`. Remote rules: never
+  deny|connections|revoke|revoke-all|forget` (`forget` runs at uninstall). `cloudflare.py`: setup / repair
+  (idempotent, objects found by name `p6mcp-<machine>`) and remove in the user's own Cloudflare account from one
+  API token never stored (`TOKEN_PERMISSIONS`; relay mode: tunnel + Workers VPC Service + Worker `worker.js` on the
+  free workers.dev subdomain with bindings P6, RELAY_SECRET, P6_PORT; domain mode: tunnel ingress + proxied
+  CNAME), plain urllib with an injectable transport (tests: a fake Cloudflare API); `manage.py` stores the result
+  (Credential Manager `remote:tunnel_token` / `remote:relay_secret`, config `remote_public_host`, `remote_cf`
+  ids); `supervise.py` `RemoteHost` (two `Supervisor`s: remote server with status file `remote`, cloudflared with
+  `TUNNEL_TOKEN` in its environment, never on the command line; `SetThreadExecutionState` keep-awake), ticked and
+  stopped by the tray. `supervisor.Supervisor` is generic (`want`, `status`, `label`, `out_log`, `env`).
+  `packaging/cloudflared.py` pins and fetches cloudflared.exe (version + SHA-256) for the build; the spec puts it in
+  `P6MCP\cloudflared\`. Remote rules: never
   `REMOTE_NEVER` (local path tools, destructive, config, shop), writes need `remote_allow_writes` plus scope
   `p6:write`. A new tool needs a remote decision (`tests/test_remote.py`).
 - `p6mcp/schema.py`: schema fingerprint (SHA-256 of table.column names), `KNOWN_SCHEMAS`, P6 version from

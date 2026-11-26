@@ -95,10 +95,12 @@ def make_icon(state: str = supervisor.DISABLED) -> QIcon:
 
 
 class TrayApp(QObject):
-    def __init__(self, app: QApplication, sup: Optional[supervisor.Supervisor] = None):
+    def __init__(self, app: QApplication, sup: Optional[supervisor.Supervisor] = None, remote=None):
         super().__init__()
         self.app = app
         self.supervisor = sup or supervisor.Supervisor()
+        from p6mcp.remote.supervise import RemoteHost
+        self.remote = remote or RemoteHost()  # remote access server and tunnel (only while remote access is on)
         self._mutex = _named_mutex(MUTEX)
         self.window = None
         self.notified = False
@@ -153,6 +155,10 @@ class TrayApp(QObject):
             st = self.supervisor.tick()
         except Exception as e:  # a supervisor bug must not kill the tray app
             st = supervisor.State(supervisor.ERROR, error=f"{type(e).__name__}: {e}")
+        try:
+            self.remote.tick()
+        except Exception:  # nor a remote access problem
+            runtime.logging.getLogger("p6mcp.tray").exception("remote access supervisor failed")
         if self.tray is not None:
             text = self.status_text(st)
             self.status_act.setText(text)
@@ -237,6 +243,7 @@ class TrayApp(QObject):
     def _shutdown(self) -> None:
         self.timer.stop()
         self.supervisor.stop()
+        self.remote.stop()
         if self.tray is not None:
             self.tray.hide()
         self.server.close()

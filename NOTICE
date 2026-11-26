@@ -8,7 +8,9 @@ Oracle, Primavera and P6 are trademarks of Oracle and/or its affiliates. No Orac
 binaries, schema documentation or sample data is distributed with this product.
 
 The Windows builds include third-party open source components (Python, Qt for Python, the MCP
-Python SDK and their dependencies), each under its own license.
+Python SDK and their dependencies), each under its own license. The installer also includes
+cloudflared, Cloudflare's tunnel connector, unchanged (Apache License 2.0,
+https://github.com/cloudflare/cloudflared), used by the remote access feature.
 
 The landing site (site/) includes third-party files under their own licenses: the IBM Plex Sans
 and JetBrains Mono fonts (SIL Open Font License 1.1, see site/assets/fonts). Its images are captures

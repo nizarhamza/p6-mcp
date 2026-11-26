@@ -87,6 +87,8 @@ DEFAULTS: dict[str, Any] = {
     "remote_keep_awake": True,    # keep the PC awake while remote access is on
     "remote_ip_allowlist": False,  # accept only the published Anthropic and OpenAI ranges
     "remote_extra_redirect_uris": [],  # Advanced: OAuth callback URLs accepted besides claude.ai and chatgpt.com
+    "remote_cf": None,            # ids of what the Cloudflare setup created (repair, removal): account_id, tunnel_id,
+                                  #   service_id, script, zone_id, dns_record_id; no token or secret
 }
 
 
@@ -291,6 +293,11 @@ def _check_remote(out: dict) -> list[str]:
     if host is not None and not remote_host_ok(host):
         errs.append("remote_public_host must be a host name in lower case (no https://, no port, no path), "
                     f"got {host!r}")
+    cf = out["remote_cf"]
+    cf_keys = ("account_id", "tunnel_id", "service_id", "script", "zone_id", "dns_record_id")
+    if cf is not None and (not isinstance(cf, dict) or set(cf) - set(cf_keys)
+                           or not all(v is None or isinstance(v, str) for v in cf.values())):
+        errs.append(f"remote_cf must be null or an object with text ids among {list(cf_keys)}")
     uris = out["remote_extra_redirect_uris"]
     if not isinstance(uris, list) or not all(isinstance(u, str) and u.startswith("https://") for u in uris):
         errs.append("remote_extra_redirect_uris must be a list of https:// URLs")
