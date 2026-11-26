@@ -49,9 +49,11 @@ class SetupError(RuntimeError):
 
 # ----------------------------------------------------------------- tools
 
-def _remote_tool(name: str, gated: Callable, tool_error: Optional[type]) -> Callable:
+def _remote_tool(name: str, gated: Callable, tool_error: Optional[type],
+                 listed: Optional[list[str]] = None) -> Callable:
     """The callable a remote client reaches: remote policy with the grant's scopes, the confirmation token
-    bound to the grant, then the result redacted and fitted to the size budget."""
+    bound to the grant, then the result redacted and fitted to the size budget. listed: the remote tool list of
+    this server (p6_diagnose reports it instead of the local one)."""
     from mcp.server.auth.middleware.auth_context import get_access_token
     from p6mcp import server as S
 
@@ -75,11 +77,35 @@ def _remote_tool(name: str, gated: Callable, tool_error: Optional[type]) -> Call
             fail(shaping.redact(str(e) if isinstance(e, (ValueError, RuntimeError)) else f"{type(e).__name__}: {e}"))
         finally:
             _confirm.OWNER.reset(owner)
+        if name == "p6_diagnose" and isinstance(res, dict):
+            res = _remote_diagnose(res, st, tok, listed)
         try:
             return shaping.shape(res)
         except shaping.TooLarge as e:
             fail(str(e))
     return call
+
+
+def _remote_diagnose(res: dict, st: config.Settings, tok: Any, listed: Optional[list[str]]) -> dict:
+    """p6_diagnose as a remote client sees it: the remote tool list and restart need, this connection, and the
+    remote edit switch next to the local one."""
+    res = dict(res)
+    now = remote_tools(st)
+    if listed is not None:
+        res["tools_listed"] = len(listed)
+        res["restart_required"] = set(now) != set(listed)
+        res.pop("restart_note", None)
+        if res["restart_required"]:
+            res["restart_note"] = ("Settings changed since the remote access server started: restart remote access "
+                                   "in MCP for Primavera P6 on the PC, then reconnect.")
+    claims = getattr(tok, "claims", None) or {}
+    res["remote"] = {"public_url": resource_url(st.remote_public_host) if st.remote_public_host else None,
+                     "mode": st.remote_mode, "allow_edits_from_remote": st.remote_allow_writes,
+                     "connection": {"client": claims.get("client_name") or (tok.client_id if tok else None),
+                                    "scopes": list(tok.scopes) if tok else []},
+                     "note": "Edits from a remote client need 'Allow write operations' and 'Allow edits from remote "
+                             "clients' on the PC, and a connection approved with edits."}
+    return res
 
 
 def remote_tools(st: config.Settings) -> list[str]:
@@ -112,8 +138,9 @@ def build_mcp(st: config.Settings, verifier: Any, store: Optional[Store] = None,
     if store is not None:
         extra = tuple(st.raw.get("remote_extra_redirect_uris") or ())
         _auth.add_routes(srv, public_url(host), resource_url(host), store, extra, fetch, st.raw.get("language"))
-    for name in remote_tools(st):
-        fn = _remote_tool(name, S.REGISTERED[name], S.ToolError)
+    listed = remote_tools(st)
+    for name in listed:
+        fn = _remote_tool(name, S.REGISTERED[name], S.ToolError, listed)
         if S.ToolAnnotations is None:
             srv.tool()(fn)
         else:

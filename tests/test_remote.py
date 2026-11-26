@@ -157,9 +157,12 @@ def test_diagnose_shows_no_local_path(p6):
     p6.set(remote_public_host=HOST)
     tok = auth_context_var.set(AuthenticatedUser(asyncio.run(StubVerifier().verify_token("tok-read"))))
     try:
-        res = remote._remote_tool("p6_diagnose", p6.s.REGISTERED["p6_diagnose"], p6.s.ToolError)()
+        listed = remote.remote_tools(p6.config.load())
+        res = remote._remote_tool("p6_diagnose", p6.s.REGISTERED["p6_diagnose"], p6.s.ToolError, listed)()
     finally:
         auth_context_var.reset(tok)
+    assert res["tools_listed"] == len(listed) and res["restart_required"] is False
+    assert res["remote"]["public_url"] == f"https://{HOST}/mcp" and res["remote"]["connection"]["scopes"] == READ
     text = json.dumps(res)
     assert p6.db.replace("\\", "\\\\") not in text and ":\\\\" not in text and "demo.db" in text
 
