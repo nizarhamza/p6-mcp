@@ -33,7 +33,14 @@ stay outside this repository.
   `remote_status.json`); every remote call checks `policy.remote_refusal` with the grant's scopes, sets
   `confirm.OWNER` (confirmation tokens bound to the OAuth grant) and returns `shaping.shape(result)` (local
   paths reduced to file names, 100,000-character budget: a page is cut short with `remote_note`, anything else
-  refused). `auth.py`: token verification (`NoGrants` until the authorization server). Remote rules: never
+  refused). `auth.py`: the OAuth 2.1 authorization server on the same app (custom routes: AS metadata, also at
+  `openid-configuration`, root protected resource metadata, `/register` DCR, `/authorize` + `/authorize/wait`
+  page with the pairing code, `/token` code and refresh grants with PKCE S256, `/revoke`; CIMD documents fetched
+  from `CIMD_HOSTS` only, redirect URIs from `REDIRECT_EXACT` / `REDIRECT_PREFIX` / `remote_extra_redirect_uris`)
+  and `StoreVerifier`; `store.py`: `%LOCALAPPDATA%\P6MCP\remote\auth.db` (hashes only; pending requests,
+  grants, codes 60 s, access 1 h, refresh 30 d rotated, a reused refresh token revokes the grant; a new public
+  host revokes the grants of the old resource); `cli.py`: `p6mcp-server remote pending|approve CODE [--edits]|
+  deny|connections|revoke|revoke-all`. Remote rules: never
   `REMOTE_NEVER` (local path tools, destructive, config, shop), writes need `remote_allow_writes` plus scope
   `p6:write`. A new tool needs a remote decision (`tests/test_remote.py`).
 - `p6mcp/schema.py`: schema fingerprint (SHA-256 of table.column names), `KNOWN_SCHEMAS`, P6 version from

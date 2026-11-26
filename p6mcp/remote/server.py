@@ -30,7 +30,9 @@ from p6mcp import config, credentials, policy, runtime
 from p6mcp import confirm as _confirm
 from p6mcp.remote import (CLIENT_IP_HEADER, PATH, READ_SCOPE, RELAY_HEADER, RELAY_SECRET_KEY, public_url,
                           resource_url, shaping)
-from p6mcp.remote.auth import NoGrants, grant_of
+from p6mcp.remote import auth as _auth
+from p6mcp.remote.auth import grant_of
+from p6mcp.remote.store import Store
 
 HOST = "127.0.0.1"
 BODY_CAP = 1_048_576  # bytes of one request body (an MCP call is a few KB)
@@ -93,9 +95,9 @@ def instructions() -> str:
     return S.INSTRUCTIONS + "\n- " + REMOTE_LINE
 
 
-def build_mcp(st: config.Settings, verifier: Any):
+def build_mcp(st: config.Settings, verifier: Any, store: Optional[Store] = None, fetch: Any = None):
     """A FastMCP/MCPServer of its own for remote clients: OAuth resource server for https://<host>/mcp, the
-    remote tool set (no prompts in this version)."""
+    remote tool set (no prompts in this version) and, with a store, the authorization server's routes."""
     from mcp.server.auth.settings import AuthSettings
     from p6mcp import server as S
     if not st.remote_public_host:
@@ -107,6 +109,9 @@ def build_mcp(st: config.Settings, verifier: Any):
         auth_kw["validate_token_resource"] = True
     srv = S.FastMCP("primavera-p6", instructions=instructions(), token_verifier=verifier,
                     auth=AuthSettings(**auth_kw), **S._version_kw)
+    if store is not None:
+        extra = tuple(st.raw.get("remote_extra_redirect_uris") or ())
+        _auth.add_routes(srv, public_url(host), resource_url(host), store, extra, fetch, st.raw.get("language"))
     for name in remote_tools(st):
         fn = _remote_tool(name, S.REGISTERED[name], S.ToolError)
         if S.ToolAnnotations is None:
@@ -177,10 +182,16 @@ async def _reply(send, status: int, text: str) -> None:
 
 
 def build_app(st: config.Settings, verifier: Any = None, relay_secret: Optional[str] = None,
-              port: Optional[int] = None):
-    """The guarded ASGI app. verifier: the token verifier (NoGrants until the authorization server)."""
+              port: Optional[int] = None, store: Optional[Store] = None, fetch: Any = None):
+    """The guarded ASGI app. Without a verifier: the authorization server on store (default: auth.db) and its
+    tokens. With a verifier and no store (tests): that verifier, no authorization server."""
     from mcp.server.transport_security import TransportSecuritySettings
-    srv = build_mcp(st, verifier or NoGrants())
+    if verifier is None:
+        store = store or Store()
+        verifier = _auth.StoreVerifier(store)
+    if store is not None and st.remote_public_host:  # a new public address: the old connections are void
+        store.revoke_other_resources(resource_url(st.remote_public_host))
+    srv = build_mcp(st, verifier, store, fetch)
     port = port or st.remote_port
     host = st.remote_public_host
     # The SDK's own Host/Origin checks stay on as a second layer. Any local port is accepted: the tunnel connector

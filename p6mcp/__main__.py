@@ -5,6 +5,7 @@
     p6mcp-server --remote [--port N]  remote access server for claude.ai and ChatGPT (started by the tray app)
     p6mcp-server clients ...        client registration (see p6mcp.clients.__main__)
     p6mcp-server setup ...          installer helpers (see p6mcp.setup_cli)
+    p6mcp-server remote ...         remote access connections: approve, deny, revoke (see p6mcp.remote.cli)
 """
 
 
@@ -14,6 +15,9 @@ def main() -> None:
     if args[:1] == ["clients"]:  # registration commands (installer)
         from p6mcp.clients.__main__ import main as clients_main
         sys.exit(clients_main(args[1:]))
+    if args[:1] == ["remote"]:
+        from p6mcp.remote.cli import main as remote_cli
+        sys.exit(remote_cli(args[1:]))
     if args[:1] == ["setup"]:
         from p6mcp.setup_cli import main as setup_main
         sys.exit(setup_main(args[1:]))

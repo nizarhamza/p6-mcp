@@ -495,5 +495,13 @@
   "details.close": "Close",
   "cards.name": "{id}, {title}",
   "cards.field": "{label}: {value}.",
-  "cards.action": "{action} {name}"
+  "cards.action": "{action} {name}",
+  "remote.page.title": "Approve on your PC",
+  "remote.page.title_error": "Connection not possible",
+  "remote.page.asks": "{client} ({host}) asks to connect to your P6 schedules.",
+  "remote.page.approve_on_pc": "Approve it in MCP for Primavera P6 on your PC. The request there must show this code:",
+  "remote.page.waiting": "This page waits for your answer ({left} s left), then takes you back.",
+  "remote.page.bad_client": "Unknown app: start the connection again from your AI app.",
+  "remote.page.bad_redirect": "This app's return address is not accepted by MCP for Primavera P6.",
+  "remote.page.unknown": "This request is unknown or already finished. Start the connection again from your AI app."
 }

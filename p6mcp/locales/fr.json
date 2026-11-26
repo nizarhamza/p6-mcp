@@ -494,5 +494,13 @@
   "details.close": "Fermer",
   "cards.name": "{id}, {title}",
   "cards.field": "{label} : {value}.",
-  "cards.action": "{action} {name}"
+  "cards.action": "{action} {name}",
+  "remote.page.title": "Approuvez sur votre PC",
+  "remote.page.title_error": "Connexion impossible",
+  "remote.page.asks": "{client} ({host}) demande à se connecter à vos plannings P6.",
+  "remote.page.approve_on_pc": "Approuvez-la dans MCP for Primavera P6 sur votre PC. La demande doit y afficher ce code :",
+  "remote.page.waiting": "Cette page attend votre réponse (encore {left} s), puis vous ramène à l'application.",
+  "remote.page.bad_client": "Application inconnue : relancez la connexion depuis votre application d'IA.",
+  "remote.page.bad_redirect": "L'adresse de retour de cette application n'est pas acceptée par MCP for Primavera P6.",
+  "remote.page.unknown": "Cette demande est inconnue ou déjà terminée. Relancez la connexion depuis votre application d'IA."
 }
