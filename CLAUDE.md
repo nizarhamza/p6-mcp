@@ -26,6 +26,16 @@ stay outside this repository.
   for tests): `http_token`, `db:<profile>`.
 - `p6mcp/policy.py`: `TOOL_KIND` (read / file / write / destructive) for every tool, `BASIC_TOOLS`,
   `listed()` (tool list fixed at startup), `refusal()` / `write_refusal()` (checked on every call).
+- `p6mcp/remote/` (3.2, plan in `MCP_P6\REMOTE_ACCESS_PLAN.md`, outside this repo): remote access for claude.ai and
+  ChatGPT. `server.py` = `p6mcp-server --remote` (127.0.0.1 only, own MCPServer built from `server.REGISTERED`
+  with `policy.remote_listed`, OAuth resource-server settings for `https://<remote_public_host>/mcp`,
+  `RemoteGuard`: relay secret header in relay mode or Host in domain mode, 1 MB body cap; status file
+  `remote_status.json`); every remote call checks `policy.remote_refusal` with the grant's scopes, sets
+  `confirm.OWNER` (confirmation tokens bound to the OAuth grant) and returns `shaping.shape(result)` (local
+  paths reduced to file names, 100,000-character budget: a page is cut short with `remote_note`, anything else
+  refused). `auth.py`: token verification (`NoGrants` until the authorization server). Remote rules: never
+  `REMOTE_NEVER` (local path tools, destructive, config, shop), writes need `remote_allow_writes` plus scope
+  `p6:write`. A new tool needs a remote decision (`tests/test_remote.py`).
 - `p6mcp/schema.py`: schema fingerprint (SHA-256 of table.column names), `KNOWN_SCHEMAS`, P6 version from
   `PREFER.database_version`; unknown schema = read only unless the user trusts it (`trusted_schemas`).
 - `p6mcp/confirm.py`: `TokenStore` (in process, 15 min, single use, bound to tool + canonical arguments +

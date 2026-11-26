@@ -515,7 +515,8 @@ def _gated(fn: Callable) -> Callable:
             finally:
                 _CALL.reset(tok)
             if isinstance(res, dict) and res.get("dry_run") and not res.get("would_refuse"):
-                g = TOKENS.issue(name, params, scope(), ctx["plan"] or _confirm.plan_digest(res.get("would_do") or []))
+                g = TOKENS.issue(name, params, scope(), ctx["plan"] or _confirm.plan_digest(res.get("would_do") or []),
+                                 owner=_confirm.OWNER.get())
                 res["confirmation_token"] = g.token
                 res["token_expires_in_s"] = int(TOKENS.ttl)
                 extra = ""
@@ -531,7 +532,7 @@ def _gated(fn: Callable) -> Callable:
             if (confirmation_text or "").strip() != want:
                 raise ValueError(f"{name} deletes or replaces data: pass confirmation_text=\"{want}\" exactly, as the "
                                  "dry run asks.")
-        g = TOKENS.check(name, params, scope(), confirmation_token)
+        g = TOKENS.check(name, params, scope(), confirmation_token, owner=_confirm.OWNER.get())
         ctx.update(token=g.token, expected_plan=g.plan)
         tok = _CALL.set(ctx)
         try:

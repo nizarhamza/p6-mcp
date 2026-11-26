@@ -2,6 +2,7 @@
 
     p6mcp-server                    stdio transport (started by an MCP client)
     p6mcp-server --http [--port N]  local Streamable HTTP transport (started by the tray app)
+    p6mcp-server --remote [--port N]  remote access server for claude.ai and ChatGPT (started by the tray app)
     p6mcp-server clients ...        client registration (see p6mcp.clients.__main__)
     p6mcp-server setup ...          installer helpers (see p6mcp.setup_cli)
 """
@@ -21,6 +22,9 @@ def main() -> None:
         print("MCP for Primavera P6 is being updated: restart the MCP client (or the server) in a minute.",
               file=sys.stderr)
         sys.exit(1)
+    if "--remote" in args:
+        from p6mcp.remote.server import main as remote_main
+        sys.exit(remote_main(args))
     if "--http" in args:
         from p6mcp.http_server import main as http_main
         sys.exit(http_main(args))

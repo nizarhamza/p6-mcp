@@ -9,6 +9,10 @@
 Tokens live in the server process (a stdio server keeps the same process for both calls), expire
 after TTL_SECONDS and are single use: consumed once the change is applied or the plan is refused.
 A refusal that writes nothing (P6 still open, for example) keeps the token for a retry.
+
+Owner: the remote access server sets OWNER around each call to the id of the OAuth connection (grant) that made
+it, so a token issued to one connection (claude.ai, say) cannot be applied by another (ChatGPT). Local calls have
+no owner (None), as before.
 """
 
 from __future__ import annotations
@@ -19,12 +23,14 @@ import os
 import secrets
 import threading
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
 TTL_SECONDS = 15 * 60
 MAX_TOKENS = 200  # oldest dropped beyond this (a client looping on dry runs cannot grow memory)
 PLAN_SKIP = ("Backup: ", "Safety backup: ")  # plan lines that only exist when applying
+OWNER: ContextVar[Optional[str]] = ContextVar("p6_confirm_owner", default=None)  # caller of the running call
 
 
 def canonical(params: dict) -> str:
@@ -51,6 +57,7 @@ class Grant:
     db: str
     plan: Optional[str]
     expires: float
+    owner: Optional[str] = None  # OAuth connection of a remote client, None for local clients
 
 
 class TokenError(ValueError):
@@ -69,16 +76,17 @@ class TokenStore:
         while len(self._grants) >= MAX_TOKENS:
             del self._grants[min(self._grants, key=lambda k: self._grants[k].expires)]
 
-    def issue(self, tool: str, params: dict, db_path: str, plan: Optional[str]) -> Grant:
+    def issue(self, tool: str, params: dict, db_path: str, plan: Optional[str], owner: Optional[str] = None) -> Grant:
         now = time.monotonic()
         g = Grant("p6c_" + secrets.token_urlsafe(18), tool, digest(canonical(params)), db_key(db_path), plan,
-                  now + self.ttl)
+                  now + self.ttl, owner)
         with self._lock:
             self._purge(now)
             self._grants[g.token] = g
         return g
 
-    def check(self, tool: str, params: dict, db_path: str, token: Optional[str]) -> Grant:
+    def check(self, tool: str, params: dict, db_path: str, token: Optional[str],
+              owner: Optional[str] = None) -> Grant:
         """The grant matching this apply call, else TokenError (the grant is left as it is)."""
         if not token:
             raise TokenError(f"confirmation_token is required to apply. Call {tool} with dry_run=true first, show "
@@ -91,6 +99,8 @@ class TokenStore:
         if g is None:
             raise TokenError("Unknown or already used confirmation_token (tokens are single use and are lost when "
                              "the server restarts). Run the dry run again.")
+        if g.owner != owner:
+            raise TokenError("This confirmation_token was issued to another connection. Run the dry run again.")
         if g.tool != tool:
             raise TokenError(f"This confirmation_token was issued for {g.tool}, not {tool}.")
         if g.db != db_key(db_path):

@@ -17,7 +17,7 @@ effect at once, while turning a tool on needs a restart of the server (reported 
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Iterable, Optional
 
 READ, FILE, WRITE, DESTRUCTIVE, CONFIG = "read", "file", "write", "destructive", "config"
 KINDS = (READ, FILE, WRITE, DESTRUCTIVE, CONFIG)
@@ -121,3 +121,64 @@ def refusal(tool: str, profile: str, allow_writes: bool, shop: bool = True) -> O
     if k in (WRITE, DESTRUCTIVE):
         return write_refusal(profile, allow_writes)
     return None
+
+
+# ----------------------------------------------------------------- remote clients (claude.ai, ChatGPT)
+# A remote client reaches the server through the remote access server (p6mcp.remote), approved on this PC with
+# OAuth. It is exposed to prompt injection from whatever it reads, so it gets less than a local client:
+# - tools that take or write a path on this PC are never offered (the remote user has no access to that folder);
+# - destructive and config tools and the skill shop are never offered;
+# - writes, and p6_eppm_pull (it rewrites the local working copy), need the remote switch remote_allow_writes
+#   on top of the local rules, and a grant approved with edits (scope p6:write).
+REMOTE_READ_SCOPE, REMOTE_WRITE_SCOPE = "p6:read", "p6:write"
+LOCAL_PATH_TOOLS = frozenset({"p6_import_xer", "p6_inspect_xer", "p6_export_xer", "p6_export_dashboard"})
+REMOTE_NEVER = LOCAL_PATH_TOOLS | SHOP_TOOLS | frozenset(t for t, k in TOOL_KIND.items() if k in (DESTRUCTIVE, CONFIG))
+REMOTE_AS_WRITE = frozenset({"p6_eppm_pull"})
+REMOTE_NO_PATH_ARGS = {"p6_schedule_options": ("xer_path",)}  # listed remotely, but these arguments are refused
+REMOTE_OFF = ("{tool} is not available to remote clients (claude.ai, ChatGPT): it works with files or settings on "
+              "the PC, or deletes data. Use it from a local client on the PC.")
+REMOTE_PATH_ARG = ("{arg} is not available to remote clients: it names a file on the PC. Use this tool from a local "
+                   "client on the PC for that.")
+REMOTE_NO_GRANT = "This connection has no access to P6 data. Connect again and approve it on the PC."
+REMOTE_WRITES_OFF = ("Edits from remote clients are off. Turn on 'Allow edits from remote clients' in MCP for "
+                     "Primavera P6 Settings (Remote access) on the PC.")
+REMOTE_SCOPE_OFF = ("This connection was approved read only. To edit, remove the connector in your AI app, connect "
+                    "again and approve it on the PC with 'Allow edits' ticked.")
+
+
+def remote_kind(tool: str) -> str:
+    """'never', 'write' or 'read' for a remote client."""
+    if tool in REMOTE_NEVER:
+        return "never"
+    if is_write(tool) or tool in REMOTE_AS_WRITE:
+        return "write"
+    return "read"
+
+
+def remote_listed(tool: str, profile: str, allow_writes: bool, remote_writes: bool, shop: bool = True) -> bool:
+    """Is the tool offered to remote clients when the remote access server starts with these settings?"""
+    rk = remote_kind(tool)
+    if rk == "never" or (rk == "write" and not remote_writes):
+        return False
+    return listed(tool, profile, allow_writes, shop)
+
+
+def remote_refusal(tool: str, profile: str, allow_writes: bool, remote_writes: bool,
+                   scopes: Optional[Iterable[str]], shop: bool = True, args: Optional[dict] = None) -> Optional[str]:
+    """Why a remote client's call is refused (None = allowed); the local rules apply on top. scopes: the scopes
+    of the OAuth grant of the call (None or empty: no grant, refused). args: the call's arguments."""
+    rk = remote_kind(tool)
+    if rk == "never":
+        return REMOTE_OFF.format(tool=tool)
+    scopes = set(scopes or ())
+    if REMOTE_READ_SCOPE not in scopes:
+        return REMOTE_NO_GRANT
+    for arg in REMOTE_NO_PATH_ARGS.get(tool, ()):
+        if (args or {}).get(arg) not in (None, ""):
+            return REMOTE_PATH_ARG.format(arg=arg)
+    if rk == "write":
+        if not remote_writes:
+            return REMOTE_WRITES_OFF
+        if REMOTE_WRITE_SCOPE not in scopes:
+            return REMOTE_SCOPE_OFF
+    return refusal(tool, profile, allow_writes, shop)
