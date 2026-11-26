@@ -37,6 +37,11 @@ WORKER_COMPAT_DATE = "2026-11-01"
 BINDING, SECRET_BINDING = "P6", "RELAY_SECRET"
 TOKEN_PERMISSIONS = (  # what the token must allow (account level; Zone DNS Edit too for domain mode)
     "Account Settings: Read", "Cloudflare Tunnel: Edit", "Workers Scripts: Edit", "Connectivity Directory: Admin")
+# Prefilled "Create token" page (permission group keys of the dashboard; a key it does not know is simply not
+# ticked, and the permission check of setup() says which one is missing)
+TOKEN_GROUPS = {"relay": (("account_settings", "read"), ("argotunnel", "edit"), ("workers_scripts", "edit"),
+                          ("connectivity_directory", "admin")),
+                "domain": (("account_settings", "read"), ("argotunnel", "edit"), ("zone", "read"), ("dns", "edit"))}
 TIMEOUT = 30
 Transport = Callable[[str, str, dict, Optional[bytes]], tuple[int, bytes]]  # method, url, headers, body
 
@@ -62,6 +67,16 @@ def _urllib_transport(method: str, url: str, headers: dict, body: Optional[bytes
         return e.code, e.read()
     except (urllib.error.URLError, OSError) as e:
         raise CloudflareError(f"Cloudflare cannot be reached from this PC: {e}") from e
+
+
+def token_url(mode: str = "relay") -> str:
+    """The Cloudflare dashboard's Create token page with the permissions of this mode ticked."""
+    from urllib.parse import urlencode
+    keys = json.dumps([{"key": k, "type": t} for k, t in TOKEN_GROUPS.get(mode, TOKEN_GROUPS["relay"])],
+                      separators=(",", ":"))
+    return "https://dash.cloudflare.com/profile/api-tokens?" + urlencode(
+        {"permissionGroupKeys": keys, "name": "MCP for Primavera P6 remote access", "accountId": "*",
+         "zoneId": "all"})
 
 
 def worker_source() -> str:
