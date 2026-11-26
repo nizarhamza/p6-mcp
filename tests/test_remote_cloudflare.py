@@ -420,10 +420,19 @@ const env = { RELAY_SECRET: "s3", P6_PORT: "41234", P6: { fetch: async (url, ini
 const req = new Request("https://p6mcp-pc.x.workers.dev/mcp?a=1", { method: "POST", body: "{}",
   headers: { "CF-Connecting-IP": "160.79.106.1", "X-P6MCP-Relay": "forged" } });
 const r = await worker.fetch(req, env);
-const down = await worker.fetch(new Request("https://h/x"), { RELAY_SECRET: "s3", P6: { fetch: async () => {
-  throw new Error("no tunnel"); } } });
+const off = { RELAY_SECRET: "s3", P6: { fetch: async () => { throw new Error("no tunnel"); } } };
+const down = await worker.fetch(new Request("https://h/x"), off);
+const rpc = await worker.fetch(new Request("https://h/mcp", { method: "POST", body: JSON.stringify(
+  { jsonrpc: "2.0", id: 7, method: "tools/call" }) }), off);
+const rpcBody = await rpc.json();
+const noPort = { RELAY_SECRET: "s3", P6: { fetch: async () => new Response("bad gateway", { status: 502 }) } };
+const gw = await worker.fetch(new Request("https://h/mcp", { method: "POST", body: '{"jsonrpc":"2.0","id":"a"}' }),
+  noPort);
+const gwBody = await gw.json();
+const note = await worker.fetch(new Request("https://h/mcp", { method: "POST", body: '{"jsonrpc":"2.0"}' }), off);
 console.log(JSON.stringify({ seen, status: r.status, up: r.headers.get("x-up"), ver: r.headers.get("x-p6mcp-relay"),
-  down: down.status, downVer: down.headers.get("x-p6mcp-relay") }));
+  down: down.status, downVer: down.headers.get("x-p6mcp-relay"), rpcStatus: rpc.status, rpcBody,
+  gwBody, noteStatus: note.status }));
 """, encoding="utf-8")
     out = subprocess.run(["node", str(tmp_path / "run.mjs")], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
@@ -432,6 +441,11 @@ console.log(JSON.stringify({ seen, status: r.status, up: r.headers.get("x-up"), 
                             "method": "POST", "redirect": "manual"}]  # a forged relay header is replaced
     assert res["status"] == 201 and res["up"] == "1" and res["ver"] == cf.worker_version()
     assert res["down"] == 503 and res["downVer"] == cf.worker_version()
+    # an MCP request while the PC is off: a JSON-RPC error the AI app shows, with the reason
+    assert res["rpcStatus"] == 200 and res["rpcBody"]["id"] == 7 and "PC is not reachable" in \
+        res["rpcBody"]["error"]["message"]
+    assert res["gwBody"]["id"] == "a" and res["gwBody"]["error"]["code"] == -32000  # tunnel up, nothing listening
+    assert res["noteStatus"] == 503  # a notification has no id to answer
 
 
 def test_cloudflared_pin_and_build_wiring():
