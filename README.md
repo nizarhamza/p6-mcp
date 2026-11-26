@@ -333,7 +333,7 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
   running**, and every write goes to the **edit log** with its parameters.
 - Writes are refused on a P6 schema version the server was not tested with, unless you trust it explicitly.
 - **Remote access** (claude.ai, ChatGPT in the browser; off by default): each connection is approved on the PC
-  by typing the code the browser shows; remote clients never get delete, restore, file or shop tools, edit only
+  (Connect with this PC in the browser that started it, or the code typed); remote clients never get delete, restore, file or shop tools, edit only
   with the remote edit switch and a connection approved with edits, and every call is in the audit log. See
   [Remote access](#remote-access-claudeai-and-chatgpt-in-the-browser).
 - These rules are enforced by the server itself on every call, not only by the Settings window.
@@ -433,7 +433,7 @@ hosted by the notification area app, for clients that need HTTP or to share one 
 
 ## Remote access (claude.ai and ChatGPT in the browser)
 
-**Beta in 3.2.** Remote access lets claude.ai and ChatGPT, in the browser or on a phone, use MCP for Primavera P6
+**Beta since 3.2.** Remote access lets claude.ai and ChatGPT, in the browser or on a phone, use MCP for Primavera P6
 on your PC. Off by default; turn it on under **Remote access** in the Settings window.
 
 How it works: the AI app calls an HTTPS address in **your own Cloudflare account** (free plan, no domain needed:
@@ -451,9 +451,11 @@ access server on this PC, which listens on `127.0.0.1` only. No server of this p
      Desktop too, since the connector belongs to your account);
    - **ChatGPT**: Settings, Apps and Connectors, Advanced settings, Developer mode, then Add custom MCP server,
      authentication OAuth (tested with the Free plan, edits included, on 2026-11-26).
-4. Your browser shows a 6-character code and the PC shows an **Approve a connection** window: type the code
-   there (the PC never shows it, so a request started by someone else cannot be approved by a click), tick
-   **Allow edits** if you want this connection to edit, and approve.
+4. The browser page shows a 6-character code and a **Connect with this PC** button. Click it: the **Approve a
+   connection** window opens on the PC with the code filled in; tick **Allow edits** if you want this connection
+   to edit, and approve. The button is only offered in the browser that started the connection, and the PC
+   accepts it only from your own connector address, so a request started by someone else cannot be approved by a
+   click. The other way: open **Approve a connection** from the tray notification or menu and type the code.
 
 What a remote client gets:
 

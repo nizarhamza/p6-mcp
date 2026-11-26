@@ -41,7 +41,11 @@ Planned, early and late dates and float are never written: P6 recalculates them 
   port). Clients sign in with OAuth 2.1 (PKCE S256, client metadata documents fetched only from claude.ai,
   claude.com, chatgpt.com and openai.com, redirect addresses on an allowlist, tokens bound to the connector
   address, stored as SHA-256 hashes, refresh tokens rotated and a reused one ending the connection). Each
-  connection is approved on the PC by typing the code the browser shows. Remote clients never get delete,
+  connection is approved on the PC: the user types the code the browser shows, or clicks Connect with this PC on
+  the connection page (3.3), which posts the code to a listener of the notification area app on `127.0.0.1` only
+  (setting `remote_pair_port`, default 39219, running while remote access is on) that accepts it only from a page
+  of the user's own connector address (Origin and Host checked) and from the browser that started the request (a
+  key kept in a cookie); the user still clicks Approve. Remote clients never get delete,
   restore, file import or export, or shop tools; they edit only with the remote edit switch and a connection
   approved with edits, and the confirmation token of a dry run works only for the connection that asked for it.
   Password columns read as empty in their `p6_sql_select`, local paths are reduced to file names, request rates
