@@ -28,11 +28,17 @@ log = logging.getLogger("p6mcp.remote.supervise")
 
 
 def cloudflared_path() -> Optional[str]:
-    """The bundled cloudflared.exe (installed beside the app). Development only (not frozen): P6MCP_CLOUDFLARED,
-    else one on PATH. An installed app never runs another cloudflared: it would receive the tunnel token."""
+    """The bundled cloudflared.exe. Installed, PyInstaller puts it under the app's contents folder (sys._MEIPASS:
+    P6MCP\\_internal\\cloudflared, found by the 3.2.0 draft's checklist); the folder beside the exe is looked at too.
+    Development only (not frozen): P6MCP_CLOUDFLARED, else one on PATH. An installed app never runs another
+    cloudflared: it would receive the tunnel token."""
     if getattr(sys, "frozen", False):
-        p = os.path.join(os.path.dirname(sys.executable), "cloudflared", "cloudflared.exe")
-        return p if os.path.isfile(p) else None
+        bases = [getattr(sys, "_MEIPASS", None), os.path.dirname(sys.executable)]
+        for base in bases:
+            p = os.path.join(base, "cloudflared", "cloudflared.exe") if base else None
+            if p and os.path.isfile(p):
+                return p
+        return None
     p = os.environ.get(CLOUDFLARED_ENV)
     if p and os.path.isfile(p):
         return p
