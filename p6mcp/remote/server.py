@@ -171,7 +171,8 @@ def build_mcp(st: config.Settings, verifier: Any, store: Optional[Store] = None,
                     auth=AuthSettings(**auth_kw), **S._version_kw)
     if store is not None:
         extra = tuple(st.raw.get("remote_extra_redirect_uris") or ())
-        _auth.add_routes(srv, public_url(host), resource_url(host), store, extra, fetch, st.raw.get("language"))
+        _auth.add_routes(srv, public_url(host), resource_url(host), store, extra, fetch, st.raw.get("language"),
+                         st.raw.get("remote_pair_port"))
     listed = remote_tools(st)
     for name in listed:
         fn = _remote_tool(name, S.REGISTERED[name], S.ToolError, listed)

@@ -3,6 +3,19 @@
 All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Remote access: a redesigned connection page (brand colors, light and dark, phone width) with a Connect with this
+  PC button. In the browser that started the connection it sends the code to the notification area app on the
+  same PC (`127.0.0.1`, setting `remote_pair_port`, default 39219), which fills it in the approval window: the user
+  only clicks Approve there. The code with a Copy button stays as the second way. The button is only offered to the
+  starting browser (a key kept in a cookie) and the app accepts only pages of the user's own connector address, so
+  a request started by someone else still cannot be approved from this PC by a click.
+- The approval window no longer pops up over the browser page when a request arrives: Connect opens it with the code
+  filled in, and the tray notification or the new tray menu entry Approve a connection opens it to type the code.
+
 ## [3.2.0] - 2026-11-26
 
 ### Added

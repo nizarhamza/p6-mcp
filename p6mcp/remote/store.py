@@ -7,7 +7,8 @@ gives no usable token.
 Tables
   clients   clients registered with DCR (CIMD clients are not stored, their document is cached in cimd)
   cimd      client metadata documents fetched (client_id URL -> JSON, fetched at)
-  pending   connection requests waiting for the user's decision on the PC (pairing code)
+  pending   connection requests waiting for the user's decision on the PC (pairing code; browser_key = hash of the
+            key the starting browser keeps in a cookie, for the page's Connect button)
   codes     authorization codes (60 s, single use)
   grants    approved connections: client, scopes, resource, created, last used, revoked
   tokens    access (ACCESS_TTL) and refresh (REFRESH_TTL, rotated, single use) tokens of a grant
@@ -16,6 +17,7 @@ Tables
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -43,7 +45,7 @@ CREATE TABLE IF NOT EXISTS pending (id TEXT PRIMARY KEY, pair TEXT NOT NULL, cli
                                     client_name TEXT NOT NULL, via TEXT NOT NULL, redirect_uri TEXT NOT NULL,
                                     state TEXT, challenge TEXT NOT NULL, scopes TEXT NOT NULL, resource TEXT NOT NULL,
                                     created INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-                                    decided INTEGER);
+                                    decided INTEGER, browser_key TEXT);
 CREATE TABLE IF NOT EXISTS codes (hash TEXT PRIMARY KEY, grant_id TEXT NOT NULL, challenge TEXT NOT NULL,
                                   redirect_uri TEXT NOT NULL, client_id TEXT NOT NULL, exp INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS grants (id TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
@@ -77,6 +79,8 @@ class Store:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         with closing(self._con()) as con:
             con.executescript(SCHEMA)
+            if "browser_key" not in {r[1] for r in con.execute("PRAGMA table_info(pending)")}:  # 3.2.0 store
+                con.execute("ALTER TABLE pending ADD COLUMN browser_key TEXT")
 
     def _con(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.path, timeout=5, isolation_level=None)  # autocommit; BEGIN IMMEDIATE when needed
@@ -115,7 +119,8 @@ class Store:
 
     # ------------------------------------------------------------- pending requests
     def add_pending(self, client: dict, redirect_uri: str, state: Optional[str], challenge: str, scopes: list[str],
-                    resource: str) -> dict:
+                    resource: str, browser_key: Optional[str] = None) -> dict:
+        """A new waiting request. browser_key: the secret the starting browser keeps in a cookie (stored hashed)."""
         rid = secrets.token_urlsafe(18)
         pair = "".join(secrets.choice(PAIR_ALPHABET) for _ in range(6))
         with closing(self._con()) as con:
@@ -127,9 +132,10 @@ class Store:
                 con.execute("ROLLBACK")
                 raise TooManyRequests(f"{n} connection requests are already waiting")
             con.execute("INSERT INTO pending (id, pair, client_id, client_name, via, redirect_uri, state, challenge, "
-                        "scopes, resource, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "scopes, resource, created, browser_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (rid, pair, client["client_id"], client["client_name"], client["via"], redirect_uri, state,
-                         challenge, json.dumps(scopes), resource, _now()))
+                         challenge, json.dumps(scopes), resource, _now(),
+                         token_hash(browser_key) if browser_key else None))
             con.execute("COMMIT")
         return self.pending(rid)
 
@@ -144,6 +150,25 @@ class Store:
             rows = con.execute("SELECT * FROM pending WHERE status = 'pending' AND created >= ? ORDER BY created",
                                (_now() - APPROVAL_SECONDS,)).fetchall()
         return [_pending_view(r) for r in rows]
+
+    def browser_ok(self, rid: str, browser_key: Optional[str]) -> bool:
+        """This browser key is the one of the browser that started the request."""
+        if not browser_key:
+            return False
+        with closing(self._con()) as con:
+            r = con.execute("SELECT browser_key FROM pending WHERE id = ?", (rid,)).fetchone()
+        return bool(r and r["browser_key"]) and hmac.compare_digest(r["browser_key"], token_hash(browser_key))
+
+    def local_hint(self, rid: str, code: str, browser_key: str) -> Optional[dict]:
+        """The Connect button of the browser page, received on this PC's loopback address: the waiting request
+        when the code and the starting browser's key match it, else None. It only fills the code in the approval
+        window; approving still takes the user's click there."""
+        req = self.pending(rid) if isinstance(rid, str) else None
+        if req is None or req["status"] != "pending" or req["expires_in"] <= 0:
+            return None
+        if not isinstance(code, str) or not hmac.compare_digest(code.strip().upper().encode(), req["pair"].encode()):
+            return None
+        return req if isinstance(browser_key, str) and self.browser_ok(rid, browser_key) else None
 
     def decide(self, pair: str, approve: bool, edits: bool = False) -> Optional[dict]:
         """Approve (edits: add the p6:write scope) or deny the waiting request showing this pairing code. None when

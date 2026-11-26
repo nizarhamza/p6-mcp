@@ -319,3 +319,52 @@ def test_tray_approvals_and_stop(qtbot, env, monkeypatch):
         assert app.keep_running() in (True, False)
     finally:
         app._shutdown()
+
+
+def test_tray_window_waits_for_connect(qtbot, env, monkeypatch):
+    """3.3: no approval window when a request arrives; the page's Connect button opens it with the code filled in,
+    the notification or tray menu opens it to type the code; the Connect listener runs while remote access is on."""
+    from PySide6.QtWidgets import QApplication
+
+    from p6mcp import settings_logic, supervisor
+    from p6mcp.settings_app import tray as tray_mod
+    port = settings_logic.free_port(43900)
+    config.save({"language": "en", "remote_enabled": True, "remote_privacy_ack": True, "remote_public_host": HOST,
+                 "remote_pair_port": port})
+
+    class Sup:
+        state = supervisor.State(supervisor.DISABLED)
+
+        def tick(self):
+            return self.state
+
+        def stop(self):
+            pass
+
+    app = tray_mod.TrayApp(QApplication.instance(), Sup(), remote=FakeRemote())
+    monkeypatch.setattr(app, "_show_on_arrival", lambda: False)  # as with a notification area icon
+    try:
+        store = Store()
+        client = {"client_id": "c", "client_name": "Claude", "via": "cimd"}
+        req = store.add_pending(client, "https://claude.ai/api/mcp/auth_callback", "s", "c" * 43, ["p6:read"],
+                                f"https://{HOST}/mcp", "key-0123456789")
+        app.poll_approvals()
+        assert app.pair_listener is not None and app.pair_listener.running and app.pair_listener.port == port
+        dlg = app.approvals[req["id"]]
+        qtbot.addWidget(dlg)
+        assert not dlg.isVisible()  # nothing covers the browser page
+        app._paired(store.local_hint(req["id"], req["pair"], "key-0123456789"), req["pair"])
+        assert dlg.isVisible() and dlg.code.text() == req["pair"] and dlg.approve_btn.isEnabled()
+        assert dlg.deny_btn.isDefault() and "Connect" in dlg.error.text()
+        dlg.hide()
+        other = store.add_pending(client, "https://claude.ai/api/mcp/auth_callback", "s", "c" * 43, ["p6:read"],
+                                  f"https://{HOST}/mcp")
+        app.poll_approvals()
+        assert not app.approvals[other["id"]].isVisible()
+        qtbot.addWidget(app.approvals[other["id"]])
+        app.show_approvals()  # tray menu Approve a connection / notification click: type the code
+        assert app.approvals[other["id"]].isVisible() and app.approvals[other["id"]].code.text() == ""
+        app.stop_remote()
+        assert app.pair_listener is None
+    finally:
+        app._shutdown()

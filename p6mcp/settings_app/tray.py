@@ -6,7 +6,7 @@ from __future__ import annotations
 import getpass
 from typing import Optional
 
-from PySide6.QtCore import QObject, QRect, Qt, QTimer
+from PySide6.QtCore import QObject, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -95,6 +95,8 @@ def make_icon(state: str = supervisor.DISABLED) -> QIcon:
 
 
 class TrayApp(QObject):
+    paired = Signal(dict, str)  # the browser page's Connect button (listener thread -> Qt thread): request, code
+
     def __init__(self, app: QApplication, sup: Optional[supervisor.Supervisor] = None, remote=None):
         super().__init__()
         self.app = app
@@ -102,6 +104,9 @@ class TrayApp(QObject):
         from p6mcp.remote.supervise import RemoteHost
         self.remote = remote or RemoteHost()  # remote access server and tunnel (only while remote access is on)
         self.approvals: dict = {}  # pending request id -> ApprovalDialog
+        self.pair_listener = None  # p6mcp.remote.pairing.PairListener while remote access is on
+        self._last_message = None  # what the last tray notification was about ("approve": a connection request)
+        self.paired.connect(self._paired)
         self._mutex = _named_mutex(MUTEX)
         self.window = None
         self.notified = False
@@ -125,16 +130,21 @@ class TrayApp(QObject):
             self.remote_status_act.setEnabled(False)
             self.remote_stop_act = QAction(tr("tray.remote.stop"), menu)
             self.remote_stop_act.triggered.connect(self.stop_remote)
+            self.approve_act = QAction(tr("tray.remote.approve"), menu)
+            self.approve_act.triggered.connect(self.show_approvals)
+            self.approve_act.setVisible(False)
             for a in (self.open_act, self.status_act, self.restart_act):
                 menu.addAction(a)
             menu.addSeparator()
             menu.addAction(self.remote_status_act)
+            menu.addAction(self.approve_act)
             menu.addAction(self.remote_stop_act)
             menu.addSeparator()
             menu.addAction(self.quit_act)
             self.menu = menu
             self.tray.setContextMenu(menu)
             self.tray.activated.connect(self._activated)
+            self.tray.messageClicked.connect(self._message_clicked)
             self.tray.show()
             app.setQuitOnLastWindowClosed(False)
         self.timer = QTimer(self)
@@ -205,6 +215,7 @@ class TrayApp(QObject):
         for dlg in list(self.approvals.values()):
             dlg.reject()
         self.approvals.clear()
+        self._pairing(None)
         self.tick()
 
     def _store(self):
@@ -216,7 +227,9 @@ class TrayApp(QObject):
         from p6mcp.remote.supervise import remote_wanted
         st = config.load()
         if not remote_wanted(st):
+            self._pairing(None)
             return
+        self._pairing(st)
         store = self._store()
         waiting = {r["id"]: r for r in store.pending_list()}
         for rid in [r for r in self.approvals if r not in waiting]:
@@ -231,12 +244,66 @@ class TrayApp(QObject):
                                  lambda rid, code, ok, edits: self._store().decide_request(rid, code, ok, edits))
             self.approvals[rid] = dlg
             if self.tray is not None:
+                self._last_message = "approve"
                 self.tray.showMessage(tr("remote.approve.title"), tr("remote.approve.notify",
                                                                      client=req["client_name"]),
                                       QSystemTrayIcon.MessageIcon.Information, 8000)
-            dlg.show()
-            dlg.raise_()
-            dlg.activateWindow()
+            if self._show_on_arrival():
+                self._present(dlg)
+        if self.tray is not None:
+            self.approve_act.setVisible(bool(self.approvals))
+
+    def _show_on_arrival(self) -> bool:
+        """The approval window waits for the browser page's Connect button (it then opens with the code filled in),
+        the notification or the tray menu: it no longer covers the page as soon as a request arrives. Without a
+        notification area there is no other way to reach it, so it opens at once."""
+        return self.tray is None
+
+    @staticmethod
+    def _present(dlg) -> None:
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def show_approvals(self) -> None:
+        """Tray menu or notification: open the approval window of every waiting request (to type the code)."""
+        self.poll_approvals()
+        for dlg in self.approvals.values():
+            self._present(dlg)
+
+    def _message_clicked(self) -> None:
+        if self._last_message == "approve":
+            self.show_approvals()
+
+    def _pairing(self, st) -> None:
+        """Run the Connect button listener on 127.0.0.1:remote_pair_port while remote access is wanted (a port in use
+        is not retried until the setting changes: the page then falls back to the typed code)."""
+        port = st.raw.get("remote_pair_port") if st is not None else None
+        cur = self.pair_listener
+        if cur is not None and cur.port != port:
+            cur.stop()
+            self.pair_listener = cur = None
+        if port and cur is None:
+            from p6mcp.remote.pairing import PairListener
+            self.pair_listener = PairListener(int(port), self._public_origin,
+                                              lambda rid, code, key: self._store().local_hint(rid, code, key),
+                                              lambda req, code: self.paired.emit(req, code))
+            self.pair_listener.start()
+
+    @staticmethod
+    def _public_origin():
+        host = config.load().remote_public_host
+        return f"https://{host}" if host else None
+
+    def _paired(self, req: dict, code: str) -> None:
+        """The browser page on this PC sent the code of a waiting request: fill it in its approval window."""
+        if req["id"] not in self.approvals:
+            self.poll_approvals()
+        dlg = self.approvals.get(req["id"])
+        if dlg is None:
+            return
+        dlg.prefill(code)
+        self._present(dlg)
 
     def restart_server(self) -> None:
         self.supervisor.restart()
@@ -274,6 +341,7 @@ class TrayApp(QObject):
         """Called when the window accepted its close: True keeps the app (window hidden)."""
         if self.keep_running():
             if not self.notified and self.tray is not None:
+                self._last_message = None
                 self.tray.showMessage(tr("app.title"), tr("tray.still_running"),
                                       QSystemTrayIcon.MessageIcon.Information, 4000)
                 self.notified = True
@@ -300,6 +368,7 @@ class TrayApp(QObject):
     def _quit_for_update(self, version: Optional[str]) -> None:
         """The installer replaces this app's files: quit (releasing the AppMutex); it starts the app again."""
         if self.tray is not None:
+            self._last_message = None
             self.tray.showMessage(tr("app.title"), tr("upd.installing", latest=version or "?"),
                                   QSystemTrayIcon.MessageIcon.Information, 4000)
         if self.window is not None:
@@ -312,6 +381,7 @@ class TrayApp(QObject):
 
     def _shutdown(self) -> None:
         self.timer.stop()
+        self._pairing(None)
         self.supervisor.stop()
         self.remote.stop()
         if self.tray is not None:
