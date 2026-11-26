@@ -92,6 +92,14 @@ On a clean Windows 10 or 11 user account, with no Python installed:
       SQL and by REST (`p6_cpm_validate` match rate 1.0 on both), an edit and a new relationship pending, a push
       refused on a change made in P6 EPPM meanwhile, then a push that succeeds and its reverse, `p6_eppm_schedule`
       with its log. Check in P6 EPPM that the server ends as it started.
+- [ ] Remote access (with a Cloudflare test account, never a customer's): Settings, Remote access, Create the API
+      token (four permissions ticked), Set up; Turn on remote access, Save: the tray shows "Remote access on" (this
+      runs the **bundled** cloudflared: the 3.2.0 draft failed here, cloudflared is under `P6MCP\_internal`);
+      add the connector address in claude.ai, approve by typing the browser's code in the PC window, list the
+      projects; a write dry run and its apply (with Allow edits); End connection in Connected apps: the AI app asks
+      to reconnect; Stop remote access now: the AI app says the PC is not reachable; Remove from Cloudflare leaves
+      the account as it was.
 - [ ] Run at startup: sign out and in, the tray icon is there (minimized).
 - [ ] Upgrade over the previous version while the tray app runs: setup asks to close it; settings kept.
-- [ ] Uninstall: the p6mcp client entries and the startup entry are gone; settings, backups and logs stay.
+- [ ] Uninstall: the p6mcp client entries and the startup entry are gone; settings, backups and logs stay; the
+      remote access secrets (`remote:tunnel_token`, `remote:relay_secret`) are gone from the Credential Manager.
