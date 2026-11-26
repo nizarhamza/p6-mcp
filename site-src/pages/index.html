@@ -60,6 +60,7 @@
         "CPM what-if and Monte Carlo schedule risk in memory",
         "XER inspection, import and export, and an XER-only mode",
         "P6 EPPM servers: pull, local edits, a push you approve, server scheduling",
+        "Remote access for claude.ai and ChatGPT in the browser, through your own free Cloudflare account (beta)",
         "Edits written to the P6 Professional database after a dry run, a confirmation token and a backup, with an edit log",
         "Excel project controls dashboard"
       ]
@@ -94,7 +95,7 @@
           "name": "Does my schedule leave my PC?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio."
+            "text": "The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. With remote access on (off by default), the results for claude.ai and ChatGPT also pass through your own Cloudflare account. For confidential projects use a local model, for example in LM Studio."
           }
         },
         {
@@ -126,7 +127,7 @@
           "name": "Does it work with ChatGPT?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer."
+            "text": "Yes, in the browser: turn on remote access (beta, through your own free Cloudflare account) and add its address as a custom MCP server in ChatGPT; tested with the Free plan. Codex and OpenAI's Secure MCP Tunnel are other routes, not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer."
           }
         },
         {
@@ -556,7 +557,7 @@
     <li>VS Code (Copilot agent mode) <span>installer</span></li>
     <li>LM Studio <span>installer</span></li>
     <li>Cline <span>installer</span></li>
-    <li>ChatGPT <span>Codex or Secure MCP Tunnel, not tested yet</span></li>
+    <li>claude.ai, ChatGPT in the browser <span>remote access, beta</span></li>
     <li>Any other MCP client <span>stdio or local HTTP</span></li>
   </ul>
 </section>
@@ -589,11 +590,11 @@
   <div class="faq">
     <details><summary>What is an MCP server for Primavera P6?</summary><div><p>MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant 65 tools that read and analyse P6 schedules, so you ask in plain language and get answers computed from the schedule rather than guessed by the model.</p></div></details>
     <details><summary>Can the AI change my P6 schedule?</summary><div><p>Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9.</p></div></details>
-    <details><summary>Does my schedule leave my PC?</summary><div><p>The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio.</p></div></details>
+    <details><summary>Does my schedule leave my PC?</summary><div><p>The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. With remote access on (off by default), the results for claude.ai and ChatGPT also pass through your own Cloudflare account. For confidential projects use a local model, for example in LM Studio.</p></div></details>
     <details><summary>Are the dates computed by the AI?</summary><div><p>No. Dates and float come from P6's last schedule run. What-if and risk use the server's CPM engine, and <code>p6_cpm_validate</code> shows how closely it matches P6's own dates on your project before you rely on it.</p></div></details>
     <details><summary>Which P6 versions and databases are supported?</summary><div><p>P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM servers through their REST API (and optionally a read-only SQL account), tested with P6 EPPM 25.12 on SQL Server. P6 Professional connected directly to SQL Server or Oracle is not supported.</p></div></details>
     <details><summary>Do I need P6 installed?</summary><div><p>Not for XER files: XER-only mode analyses them without P6 or a P6 database. Not for a P6 EPPM server either: it is reached over the network.</p></div></details>
-    <details><summary>Does it work with ChatGPT?</summary><div><p>Through Codex, which starts local MCP servers, or through OpenAI's Secure MCP Tunnel for ChatGPT chat. Both routes are documented in the <a href="https://github.com/nizarhamza/p6-mcp#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer.</p></div></details>
+    <details><summary>Does it work with ChatGPT?</summary><div><p>Yes, in the browser: turn on remote access (beta, through your own free Cloudflare account) and add its address as a custom MCP server in ChatGPT; tested with the Free plan. Codex and OpenAI's Secure MCP Tunnel are other routes, documented in the <a href="https://github.com/nizarhamza/p6-mcp#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer.</p></div></details>
     <details><summary>Does it run on macOS or Linux?</summary><div><p>No. P6 Professional is a Windows program and the server is built for Windows 10 and 11.</p></div></details>
   </div>
 </section>
