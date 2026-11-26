@@ -2,7 +2,9 @@
 
 The browser page of the request shows a pairing code; approving needs that code typed here. A request that someone
 else started (with the connector address) shows its code in their browser, not in the user's, so it cannot be
-approved by a click on a window that looks like the user's own. The window closes on its own when the request is
+approved by a click on a window that looks like the user's own. Since 3.3 the window does not open on its own: the
+browser page's Connect button opens it with the code filled in (p6mcp.remote.pairing), and the tray notification or
+menu opens it to type the code. The window closes on its own when the request is
 decided elsewhere (command line) or expires after 5 minutes; three wrong codes deny it.
 """
 

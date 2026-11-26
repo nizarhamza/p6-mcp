@@ -13,6 +13,8 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   only clicks Approve there. The code with a Copy button stays as the second way. The button is only offered to the
   starting browser (a key kept in a cookie) and the app accepts only pages of the user's own connector address, so
   a request started by someone else still cannot be approved from this PC by a click.
+- The approval window no longer pops up over the browser page when a request arrives: Connect opens it with the code
+  filled in, and the tray notification or the new tray menu entry Approve a connection opens it to type the code.
 
 ## [3.2.0] - 2026-11-26
 
