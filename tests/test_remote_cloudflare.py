@@ -396,6 +396,24 @@ def test_tunnel_key_never_holds_the_token(child_env):
     assert "secret" not in key and key.startswith("p6mcp-pc.x.workers.dev ")
 
 
+def test_cloudflared_path_installed(monkeypatch, tmp_path):
+    """The installed layout of PyInstaller 6 (checked in the 3.2.0 draft's portable zip): P6MCP\\p6mcp-settings.exe
+    and P6MCP\\_internal\\cloudflared\\cloudflared.exe; never a cloudflared from PATH or the environment."""
+    app = tmp_path / "P6MCP"
+    (app / "_internal" / "cloudflared").mkdir(parents=True)
+    exe = app / "_internal" / "cloudflared" / "cloudflared.exe"
+    exe.write_bytes(b"MZ")
+    other = tmp_path / "other.exe"
+    other.write_bytes(b"MZ")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(app / "p6mcp-settings.exe"))
+    monkeypatch.setattr(sys, "_MEIPASS", str(app / "_internal"), raising=False)
+    monkeypatch.setenv(supervise.CLOUDFLARED_ENV, str(other))
+    assert supervise.cloudflared_path() == str(exe)
+    exe.unlink()
+    assert supervise.cloudflared_path() is None  # missing: no fallback to another cloudflared
+
+
 def test_cloudflared_path(monkeypatch, tmp_path):
     exe = tmp_path / "cloudflared.exe"
     exe.write_bytes(b"MZ")
