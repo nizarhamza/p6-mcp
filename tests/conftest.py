@@ -118,3 +118,26 @@ class P6:
 @pytest.fixture
 def p6(server, tmp_path, golden):
     return P6(server, tmp_path, golden)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Delete the Qt widgets the tests left while Python is fully alive.
+
+    pytest-qt closes a test's widgets with deleteLater, which only an event loop runs: the last Settings window
+    and its popups, the tray menu and approval windows were still alive at exit (11 top-level, 540 widgets in
+    all). PySide6 then destroyed them with the QApplication in its atexit handler, which crashed now and then
+    (access violation after "N passed", reported by the CI as exit code 1 with no error text)."""
+    qw = sys.modules.get("PySide6.QtWidgets")
+    if qw is None or qw.QApplication.instance() is None:
+        return
+    import gc
+
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QEvent, QThreadPool
+    QThreadPool.globalInstance().waitForDone(30000)  # no Job delivers its result to a deleted page
+    for w in qw.QApplication.topLevelWidgets():  # no close(): a close event could ask about unsaved changes
+        if shiboken6.isValid(w):
+            w.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QCoreApplication.processEvents()
+    gc.collect()

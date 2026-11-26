@@ -31,7 +31,12 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Tests
-        run: python -m pytest -q
+        # faulthandler prints the trace of a native crash (one at interpreter exit was only "exit code 1")
+        run: |
+          python -X faulthandler -m pytest -q
+          $code = $LASTEXITCODE
+          Write-Host ("pytest exit code: {0} (0x{0:X8})" -f $code)
+          exit $code
       - name: No real project data in the repository
         shell: bash
         # the only exception: the synthetic P6 parity cases of tests/test_engine_parity.py (no project data)
