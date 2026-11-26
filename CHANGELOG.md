@@ -5,6 +5,8 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-11-26
+
 ### Added
 
 - Remote access: a redesigned connection page (brand colors, light and dark, phone width) with a Connect with this
