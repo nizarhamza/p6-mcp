@@ -6,7 +6,7 @@ from __future__ import annotations
 import getpass
 from typing import Optional
 
-from PySide6.QtCore import QObject, QRect, Qt, QTimer
+from PySide6.QtCore import QObject, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -95,6 +95,8 @@ def make_icon(state: str = supervisor.DISABLED) -> QIcon:
 
 
 class TrayApp(QObject):
+    paired = Signal(dict, str)  # the browser page's Connect button (listener thread -> Qt thread): request, code
+
     def __init__(self, app: QApplication, sup: Optional[supervisor.Supervisor] = None, remote=None):
         super().__init__()
         self.app = app
@@ -102,6 +104,8 @@ class TrayApp(QObject):
         from p6mcp.remote.supervise import RemoteHost
         self.remote = remote or RemoteHost()  # remote access server and tunnel (only while remote access is on)
         self.approvals: dict = {}  # pending request id -> ApprovalDialog
+        self.pair_listener = None  # p6mcp.remote.pairing.PairListener while remote access is on
+        self.paired.connect(self._paired)
         self._mutex = _named_mutex(MUTEX)
         self.window = None
         self.notified = False
@@ -205,6 +209,7 @@ class TrayApp(QObject):
         for dlg in list(self.approvals.values()):
             dlg.reject()
         self.approvals.clear()
+        self._pairing(None)
         self.tick()
 
     def _store(self):
@@ -216,7 +221,9 @@ class TrayApp(QObject):
         from p6mcp.remote.supervise import remote_wanted
         st = config.load()
         if not remote_wanted(st):
+            self._pairing(None)
             return
+        self._pairing(st)
         store = self._store()
         waiting = {r["id"]: r for r in store.pending_list()}
         for rid in [r for r in self.approvals if r not in waiting]:
@@ -237,6 +244,38 @@ class TrayApp(QObject):
             dlg.show()
             dlg.raise_()
             dlg.activateWindow()
+
+    def _pairing(self, st) -> None:
+        """Run the Connect button listener on 127.0.0.1:remote_pair_port while remote access is wanted (a port in use
+        is not retried until the setting changes: the page then falls back to the typed code)."""
+        port = st.raw.get("remote_pair_port") if st is not None else None
+        cur = self.pair_listener
+        if cur is not None and cur.port != port:
+            cur.stop()
+            self.pair_listener = cur = None
+        if port and cur is None:
+            from p6mcp.remote.pairing import PairListener
+            self.pair_listener = PairListener(int(port), self._public_origin,
+                                              lambda rid, code, key: self._store().local_hint(rid, code, key),
+                                              lambda req, code: self.paired.emit(req, code))
+            self.pair_listener.start()
+
+    @staticmethod
+    def _public_origin():
+        host = config.load().remote_public_host
+        return f"https://{host}" if host else None
+
+    def _paired(self, req: dict, code: str) -> None:
+        """The browser page on this PC sent the code of a waiting request: fill it in its approval window."""
+        if req["id"] not in self.approvals:
+            self.poll_approvals()
+        dlg = self.approvals.get(req["id"])
+        if dlg is None:
+            return
+        dlg.prefill(code)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def restart_server(self) -> None:
         self.supervisor.restart()
@@ -312,6 +351,7 @@ class TrayApp(QObject):
 
     def _shutdown(self) -> None:
         self.timer.stop()
+        self._pairing(None)
         self.supervisor.stop()
         self.remote.stop()
         if self.tray is not None:

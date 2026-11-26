@@ -67,6 +67,13 @@ class ApprovalDialog(QDialog):
         row.addWidget(self.approve_btn)
         lay.addLayout(row)
 
+    def prefill(self, code: str) -> None:
+        """The Connect button of the browser page on this PC sent the code (p6mcp.remote.pairing): fill it in. The
+        user still decides with a click (Deny stays the default button)."""
+        self.code.setText(code)
+        pill(self.error, "ok", tr("remote.approve.prefilled"))
+        self.error.setVisible(True)
+
     def _typed(self, text: str) -> None:
         self.approve_btn.setEnabled(len(text.strip()) == 6)
 

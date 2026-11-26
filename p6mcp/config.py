@@ -83,6 +83,7 @@ DEFAULTS: dict[str, Any] = {
     "remote_mode": "relay",       # relay: Worker on the user's free workers.dev address; domain: their own domain
     "remote_public_host": None,   # public host name only (no scheme, no port), written by the Cloudflare setup
     "remote_port": 39218,         # local port of the remote access server (127.0.0.1 only)
+    "remote_pair_port": 39219,    # 3.3: loopback port of the tray app for the Connect button of the browser page
     "remote_allow_writes": False,  # edits from remote clients, independent from allow_writes
     "remote_keep_awake": True,    # keep the PC awake while remote access is on
     "remote_ip_allowlist": False,  # accept only the published Anthropic and OpenAI ranges
@@ -289,6 +290,11 @@ def _check_remote(out: dict) -> list[str]:
         errs.append("remote_port must be a whole number between 1024 and 65535")
     elif port == out["http_port"]:
         errs.append("remote_port must differ from http_port")
+    pport = out["remote_pair_port"]
+    if not isinstance(pport, int) or isinstance(pport, bool) or not 1024 <= pport <= 65535:
+        errs.append("remote_pair_port must be a whole number between 1024 and 65535")
+    elif pport in (out["http_port"], port):
+        errs.append("remote_pair_port must differ from http_port and remote_port")
     host = out["remote_public_host"]
     if host is not None and not remote_host_ok(host):
         errs.append("remote_public_host must be a host name in lower case (no https://, no port, no path), "

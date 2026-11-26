@@ -23,11 +23,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import html
 import ipaddress
 import json
 import logging
 import re
+import secrets
 import socket
 from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import urlencode, urlparse
@@ -37,6 +37,8 @@ from mcp.server.auth.provider import AccessToken
 
 from p6mcp import i18n
 from p6mcp.remote import READ_SCOPE, WRITE_SCOPE, audit
+from p6mcp.remote import pages as _pages
+from p6mcp.remote.pairing import PATH as PAIR_PATH
 from p6mcp.remote.store import APPROVAL_SECONDS, Store, TooManyRequests
 
 log = logging.getLogger("p6mcp.remote.auth")
@@ -173,29 +175,24 @@ def pkce_ok(verifier: str, challenge: str) -> bool:
 
 # ----------------------------------------------------------------- routes
 
-PAGE = """<!doctype html><html lang="{lang}"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer">
-{refresh}<title>{title}</title>
-<style>body{{font-family:"Segoe UI",Arial,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem;color:#0a1a33;
-background:#fff;line-height:1.5}}h1{{font-size:1.3rem}}.code{{font-size:2.4rem;letter-spacing:.35rem;font-weight:700;
-background:#eef2f8;padding:.5rem 1rem;display:inline-block;border-radius:6px}}.muted{{color:#4a5a73}}</style>
-</head><body><h1>MCP for Primavera P6</h1>{body}</body></html>"""
 NO_STORE = {"cache-control": "no-store", "pragma": "no-cache"}
-CSP = ("default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; "
-       "form-action 'none'")
+CSP = _pages.csp()
 PAGE_HEADERS = dict(NO_STORE, **{"content-security-policy": CSP, "x-frame-options": "DENY",
                                  "x-content-type-options": "nosniff", "referrer-policy": "no-referrer"})
+BROWSER_COOKIE = "p6b_"  # + request id: the browser key of the browser that started the request (Connect button)
 
 
-def _page(title: str, body: str, refresh: Optional[str] = None, status: int = 200):
+def _page(title: str, body: str, refresh: Optional[str] = None, status: int = 200, nonce: Optional[str] = None,
+          script_data: Optional[dict] = None, local: Optional[str] = None):
     from starlette.responses import HTMLResponse
-    meta = f'<meta http-equiv="refresh" content="2;url={html.escape(refresh)}">' if refresh else ""
-    return HTMLResponse(PAGE.format(lang=html.escape(i18n.language()), title=html.escape(title), body=body,
-                                    refresh=meta), status_code=status, headers=PAGE_HEADERS)
+    headers = dict(PAGE_HEADERS, **{"content-security-policy": _pages.csp(nonce, local)}) if nonce else PAGE_HEADERS
+    return HTMLResponse(_pages.page(i18n.language(), title, body, refresh, nonce, script_data), status_code=status,
+                        headers=headers)
 
 
 def _message(key: str, status: int = 400):
-    return _page(i18n.tr("remote.page.title_error"), f"<p>{html.escape(i18n.tr(key))}</p>", status=status)
+    title = i18n.tr("remote.page.title_error")
+    return _page(title, _pages.message_body(title, i18n.tr(key)), status=status)
 
 
 def _event(what: str, **fields) -> None:
@@ -210,8 +207,10 @@ def _oauth_error(status: int, error: str, desc: str = ""):
 
 
 def add_routes(srv: Any, issuer: str, resource: str, store: Store, extra_redirects: tuple[str, ...] = (),
-               fetch: Optional[Fetcher] = None, language: Optional[str] = None) -> None:
-    """Register the authorization server's routes on the remote MCP server (custom routes: no bearer token)."""
+               fetch: Optional[Fetcher] = None, language: Optional[str] = None,
+               pair_port: Optional[int] = None) -> None:
+    """Register the authorization server's routes on the remote MCP server (custom routes: no bearer token).
+    pair_port: loopback port of the tray app's Connect button listener (None: no Connect button)."""
     from starlette.requests import Request
     from starlette.responses import JSONResponse, RedirectResponse, Response
     i18n.set_language(language)
@@ -277,19 +276,30 @@ def add_routes(srv: Any, issuer: str, resource: str, store: Store, extra_redirec
         if any(s not in SCOPES for s in asked):
             return back(error="invalid_scope", error_description=f"scopes: {' '.join(SCOPES)}", state=state)
         scopes = [READ_SCOPE] + [s for s in asked if s == WRITE_SCOPE]
+        bkey = secrets.token_urlsafe(24)
         try:
             req = await anyio.to_thread.run_sync(store.add_pending, client, redirect, state, challenge, scopes,
-                                                 resource)
+                                                 resource, bkey)
         except TooManyRequests:
             _event("busy", app=client["client_name"])
             return _message("remote.page.busy", 429)
         log.info("connection request from %s (%s)", client["client_name"], client["via"])
         _event("request", app=client["client_name"], via=client["via"], host=urlparse(redirect).hostname)
-        return RedirectResponse(f"/authorize/wait?id={req['id']}", status_code=302, headers=NO_STORE)
+        resp = RedirectResponse(f"/authorize/wait?id={req['id']}", status_code=302, headers=NO_STORE)
+        resp.set_cookie(BROWSER_COOKIE + req["id"], bkey, max_age=APPROVAL_SECONDS + 60, path="/authorize",
+                        secure=True, httponly=True, samesite="lax")
+        return resp
 
     @srv.custom_route("/authorize/wait", methods=["GET"])
     async def authorize_wait(request: Request) -> Response:
         rid = request.query_params.get("id", "")
+        if request.query_params.get("check") == "1":  # the page script: has the request been decided? no side effect
+            req = await anyio.to_thread.run_sync(store.pending, rid) if _RID.match(rid) else None
+            if req is None:
+                return JSONResponse({"status": "unknown"}, status_code=404, headers=NO_STORE)
+            waiting = req["status"] == "pending" and req["expires_in"] > 0
+            return JSONResponse({"status": "pending" if waiting else "done", "left": req["expires_in"]},
+                                headers=NO_STORE)
         out = await anyio.to_thread.run_sync(store.finish_pending, rid) if _RID.match(rid) else None
         if out is None:
             return _message("remote.page.unknown", 404)
@@ -311,11 +321,20 @@ def add_routes(srv: Any, issuer: str, resource: str, store: Store, extra_redirec
                 params["state"] = req["state"]
             return RedirectResponse(redirect + sep + urlencode(params), status_code=302, headers=NO_STORE)
         host = urlparse(redirect).hostname or ""
-        body = (f"<p>{html.escape(i18n.tr('remote.page.asks', client=req['client_name'], host=host))}</p>"
-                f"<p>{html.escape(i18n.tr('remote.page.approve_on_pc'))}</p>"
-                f"<p class=\"code\">{html.escape(req['pair'])}</p>"
-                f"<p class=\"muted\">{html.escape(i18n.tr('remote.page.waiting', left=req['expires_in']))}</p>")
-        return _page(i18n.tr("remote.page.title"), body, refresh=f"/authorize/wait?id={rid}")
+        bkey = request.cookies.get(BROWSER_COOKIE + rid)
+        connect = bool(pair_port) and await anyio.to_thread.run_sync(store.browser_ok, rid, bkey)
+        local = f"http://127.0.0.1:{int(pair_port)}" if connect else None
+        body = _pages.wait_body(i18n.tr, req["client_name"], host, req["pair"], req["expires_in"], APPROVAL_SECONDS,
+                                connect)
+        data = {"id": rid, "code": req["pair"], "left": req["expires_in"], "total": APPROVAL_SECONDS,
+                "wait": f"/authorize/wait?id={rid}", "check": f"/authorize/wait?id={rid}&check=1",
+                "t": {k: i18n.tr("remote.page." + key) for k, key in (("copy", "copy"), ("copied", "copied"),
+                                                                     ("busy", "sending"), ("done", "done"),
+                                                                     ("failed", "failed"))}}
+        if connect:
+            data.update(key=bkey, local=local + PAIR_PATH)
+        return _page(i18n.tr("remote.page.title"), body, refresh=f"/authorize/wait?id={rid}",
+                     nonce=secrets.token_urlsafe(16), script_data=data, local=local)
 
     @srv.custom_route("/token", methods=["POST"])
     async def token(request: Request) -> Response:
