@@ -9,8 +9,9 @@ import threading
 import time
 
 import pytest
+from conftest import free_port
 
-from p6mcp import confirm, policy, settings_logic
+from p6mcp import confirm, policy
 from p6mcp.remote import RELAY_HEADER, resource_url, shaping
 
 httpx = pytest.importorskip("httpx2")
@@ -183,7 +184,7 @@ def test_remote_instructions_are_ascii(server):
 # ----------------------------------------------------------------- live server
 
 def _start(app):
-    port = settings_logic.free_port(41700)
+    port = free_port()
     srv = remote.make_server(app, port)
     th = threading.Thread(target=srv.run, daemon=True)
     th.start()
@@ -332,7 +333,7 @@ def test_setup_errors(p6):
 def test_serve_reports_setup_and_port_problems(p6, monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     p6.set(remote_public_host=None)
-    assert remote.serve(settings_logic.free_port(41800)) == 2
+    assert remote.serve(free_port()) == 2
     st = json.loads((tmp_path / "P6MCP" / "remote_status.json").read_text(encoding="utf-8"))
     assert st["state"] == "error" and "public address" in st["error"]
     p6.set(remote_public_host=HOST)

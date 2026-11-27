@@ -8,8 +8,7 @@ import time
 from datetime import date, timedelta
 
 import pytest
-
-from p6mcp import settings_logic
+from conftest import free_port
 
 httpx = pytest.importorskip("httpx2")
 pytest.importorskip("mcp.server.auth.settings")
@@ -93,7 +92,7 @@ def live(p6, tmp_path):
     p6.set(remote_public_host=HOST)
     guard = remote.build_app(p6.config.load(), relay_secret=SECRET, store=Store(str(tmp_path / "auth.db")),
                              fetch=lambda url: None)
-    port = settings_logic.free_port(42100)
+    port = free_port()
     srv = remote.make_server(guard, port)
     th = threading.Thread(target=srv.run, daemon=True)
     th.start()

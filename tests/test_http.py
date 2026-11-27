@@ -7,8 +7,9 @@ import threading
 import time
 
 import pytest
+from conftest import free_port
 
-from p6mcp import http_server, runtime, settings_logic
+from p6mcp import http_server, runtime
 
 httpx = pytest.importorskip("httpx2")
 TOKEN = "test-token-0123456789abcdef"
@@ -19,7 +20,7 @@ HDR = {"accept": "application/json, text/event-stream", "content-type": "applica
 
 @pytest.fixture
 def live(p6):
-    port = settings_logic.free_port(41500)
+    port = free_port()
     srv = http_server.make_server(port, TOKEN)
     th = threading.Thread(target=srv.run, daemon=True)
     th.start()

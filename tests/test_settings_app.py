@@ -33,6 +33,8 @@ def env(tmp_path, monkeypatch, golden):
         (tmp_path / sub).mkdir()
         monkeypatch.setenv(var, str(tmp_path / sub))  # a fake profile: the real client configs are never read
     monkeypatch.delenv("CLINE_MCP_SETTINGS_PATH", raising=False)
+    # the tray's single instance pipe, per process: another xdist worker's tray, or the installed app, never answers
+    monkeypatch.setattr("p6mcp.settings_app.tray.instance_name", lambda: f"p6mcp-tray-test-{os.getpid()}")
     monkeypatch.setattr("p6mcp.clients._running_names", lambda: set())
     monkeypatch.setattr(pages.credentials, "http_token", lambda create=True: TOKEN)
     monkeypatch.setattr("p6mcp.settings_app.clients_page.credentials.http_token", lambda create=True: TOKEN)

@@ -49,6 +49,10 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   (monthly at most 0.5). `checks.spread` counts the spans spread over calendar time (no working time on their
   calendar), the curves applied or not found and the assignments with period actuals; the note says what is still
   approximate. The dashboard S-curve follows.
+- Tests run in parallel on 4 workers (pytest-xdist, `pytest -n 4`) in CI and in the release build: 60 to 95 s
+  instead of 165 to 205 s serial on a 12 core machine. Tests that start a server take an OS-chosen port per worker,
+  the Run at startup test uses its own registry key per process and the tray tests their own single instance
+  pipe. Nothing user visible.
 
 ## [3.4.0] - 2026-11-27
 

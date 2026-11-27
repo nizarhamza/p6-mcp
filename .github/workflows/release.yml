@@ -46,7 +46,7 @@ jobs:
           v=$(python -c "import p6mcp; print(p6mcp.__version__)")
           test "v$v" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} but version $v"; exit 1; }
       - name: Tests
-        run: python -m pytest -q
+        run: python -m pytest -q -n 4 --dist loadgroup  # pytest-xdist, as CI
       - name: Build executables
         run: |
           python packaging/make_assets.py

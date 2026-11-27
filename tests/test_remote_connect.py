@@ -10,8 +10,7 @@ import urllib.error
 import urllib.request
 
 import pytest
-
-from p6mcp import settings_logic
+from conftest import free_port
 
 pytest.importorskip("httpx2")
 pytest.importorskip("mcp.server.auth.settings")
@@ -142,7 +141,7 @@ ORIGIN = "https://p6mcp-relay.example.workers.dev"
 def listener(tmp_path):
     store = Store(str(tmp_path / "auth.db"))
     got = []
-    port = settings_logic.free_port(42900)
+    port = free_port()
     pl = PairListener(port, lambda: ORIGIN, store.local_hint, lambda req, code: got.append((req["id"], code)))
     assert pl.start()
     yield {"pl": pl, "store": store, "got": got, "port": port}

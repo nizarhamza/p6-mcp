@@ -57,9 +57,10 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Tests
-        # faulthandler prints the trace of a native crash (one at interpreter exit was only "exit code 1")
+        # faulthandler prints the trace of a native crash (one at interpreter exit was only "exit code 1");
+        # -n 4: one pytest-xdist worker per vCPU of the windows runner; loadgroup keeps an xdist_group on one worker
         run: |
-          python -X faulthandler -m pytest -q
+          python -X faulthandler -m pytest -q -n 4 --dist loadgroup
           $code = $LASTEXITCODE
           Write-Host ("pytest exit code: {0} (0x{0:X8})" -f $code)
           exit $code
