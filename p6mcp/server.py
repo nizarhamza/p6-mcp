@@ -7534,7 +7534,8 @@ def _value_at(items: Sequence[tuple], t: datetime) -> float:
 def _measure_rows(con, pid: int, measure: str, resource: Optional[str] = None) -> list[sqlite3.Row]:
     """Assignments of a project: target, actual and remain quantity (measure 'units': labor and
     nonlabor resources; 'cost': every resource), planned, actual and remaining dates and what
-    _perf_pct needs of the activity. resource= one resource (any type)."""
+    _perf_pct and _ev_pct need of the activity (WBS node; has_curve = a resource curve on one of its
+    assignments). resource= one resource (any type)."""
     cols, tc, k = _cols(con, "TASKRSRC"), _cols(con, "TASK"), "qty" if measure == "units" else "cost"
     act = " + ".join(f"COALESCE(tr.{c}, 0)" for c in (f"act_reg_{k}", f"act_ot_{k}") if c in cols) or "0"
     rtype = "COALESCE(tr.rsrc_type, r.rsrc_type)" if "rsrc_type" in cols else "r.rsrc_type"
@@ -7544,7 +7545,10 @@ def _measure_rows(con, pid: int, measure: str, resource: Optional[str] = None) -
            "tr.target_start_date, tr.target_end_date, tr.act_start_date, tr.act_end_date, tr.restart_date, "
            "tr.reend_date, t.phys_complete_pct, t.status_code, t.target_drtn_hr_cnt, t.remain_drtn_hr_cnt, "
            + ("t.complete_pct_type" if "complete_pct_type" in tc else "NULL") + f" AS pct_type, {tu('act')} AS task_act, "
-           f"{tu('remain')} AS task_remain FROM TASKRSRC tr JOIN TASK t ON t.task_id = tr.task_id "
+           f"{tu('remain')} AS task_remain, t.wbs_id, "
+           + ("EXISTS (SELECT 1 FROM TASKRSRC c WHERE c.task_id = t.task_id AND c.curv_id IS NOT NULL"
+              + _alive(con, "TASKRSRC", "c") + ")" if "curv_id" in cols else "0") + " AS has_curve "
+           "FROM TASKRSRC tr JOIN TASK t ON t.task_id = tr.task_id "
            "LEFT JOIN RSRC r ON r.rsrc_id = tr.rsrc_id" + _alive(con, "RSRC", "r") + " WHERE t.proj_id = ?"
            + _alive(con, "TASKRSRC", "tr") + _alive(con, "TASK", "t"))
     if resource:
@@ -7572,12 +7576,86 @@ def _perf_pct(r: Mapping) -> float:
     return min(100.0, max(0.0, v))
 
 
-def _curve_items(rows: Sequence, dd: datetime) -> dict:
+# P6 earned value techniques (PROJWBS / PREFER ev_compute_type) -> technique name. EC_Cmp_pct is in P6's
+# own exports; the other tokens come from a third-party reader of P6 XER files. The token of 'activity
+# percent complete using resource curves' is not known: a token naming a curve is read as that technique.
+EV_TECHNIQUES = {"EC_Cmp_pct": "activity_pct", "EC_0_pct": "0_100", "EC_50_pct": "50_50",
+                 "EC_User_pct": "custom_pct", "EC_MS": "wbs_milestones"}
+EV_CURVE_TOKEN = re.compile(r"curv", re.I)
+
+
+def _ev_map(con, pid: int) -> dict:
+    """Earned value technique of every WBS node of a project: {by_wbs: {wbs_id: (technique, custom %,
+    WBS milestones %)}, nodes: {technique: node count}, unknown: [tokens]}. A node's own
+    ev_compute_type / ev_user_pct, else the project node's, else PREFER's (the admin default), else
+    activity percent complete. WBS milestones % = weight of the node's completed WBSSTEP rows / weight
+    of all of them x 100 (None without weights). An unknown token counts as activity percent complete
+    and is listed."""
+    wc = _cols(con, "PROJWBS")
+    col = lambda c: c if c in wc else "NULL"  # noqa: E731
+    rows = con.execute(f"SELECT wbs_id, proj_node_flag, {col('ev_compute_type')}, {col('ev_user_pct')} FROM PROJWBS "
+                       "WHERE proj_id = ?" + _alive(con, "PROJWBS"), (pid,)).fetchall()
+    pc = _cols(con, "PREFER")
+    pref = (con.execute("SELECT " + ", ".join(c if c in pc else "NULL" for c in ("ev_compute_type", "ev_user_pct"))
+                        + " FROM PREFER").fetchone() if pc else None) or (None, None)
+    node = next((r for r in rows if r[1] == "Y"), None)
+    dflt = (node[2] if node and node[2] else pref[0] or "EC_Cmp_pct",
+            node[3] if node and node[3] is not None else pref[1])
+    ms: dict[int, list[float]] = {}
+    if {"wbs_id", "proj_id", "step_wt", "complete_flag"} <= set(_cols(con, "WBSSTEP")):
+        for w, wt, done in con.execute("SELECT wbs_id, step_wt, complete_flag FROM WBSSTEP WHERE proj_id = ?"
+                                       + _alive(con, "WBSSTEP"), (pid,)):
+            m = ms.setdefault(w, [0.0, 0.0])
+            m[0] += float(wt or 0) * (done == "Y")
+            m[1] += float(wt or 0)
+    out: dict[str, Any] = {"by_wbs": {}, "nodes": {}, "unknown": []}
+    for w, _, tok, up in rows:
+        tok = tok or dflt[0]
+        tech = EV_TECHNIQUES.get(tok) or ("resource_curves" if EV_CURVE_TOKEN.search(tok) else None)
+        if tech is None:
+            tech = "activity_pct"
+            if tok not in out["unknown"]:
+                out["unknown"].append(tok)
+        up = dflt[1] if up is None else up
+        m = ms.get(w)
+        out["by_wbs"][w] = (tech, None if up is None else min(100.0, max(0.0, float(up))),
+                            100 * m[0] / m[1] if m and m[1] > 0 else None)
+        out["nodes"][tech] = out["nodes"].get(tech, 0) + 1
+    return out
+
+
+def _ev_pct(r: Mapping, ev: Optional[Mapping]) -> float:
+    """Performance % complete (0 to 100) of a _measure_rows row under the earned value technique of its
+    WBS node (ev = _ev_map; None or a node it lacks = activity percent complete), as the P6
+    documentation defines them: activity_pct = _perf_pct; resource_curves = units % complete of the
+    activity (actual / at completion, labor plus nonlabor) when one of its assignments has a resource
+    curve, else _perf_pct; 0_100 = 100 once completed, else 0; 50_50 = 50 once started, 100 once
+    completed; custom_pct = the node's custom % once started, 100 once completed; wbs_milestones = the
+    node's completed milestone weight share (0 without weights)."""
+    tech, user, ms = (ev or {}).get("by_wbs", {}).get(r["wbs_id"], ("activity_pct", None, None))
+    st = r["status_code"]
+    if tech == "0_100":
+        return 100.0 * (st == "TK_Complete")
+    if tech in ("50_50", "custom_pct"):
+        if st in ("TK_Complete", "TK_NotStart"):
+            return 100.0 * (st == "TK_Complete")
+        return 50.0 if tech == "50_50" else user or 0.0
+    if tech == "wbs_milestones":
+        return ms or 0.0
+    if tech == "resource_curves" and r["has_curve"]:
+        a = float(r["task_act"] or 0)
+        at = a + float(r["task_remain"] or 0)
+        return min(100.0, max(0.0, 100 * a / at)) if at else 100.0 * (st == "TK_Complete")
+    return _perf_pct(r)
+
+
+def _curve_items(rows: Sequence, dd: datetime, ev: Optional[Mapping] = None) -> dict:
     """Curves of _measure_rows at data date dd, as (qty, start, end): planned (target over the planned
     dates), actual (actual from the actual start to the actual finish, clipped at dd; dates missing =
     at dd), remaining (remain from the remaining start, not before dd, to the remaining finish). Plus
-    budget, actual_qty, remain_qty and earned (target x _perf_pct) totals, clipped (actual dates after
-    dd), clamped (remaining start before dd) and unspread (target without planned dates)."""
+    budget, actual_qty, remain_qty and earned (target x _ev_pct under the WBS techniques of ev =
+    _ev_map) totals, clipped (actual dates after dd), clamped (remaining start before dd) and unspread
+    (target without planned dates)."""
     out: dict[str, Any] = {"planned": [], "actual": [], "remaining": [], "budget": 0.0, "actual_qty": 0.0,
                            "remain_qty": 0.0, "earned": 0.0, "clipped": 0, "clamped": 0, "unspread": 0.0}
     for r in rows:
@@ -7585,7 +7663,7 @@ def _curve_items(rows: Sequence, dd: datetime) -> dict:
         out["budget"] += q
         out["actual_qty"] += a
         out["remain_qty"] += rem
-        out["earned"] += _perf_pct(r) / 100 * q
+        out["earned"] += _ev_pct(r, ev) / 100 * q
         s, e = _db_dt(r["target_start_date"]), _db_dt(r["target_end_date"])
         if q and s and e:
             out["planned"].append((q, s, max(s, e)))
@@ -7632,14 +7710,15 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
     dates), actual (actual quantities, up to the data date) and forecast (actuals, then remaining
     from the data date); period_count = the number of periods. to_date: exact values at the data date:
     baseline planned (planned value),
-    planned, actual and actual %, earned and earned % (earned value: budget x activity % complete
-    by its percent complete type, P6 earned value with 'activity percent complete'), variance
+    planned, actual and actual %, earned and earned % (earned value: budget x performance % complete
+    by the earned value technique of the activity's WBS node: activity % complete by its percent
+    complete type, 0/100, 50/50, custom %, WBS milestones or resource curves), variance
     (earned - baseline planned), spi (earned / baseline planned) and spi_actual (actual / baseline
     planned, the units-based index). updates= earlier updates of
     the same schedule (Project IDs): their earned and actual totals at their own data date
     (earned_points). from_date / to_date (YYYY-MM-DD) trim the periods; cumulatives stay exact.
     checks: totals reached by the last period, actuals clipped at the data date, remaining starts
-    moved to it, quantities without dates, WBS nodes with another earned value technique. Spread is
+    moved to it, quantities without dates, WBS nodes per earned value technique. Spread is
     linear over calendar time: an approximation, see note."""
     if period not in get_args(Period):
         raise ValueError(f"period must be one of {list(get_args(Period))}")
@@ -7667,16 +7746,18 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
         dd = dd_of(pid)
         if dd is None:
             raise ValueError(f"{project} has no data date (PROJECT.last_recalc_date)")
-        cur = _curve_items(_measure_rows(con, pid, measure, resource), dd)
+        evm = _ev_map(con, pid)
+        cur = _curve_items(_measure_rows(con, pid, measure, resource), dd, evm)
         base = bdd = bname = None
         if bid is not None:
             bdd, bname = dd_of(bid), con.execute("SELECT proj_short_name FROM PROJECT WHERE proj_id = ?", (bid,)).fetchone()[0]
-            base = _curve_items(_measure_rows(con, bid, measure, resource), bdd or dd)
-        pts = [(u, dd_of(p), _curve_items(_measure_rows(con, p, measure, resource), dd_of(p) or dd)) for u, p in upd]
+            base = _curve_items(_measure_rows(con, bid, measure, resource), bdd or dd, _ev_map(con, bid))
+        pts = [(u, dd_of(p), _curve_items(_measure_rows(con, p, measure, resource), dd_of(p) or dd, _ev_map(con, p)))
+               for u, p in upd]
         week_day = _prefer(con, "week_start_day_num") or 1
         fin = {t: con.execute(f"SELECT COUNT(*) FROM {t} WHERE proj_id = ?" + _alive(con, t), (pid,)).fetchone()[0]
                if "proj_id" in _cols(con, t) else 0 for t in ("TRSRCFIN", "TASKFIN")}
-        ev_other = 0  # earned value technique of the WBS nodes: only EC_Cmp_pct (activity percent complete) is applied
+        ev_other = 0  # WBS nodes whose stored technique is not EC_Cmp_pct (activity percent complete)
         if "ev_compute_type" in _cols(con, "PROJWBS"):
             ev_other = con.execute("SELECT COUNT(*) FROM PROJWBS WHERE proj_id = ? AND ev_compute_type <> 'EC_Cmp_pct'"
                                    + _alive(con, "PROJWBS"), (pid,)).fetchone()[0]
@@ -7721,7 +7802,10 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
             "project planned dates, which move with the schedule for unstarted work; use a baseline for a true plan."
             + ("" if base else " No baseline: pass baseline= or set a project baseline in P6.")
             + (f" {ev_other} WBS nodes use another earned value technique than activity percent complete: earned "
-               "ignores it." if ev_other else ""))
+               "applies each node's technique (rules of the P6 documentation, not checked against P6's own numbers)."
+               if ev_other else "")
+            + (f" Unknown earned value technique(s) {evm['unknown']}: counted as activity percent complete."
+               if evm["unknown"] else ""))
     return {"project": project, "data_date": _fmt_dt(dd), "period": period,
             "measure": {"kind": measure, "resources": what, "budget": r2(cur["budget"]), "actual": r2(act),
                         "remaining": r2(cur["remain_qty"]), "at_completion": r2(act + cur["remain_qty"])},
@@ -7736,7 +7820,8 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
                                     key=lambda p: p["data_date"] or ""),
             "checks": {"totals_reached": reached, "clipped_actuals": cur["clipped"], "clamped_remaining": cur["clamped"],
                        "unspread_planned": r2(cur["unspread"]), "trsrcfin_rows": fin["TRSRCFIN"], "taskfin_rows": fin["TASKFIN"],
-                       "wbs_other_ev_technique": ev_other},
+                       "wbs_other_ev_technique": ev_other, "ev_techniques": evm["nodes"],
+                       "ev_unknown_techniques": evm["unknown"]},
             "schedule_state": _schedule_state(con, pid), "note": note}
 
 
@@ -7950,8 +8035,9 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
             braw = {c: (one(f"SELECT {c} FROM PROJECT WHERE proj_id = ?", (bid,)) if c in pc else None)
                     for c in ("scd_end_date", "last_recalc_date")}
             bfin = _db_dt(braw["scd_end_date"])
-            bl = {"finish": bfin, "raw": braw, "items": _curve_items(_measure_rows(con, bid, "units"), dd) if dd else None,
-                  "cur": _curve_items(_measure_rows(con, pid, "units"), dd) if dd else None}
+            bl = {"finish": bfin, "raw": braw,
+                  "items": _curve_items(_measure_rows(con, bid, "units"), dd, _ev_map(con, bid)) if dd else None,
+                  "cur": _curve_items(_measure_rows(con, pid, "units"), dd, _ev_map(con, pid)) if dd else None}
         names = (name_of(pbid), name_of(bid))
     finally:
         con.rollback()
@@ -9208,6 +9294,42 @@ def _asg_find(con, project: str, it: Mapping) -> tuple[sqlite3.Row, sqlite3.Row,
     return hits[0], t, label(hits[0])
 
 
+SUM_TABLES = ("SUMTASK", "SUMTASKSPREAD", "SUMTRSRC")  # P6 summary tables (Tools > Summarize)
+SUMMARIZE_ADVICE = ("In P6 choose Tools > Summarize > Open Projects (or All Projects: only that one refreshes "
+                    "the global resource summaries) to refresh them.")
+
+
+def _summaries_stale(con, keys: Iterable[tuple]) -> dict:
+    """Summary rows that assignment unit changes leave out of date, keys = (proj_id, rsrc_id, role_id) of
+    the changed assignments: SUMTASK and SUMTASKSPREAD rows of the projects, SUMTRSRC rows of the
+    projects or of the resources and roles (enterprise rows have no project). They are never written:
+    no recompute matched P6's stored rows (time-phased spreads; the test database's SUMTRSRC rows match
+    no current assignment). {stale, tables {table: rows}, refreshed [], advice}."""
+    keys = list(keys)
+    ids = {k: sorted({x[i] for x in keys if x[i] is not None}) for i, k in enumerate(("proj_id", "rsrc_id", "role_id"))}
+    tables: dict[str, int] = {}
+    for t in SUM_TABLES:
+        cols = _cols(con, t)
+        conds, args = [], []
+        for c in ("proj_id",) + (("rsrc_id", "role_id") if t == "SUMTRSRC" else ()):
+            if c in cols and ids[c]:
+                conds.append(f"{c} IN ({', '.join('?' * len(ids[c]))})")
+                args += ids[c]
+        if conds:
+            n = con.execute(f"SELECT COUNT(*) FROM {t} WHERE ({' OR '.join(conds)})" + _alive(con, t), args).fetchone()[0]
+            if n:
+                tables[t] = n
+    return {"stale": bool(tables), "tables": tables, "refreshed": [], "advice": SUMMARIZE_ADVICE if tables else None}
+
+
+def _sum_plan(s: dict) -> list[str]:
+    """Plan line of _summaries_stale (none when no summary row is affected)."""
+    if not s["stale"]:
+        return []
+    rows = ", ".join(f"{t} {n} row(s)" for t, n in s["tables"].items())
+    return [f"Summaries not refreshed ({rows}): {s['advice']}"]
+
+
 def _asg_update(con, project: str, it: Mapping) -> dict:
     """Set the budgeted, actual and/or remaining (or at completion) units of one assignment, with P6's
     recalculation: linked costs, units/time (fixed duration), remaining = budget for a not started
@@ -9317,6 +9439,7 @@ def _asg_update(con, project: str, it: Mapping) -> dict:
             "before": {**{k: a[k] for k in sets}, **{f"TASK.{k}": t[k] for k in tsets}},
             "after": {**sets, **{f"TASK.{k}": v for k, v in tsets.items()}}, "summary": plan}]
     return {"plan": plan, "projects": [], "log": log,
+            "_sum": (t["proj_id"], a["rsrc_id"] if "rsrc_id" in acols else None, a["role_id"] if "role_id" in acols else None),
             "assignment": {"taskrsrc_id": a["taskrsrc_id"], "task_code": code, "resource": a["rsrc_short_name"],
                            "role": a["role_short_name"], "before": view(old), "after": view(new)}}
 
@@ -9335,11 +9458,26 @@ def p6_update_assignment(
     activity, a completed one keeps 0 remaining; a not started activity whose project links budget and
     at completion keeps them equal (one value moves both); costs = units x price/unit when the cost is
     linked to units; units/time follow (Fixed Duration types only: durations never change); the
-    activity's labor / nonlabor unit totals follow. Dates are not affected. Dry run unless confirm=True."""
-    return _single_link(_asg_update, project, {k: v for k, v in (
+    activity's labor / nonlabor unit totals follow. Dates are not affected. P6's summary tables
+    (SUMTASK, SUMTASKSPREAD, SUMTRSRC) are never written: summaries_stale {stale, tables {table:
+    rows the change leaves out of date}, refreshed (always empty), advice (run Summarize in P6)}.
+    Dry run unless confirm=True."""
+    it = {k: v for k, v in (
         ("task_code", task_code), ("resource", resource), ("role", role), ("taskrsrc_id", taskrsrc_id),
         ("budgeted_units", budgeted_units), ("actual_units", actual_units), ("remaining_units", remaining_units),
-        ("at_completion_units", at_completion_units)) if v is not None}, confirm)
+        ("at_completion_units", at_completion_units)) if v is not None}
+    with _write_session(confirm) as (con, backup):
+        try:
+            x = _asg_update(con, project, it)
+        except _Refused as e:
+            return {"applied": False, "error": str(e)}
+        sums = _summaries_stale(con, [x["_sum"]])
+        plan = [x["plan"], *_sum_plan(sums)]
+        if backup:
+            plan.append(f"Backup: {backup}")
+        res = _commit(con, plan, confirm, projects=x["projects"], log=x["log"])
+        res["summaries_stale"] = sums
+        return res
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
@@ -9347,20 +9485,27 @@ def p6_update_assignments(project: ProjectId, items: AsgEdits, confirm: bool = F
     """Set the units of many assignments in one transaction (all or nothing; dry run unless
     confirm=True). Item: {task_code, resource, role, taskrsrc_id, budgeted_units, actual_units,
     remaining_units, at_completion_units}, as p6_update_assignment. items: one report per item
-    (assignment before / after, or the error). One edit log entry per assignment."""
+    (assignment before / after, or the error). One edit log entry per assignment. summaries_stale
+    as p6_update_assignment, for every applied item."""
     items = _items_arg(items)
     with _write_session(confirm) as (con, backup):
         _project_id(con, project)
+        keys: list[tuple] = []
 
         def apply_one(i: int, it) -> dict:
             if not isinstance(it, Mapping):
                 raise ValueError("an item must be an object")
-            return _asg_update(con, project, it)
+            x = _asg_update(con, project, it)
+            keys.append(x["_sum"])
+            return x
 
         b = _batch(con, items, apply_one)
         for rep, it in zip(b["items"], items):
             rep["item"] = it
-        return _batch_commit(con, b, confirm, f"Update units of {len(items)} assignment(s)", backup)
+        sums = _summaries_stale(con, keys)
+        res = _batch_commit(con, b, confirm, f"Update units of {len(items)} assignment(s)", backup, tail=_sum_plan(sums))
+        res["summaries_stale"] = sums
+        return res
 
 
 # ----------------------------------------------------------------- activity UDF values
