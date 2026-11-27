@@ -275,7 +275,7 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
                              "pct": r2(100 * c["earned"] / c["budget"]) if c["budget"] else None}
     note = (_spread_note(spread) + " Exact: the totals and every value at the data date; to_date keeps the planned value "
             "of the planned dates linear over calendar time (baseline_planned, planned, variance, spi: the definition used "
-            "before 3.6.0), so it can differ a little from the period curve at the data date. Earned value (budget x "
+            "before 3.5.0), so it can differ a little from the period curve at the data date. Earned value (budget x "
             "activity % complete) exists at a data date only: to_date, and earned_points of earlier updates (updates=). "
             "Planned uses the current "
             "project planned dates, which move with the schedule for unstarted work; use a baseline for a true plan."

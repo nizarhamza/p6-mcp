@@ -5,12 +5,7 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
-### Changed
-
-- The server is split into modules: `p6mcp/server.py` (15,456 lines) becomes a facade over `p6mcp/registry.py`,
-  `p6mcp/core/` (state, database access, calendars, schedule options, CPM engine, analysis, reporting, XER,
-  Excel workbooks...) and `p6mcp/tools/` (one module per tool family). No change in behaviour: the same tools, in
-  the same order, with the same schemas and results; `p6mcp.server` still exposes every name.
+## [3.5.0] - 2026-11-27
 
 ### Added
 
@@ -47,6 +42,10 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ### Changed
 
+- The server is split into modules: `p6mcp/server.py` (15,456 lines) becomes a facade over `p6mcp/registry.py`,
+  `p6mcp/core/` (state, database access, calendars, schedule options, CPM engine, analysis, reporting, XER,
+  Excel workbooks...) and `p6mcp/tools/` (one module per tool family). No change in behaviour: the same tools, in
+  the same order, with the same schemas and results; `p6mcp.server` still exposes every name.
 - `p6_progress_curve` periods are spread over working time: each assignment over its calendar (the resource's
   calendar for a resource dependent activity, else the activity's), on the assignment's resource curve when it has
   one (P6's 21 point curves of RSRCCURV), and with the stored period actuals (TRSRCFIN) placed in their financial
@@ -704,6 +703,7 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[3.5.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.5.0
 [3.4.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.4.0
 [3.3.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.3.0
 [3.2.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.2.0
