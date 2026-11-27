@@ -66,11 +66,9 @@ from collections import Counter
 from contextlib import closing, contextmanager
 from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from time import monotonic
-from typing import (Annotated, Any, Callable, Iterable, Literal, Mapping, Optional, Sequence, TypedDict,
-                    Union, get_args)
-
+from typing import Annotated, Any, Callable, get_args, Iterable, Literal, Mapping, Optional, Sequence, TypedDict, Union
 try:  # mcp >= 2.0
     from mcp.server.mcpserver import MCPServer as FastMCP
 except ImportError:  # mcp 1.x
@@ -91,7 +89,6 @@ try:  # always installed with mcp
 except ImportError:  # test stub without pydantic: annotations are never evaluated
     def Field(*_a, **_k):
         return None
-
 from p6mcp import __version__ as _pkg_version
 from p6mcp import config as _config
 from p6mcp import confirm as _confirm
@@ -102,6 +99,12 @@ from p6mcp import schema as _schema
 from p6mcp import shop as _shop
 from p6mcp import xerstore as _xerstore
 from p6mcp.eppm import store as _eppm_store
+
+from p6mcp.core.calendar import (  # noqa: F401  (re-exported)
+    _Cal, CAL_EPOCH, _cal_parse, _cal_row, CAL_SCAN_DAYS, CAL_WINDOW_DAYS, _calendar, _calendars, DEFAULT_WEEK, _hm,
+    _lag_cal_of, _lag_hpd_of, _resolve_dt, _shift_txt, _shifts_of, WEEKDAYS,
+)
+
 
 # Effective settings: refreshed by _refresh() at the start of every tool call (config.json may change
 # while the server runs). STARTUP = the settings the tool list was built with.
@@ -138,6 +141,8 @@ CSTR_LABELS = {"CS_MSO": "Start On", "CS_MSOA": "Start On or After", "CS_MSOB": 
 
 def _cstr_label(code: Optional[str]) -> Optional[str]:
     return None if code is None else CSTR_LABELS.get(code, code)
+
+
 # Schedule option sched_calendar_on_relationship_lag: calendar whose hours per day convert lag hours.
 LAG_RULES = {"rcal_Predecessor": "predecessor calendar", "rcal_Successor": "successor calendar",
              "rcal_24Hour": "24-hour day", "rcal_ProjDefault": "project default calendar"}
@@ -168,6 +173,8 @@ def _sql_authorizer(action: int, arg1, arg2, dbname, source) -> int:
     if action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() in SQL_PRAGMAS:
         return sqlite3.SQLITE_OK
     return sqlite3.SQLITE_DENY
+
+
 ACT_EXTRA = ("cstr_type2", "cstr_date2", "restart_date", "reend_date", "expect_end_date", "suspend_date",
              "resume_date")  # TASK columns added by p6_get_activity to the list fields
 UDF_VALUE = {"FT_TEXT": "udf_text", "FT_STATICTYPE": "udf_text", "FT_START_DATE": "udf_date",
@@ -179,10 +186,6 @@ UDF_KINDS = {"FT_TEXT": "text", "FT_STATICTYPE": "indicator", "FT_START_DATE": "
 UDF_TEXT_MAX = 255  # UDFVALUE.udf_text length (P6 limit)
 UDF_INDICATOR = re.compile(r"UDF_G[0-4]", re.I)  # indicator values as P6 stores them (UDF_G0 to UDF_G4)
 UDF_PROJECT_TABLES = ("PROJECT", "PROJWBS", "TASK", "TASKRSRC")  # UDF subjects whose values belong to a project
-CAL_EPOCH = date(1899, 12, 30)  # P6 calendar exception dates are day serials from this date
-WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # Python weekday order
-CAL_SCAN_DAYS = 7320  # add_work_hours gives up after 20 years without working time
-CAL_WINDOW_DAYS = 3660
 # p6_list_calendars(include_exceptions=True): calendars and exception dates per page, dates per calendar (< 200 KB)
 CAL_EXC_ROWS, CAL_EXC_PAGE, CAL_EXC_EACH = 50, 800, 100
 LOOKAHEAD_DAYS = 14  # p6_lookahead window without days= or weeks=
@@ -259,6 +262,8 @@ ProjectIds = Annotated[list[ProjectId], Field(description="Project IDs (earlier 
 ActivityIds = Annotated[list[ActivityId], Field(description="Activity IDs (task_code).")]
 SchedValues = Annotated[dict[str, Any], Field(description="Option name -> value (names as p6_schedule_options shows them).")]
 LevelPriority = Annotated[list[str], Field(description="Leveling priorities, 'field:ASC' or 'field:DESC', e.g. ['priority_type:ASC'].")]
+
+
 class _NewEpsKeys(TypedDict):
     eps_id: str
     eps_name: str
@@ -376,6 +381,8 @@ def _eppm_refusal(tool: str) -> str:
                 "then pull again.")
     return (f"{tool} is not available on a P6 EPPM working copy: the push to the server supports activity, "
             "relationship and assignment edits only. Do it in P6 EPPM, then pull again.")
+
+
 TOOL_HINTS: dict[str, dict[str, bool]] = {}
 HINT_KEYS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")  # MCP tool annotations, in order
 REGISTERED: dict[str, Callable] = {}  # tool -> what a client call runs (policy gate + two-step write flow)
@@ -582,6 +589,8 @@ def _gated(fn: Callable) -> Callable:
     call.__signature__ = ev.replace(parameters=ps)
     call.__doc__ = (fn.__doc__ or "").rstrip() + WRITE_DOC + (DESTRUCTIVE_DOC if destructive else "")
     return call
+
+
 _ro_cons: ContextVar[Optional[list]] = ContextVar("_ro_cons", default=None)  # read connections of the running tool
 
 
@@ -1267,326 +1276,6 @@ def _slice(rows: list[dict], offset: int, limit: int) -> dict:
     return _env(len(rows), offset, rows[offset:offset + limit])
 
 
-# ----------------------------------------------------------------- calendars
-
-def _hm(v: Optional[str]) -> int:
-    m = re.fullmatch(r"(\d{1,2}):(\d\d)", (v or "").strip())
-    if not m:
-        raise ValueError(f"bad shift time {v!r}")
-    return int(m[1]) * 60 + int(m[2])
-
-
-def _shifts_of(node: dict) -> tuple:
-    """Shift children (s|HH:MM|f|HH:MM, either order) -> sorted ((start, end), ...) in minutes."""
-    out = []
-    for k in node["kids"]:
-        s, f = _hm(k["attrs"].get("s")), _hm(k["attrs"].get("f"))
-        f = 1440 if f == 0 else f  # f|00:00 is 24:00
-        if f <= s:
-            raise ValueError(f"shift ends before it starts: {k['attrs']}")
-        out.append((s, f))
-    return tuple(sorted(out))
-
-
-@functools.lru_cache(maxsize=256)
-def _cal_parse(data: str) -> tuple[Optional[tuple], tuple]:
-    """CALENDAR.clndr_data -> (week, exceptions), immutable because cached. week: shifts per Python
-    weekday (P6 day '1' is Sunday), None without a DaysOfWeek node. exceptions: ((date, shifts), ...),
-    serial dates from 1899-12-30, no shifts = non-work day."""
-    tree = _p6_tree(data)
-    try:
-        week, node = None, _p6_find(tree, "DaysOfWeek")
-        if node is not None:
-            w: list[tuple] = [()] * 7
-            for d in node["kids"]:
-                n = int(d["name"])
-                if not 1 <= n <= 7:
-                    raise ValueError(f"day {n}")
-                w[(n + 5) % 7] = _shifts_of(d)
-            week = tuple(w)
-        node = _p6_find(tree, "Exceptions")
-        exc = tuple((CAL_EPOCH + timedelta(days=int(float(e["attrs"]["d"]))), _shifts_of(e))
-                    for e in (node["kids"] if node else ()))
-    except (KeyError, TypeError, ValueError, OverflowError) as e:
-        raise ValueError(f"unreadable calendar data: {e}") from None
-    return week, exc
-
-
-class _Cal:
-    """Working time of one calendar (minutes from midnight), base calendar already merged."""
-    __slots__ = ("clndr_id", "name", "hpd", "week", "exc", "inherited", "week_from_base", "error", "_cum")
-
-    def __init__(self, clndr_id: int, name: str, hpd: float, week: Optional[tuple], exc: dict,
-                 inherited: frozenset = frozenset(), week_from_base: bool = False, error: Optional[str] = None):
-        self.clndr_id, self.name, self.hpd, self.week = clndr_id, name, hpd, week or ((),) * 7
-        self.exc, self.inherited, self.week_from_base, self.error = exc, inherited, week_from_base, error
-        self._cum: Optional[tuple] = None  # (first day ordinal, cumulative working seconds) for work_hours
-
-    def shifts(self, d: date) -> tuple:
-        return self.exc[d] if d in self.exc else self.week[d.weekday()]
-
-    def is_workday(self, d: date) -> bool:
-        return bool(self.shifts(d))
-
-    def day_hours(self, d: date) -> float:
-        return sum(f - s for s, f in self.shifts(d)) / 60
-
-    def first_start(self, d: date) -> Optional[datetime]:
-        sh = self.shifts(d)
-        return datetime.combine(d, time()) + timedelta(minutes=sh[0][0]) if sh else None
-
-    def last_end(self, d: date) -> Optional[datetime]:
-        sh = self.shifts(d)  # 24:00 gives the next day at 00:00
-        return datetime.combine(d, time()) + timedelta(minutes=sh[-1][1]) if sh else None
-
-    def _day_secs(self, d: date, a: Optional[datetime] = None, b: Optional[datetime] = None) -> float:
-        """Working seconds of day d between a and b (None: the day's edges)."""
-        day0 = datetime.combine(d, time())
-        secs = 0.0
-        for s, f in self.shifts(d):
-            lo, hi = day0 + timedelta(minutes=s), day0 + timedelta(minutes=f)
-            lo, hi = (max(a, lo) if a else lo), (min(b, hi) if b else hi)
-            if hi > lo:
-                secs += (hi - lo).total_seconds()
-        return secs
-
-    def _cum_secs(self, d: date) -> float:
-        """Working seconds of the days before d, from an index built on demand (CAL_WINDOW_DAYS margin)."""
-        o = d.toordinal()
-        c0, cum = self._cum if self._cum else (o, [])
-        if not c0 <= o < c0 + len(cum):  # cum[i] = seconds of the days c0 .. c0 + i - 1
-            lo, hi = min(o, c0) - CAL_WINDOW_DAYS // 10, max(o, c0 + len(cum)) + CAL_WINDOW_DAYS // 10
-            cum = [0.0]
-            for k in range(lo, hi + 1):
-                cum.append(cum[-1] + self._day_secs(date.fromordinal(k)))
-            self._cum, c0 = (lo, cum), lo
-        return cum[o - c0]
-
-    def work_hours(self, a: datetime, b: datetime) -> float:
-        """Working hours between a and b (negative when b is before a)."""
-        if b < a:
-            return -self.work_hours(b, a)
-        da, db = a.date(), b.date()
-        if da == db:
-            return self._day_secs(da, a, b) / 3600
-        self._cum_secs(da)  # both ends in one index: a rebuild changes its origin
-        mid = self._cum_secs(db) - self._cum_secs(da + timedelta(days=1))
-        return (self._day_secs(da, a, None) + mid + self._day_secs(db, None, b)) / 3600
-
-    def work_days(self, a: datetime, b: datetime) -> float:
-        return self.work_hours(a, b) / self.hpd
-
-    def count_workdays(self, d1: date, d2: date) -> int:
-        """Work days from d1 to d2, both included."""
-        return sum(1 for i in range((d2 - d1).days + 1) if self.is_workday(d1 + timedelta(days=i)))
-
-    def add_work_hours(self, start: datetime, hours: float) -> datetime:
-        """End of `hours` of work begun at start; lands on a shift end when it fills it (P6 finish). The start day
-        is walked shift by shift from start, the following whole days are skipped through the cumulative index
-        (_cum_secs: same result as walking them), the last day is walked shift by shift."""
-        if hours < 0:
-            raise ValueError("hours must be 0 or more")
-        left = round(hours * 60)
-        if not left:
-            return start
-        d, t0 = start.date(), (start - datetime.combine(start.date(), time())).total_seconds() / 60
-        for s, f in self.shifts(d):
-            lo = max(s, t0)
-            if f > lo:
-                if left <= f - lo:
-                    return datetime.combine(d, time()) + timedelta(minutes=lo + left)
-                left -= f - lo
-        o, span, need = d.toordinal() + 1, 32, left * 60  # working seconds still to place, from the next day
-        while True:
-            self._cum_secs(date.fromordinal(o))  # both ends in one index (a rebuild keeps the earlier range)
-            self._cum_secs(date.fromordinal(o + span))
-            c0, cum = self._cum
-            base = cum[o - c0]
-            if cum[o + span - c0] - base >= need:
-                break
-            if span >= CAL_SCAN_DAYS:
-                raise ValueError(f"calendar {self.name!r} has no working time within {CAL_SCAN_DAYS} days")
-            span = min(span * 4, CAL_SCAN_DAYS)
-        i = bisect.bisect_left(cum, base + need, o - c0 + 1, o + span - c0 + 1)  # the day that fills it
-        day, left = date.fromordinal(c0 + i - 1), (base + need - cum[i - 1]) / 60
-        for s, f in self.shifts(day):
-            if left <= f - s:
-                return datetime.combine(day, time()) + timedelta(minutes=s + left)
-            left -= f - s
-        raise AssertionError("cumulative index out of step with the shifts")  # cannot happen
-
-    def subtract_work_hours(self, end: datetime, hours: float) -> datetime:
-        """Start of `hours` of work that finish at end; lands on a shift start when it fills it
-        (backward pass mirror of add_work_hours)."""
-        if hours < 0:
-            raise ValueError("hours must be 0 or more")
-        left = round(hours * 60)
-        if not left:
-            return end
-        d, t1 = end.date(), (end - datetime.combine(end.date(), time())).total_seconds() / 60
-        for _ in range(CAL_SCAN_DAYS):
-            for s, f in reversed(self.shifts(d)):
-                hi = min(f, t1)
-                if hi > s:
-                    if left <= hi - s:
-                        return datetime.combine(d, time()) + timedelta(minutes=hi - left)
-                    left -= hi - s
-            d, t1 = d - timedelta(days=1), 1440
-        raise ValueError(f"calendar {self.name!r} has no working time within {CAL_SCAN_DAYS} days")
-
-    def work_hours_between(self, a: datetime, b: datetime) -> float:
-        """Working hours from a to b (negative when b is before a); same as work_hours."""
-        return self.work_hours(a, b)
-
-    def is_work_time(self, dt: datetime) -> bool:
-        """dt falls inside a shift: [start, finish), so a shift finish is not work time."""
-        m = (dt - datetime.combine(dt.date(), time())).total_seconds() / 60
-        return any(s <= m < f for s, f in self.shifts(dt.date()))
-
-    def next_work_start(self, dt: datetime) -> datetime:
-        """dt when it is work time, else the next shift start after it."""
-        d, m = dt.date(), (dt - datetime.combine(dt.date(), time())).total_seconds() / 60
-        for _ in range(CAL_SCAN_DAYS):
-            for s, f in self.shifts(d):
-                if m < f:
-                    return dt if s <= m else datetime.combine(d, time()) + timedelta(minutes=s)
-            d, m = d + timedelta(days=1), -1
-        raise ValueError(f"calendar {self.name!r} has no working time within {CAL_SCAN_DAYS} days")
-
-    def prev_work_end(self, dt: datetime) -> datetime:
-        """dt when work runs just before it (inside a shift, or at its finish), else the last shift
-        finish before it: a shift start gives the previous finish (backward mirror of next_work_start)."""
-        d, m = dt.date(), (dt - datetime.combine(dt.date(), time())).total_seconds() / 60
-        for _ in range(CAL_SCAN_DAYS):
-            for s, f in reversed(self.shifts(d)):
-                if m > s:
-                    return dt if m <= f else datetime.combine(d, time()) + timedelta(minutes=f)
-            d, m = d - timedelta(days=1), 1441
-        raise ValueError(f"calendar {self.name!r} has no working time within {CAL_SCAN_DAYS} days")
-
-
-DEFAULT_WEEK = (((480, 960),),) * 5 + ((),) * 2  # Monday to Friday 08:00 to 16:00 (Python weekday order)
-
-
-def _calendars(con, only: Optional[int] = None) -> dict[int, _Cal]:
-    """Live calendars by clndr_id (only= one calendar and its bases). A project or global calendar without a
-    DaysOfWeek node works DEFAULT_WEEK, with or without a base (P6 25.12, parity case calendars/cal-base); a
-    resource calendar without one takes its base calendar's week (P6 stores the base's week hours on it).
-    A base calendar gives its exceptions (the calendar's own dates win). An unreadable clndr_data gives a
-    calendar without working time (nothing taken from its base) and .error set."""
-    has_type = any(r[1].lower() == "clndr_type" for r in con.execute("PRAGMA table_info(CALENDAR)"))
-    typ = "clndr_type" if has_type else "NULL AS clndr_type"
-    sql = (f"SELECT clndr_id, clndr_name, base_clndr_id, day_hr_cnt, clndr_data, {typ} FROM CALENDAR WHERE "
-           + ("clndr_id = ?" if only is not None else "1=1") + _alive(con, "CALENDAR"))
-    if only is None:
-        rows = {r["clndr_id"]: r for r in con.execute(sql)}
-    else:
-        rows, cid = {}, only
-        while cid is not None and cid not in rows and len(rows) <= 10:
-            r = con.execute(sql, (cid,)).fetchone()
-            if r is None:
-                break
-            rows[cid], cid = r, r["base_clndr_id"]
-    out: dict[int, _Cal] = {}
-
-    def build(cid: int, depth: int = 0) -> _Cal:
-        if cid in out:
-            return out[cid]
-        r = rows[cid]
-        try:
-            (week, exc), err = _cal_parse(_blob_text(r["clndr_data"])), None
-        except ValueError as e:
-            week, exc, err = None, (), str(e)
-        own, inherited, from_base = dict(exc), frozenset(), False
-        if err is None and r["base_clndr_id"] in rows and r["base_clndr_id"] != cid and depth < 10:
-            b = build(r["base_clndr_id"], depth + 1)
-            if week is None and r["clndr_type"] == "CA_Rsrc":
-                week, from_base = b.week, True
-            inherited = frozenset(set(b.exc) - set(own))
-            own = {**b.exc, **own}
-        if week is None and err is None and r["clndr_type"] != "CA_Rsrc":
-            week = DEFAULT_WEEK
-        out[cid] = _Cal(cid, r["clndr_name"], float(r["day_hr_cnt"] or 8), week, own, inherited, from_base, err)
-        return out[cid]
-
-    for cid in rows:
-        build(cid)
-    return out
-
-
-def _calendar(con, clndr_id: int) -> _Cal:
-    cal = _calendars(con, int(clndr_id)).get(int(clndr_id))
-    if cal is None:
-        raise ValueError(f"Calendar not found: {clndr_id}")
-    return cal
-
-
-def _resolve_dt(cal: Optional[_Cal], value: str, field: str, edge: str) -> tuple[str, list[str]]:
-    """User date of an activity -> (DB date string, notes). An explicit time is kept (noted when the
-    day is not a work day of cal). A date alone takes the first shift start (edge 'start') or the
-    last shift end (edge 'finish', 24:00 = next day 00:00) of that day, and is refused on a non-work
-    day. Without a readable calendar a date alone starts at 08:00 and a finish needs a time."""
-    dt, has_time = _parse_dt(value, field)
-    d = dt.date()
-    if has_time:
-        if cal is not None and not cal.is_workday(d):
-            return _fmt_dt(dt), [f"{field} {_fmt_dt(dt)} is on a non-work day of calendar {cal.name!r} (kept)"]
-        return _fmt_dt(dt), []
-    if cal is None:
-        if edge == "finish":
-            raise ValueError(f"{field}: give the time ('YYYY-MM-DD HH:MM'): the activity has no readable calendar")
-        return _fmt_dt(dt.replace(hour=8)), [f"{field}: date only and no readable calendar, 08:00 used"]
-    if not cal.is_workday(d):
-        raise ValueError(f"{field}: {d} is not a work day on calendar {cal.name!r}: give the time ('YYYY-MM-DD HH:MM')")
-    v = cal.first_start(d) if edge == "start" else cal.last_end(d)
-    return _fmt_dt(v), [f"{field}: date only, {'first shift start' if edge == 'start' else 'last shift end'} "
-                        f"of calendar {cal.name!r} used ({_fmt_dt(v)})"]
-
-
-def _shift_txt(shifts: tuple) -> list[str]:
-    return [f"{s // 60:02d}:{s % 60:02d}-{f // 60:02d}:{f % 60:02d}" for s, f in shifts]
-
-
-def _cal_row(r: sqlite3.Row, cal: _Cal, win: Optional[tuple], span: Optional[tuple], exc_cap: Optional[int]) -> dict:
-    """p6_list_calendars row: stored values, the parsed week, exceptions and warnings; exc_cap = how
-    many exception dates to list (None: no list)."""
-    hpd = float(r["day_hr_cnt"] or 8)
-    hours = [sum(f - s for s, f in sh) / 60 for sh in cal.week]
-    week_h = sum(hours)
-    warn = [] if r["day_hr_cnt"] else ["day_hr_cnt is empty, 8 h per day used"]
-    if r["base_clndr_id"] is not None and r["base_name"] is None:
-        warn.append(f"base calendar {r['base_clndr_id']} not found")
-    if not week_h:
-        warn.append("no working time in the work week")
-    if r["week_hr_cnt"] is not None and abs(float(r["week_hr_cnt"]) - week_h) > 1e-6:
-        warn.append(f"stored week_hr_cnt {float(r['week_hr_cnt']):g} differs from the work week {week_h:g} h")
-    warn += [f"a work day has {h:g} h, hours_per_day is {hpd:g}" for h in sorted({h for h in hours if h})
-             if abs(h - hpd) > 1e-6]
-    non_work = sum(1 for v in cal.exc.values() if not v)
-    row = {"clndr_id": r["clndr_id"], "name": r["clndr_name"], "type": r["clndr_type"],
-           "project": r["cal_project"], "base_calendar": r["base_name"],
-           "project_default": None if r["project_default"] is None else bool(r["project_default"]),
-           "activities": r["activities"], "hours_per_day": hpd, "week_hours_stored": r["week_hr_cnt"],
-           "work_week": {WEEKDAYS[(n + 5) % 7]: _shift_txt(cal.week[(n + 5) % 7]) for n in range(1, 8)},
-           "week_hours": week_h, "week_inherited": cal.week_from_base,
-           "exceptions": {"total": len(cal.exc), "inherited": len(cal.inherited), "non_work": non_work,
-                          "changed_hours": len(cal.exc) - non_work}}
-    if win:
-        wh = cal.work_hours(datetime.combine(win[0], time()), datetime.combine(win[1] + timedelta(days=1), time()))
-        row["window"] = {"from": win[0].isoformat(), "to": win[1].isoformat(), "work_hours": round(wh, 4),
-                         "work_days": round(wh / hpd, 2), "workdays": cal.count_workdays(*win)}
-    if exc_cap is not None:
-        lo, hi = win or span or (None, None)
-        dates = sorted(d for d in cal.exc if (lo is None or d >= lo) and (hi is None or d <= hi))
-        row["exception_dates"] = [{"date": d.isoformat(), "work": _shift_txt(cal.exc[d]),
-                                   "inherited": d in cal.inherited} for d in dates[:exc_cap]]
-        row["exception_dates_truncated"] = len(dates) > exc_cap
-    if cal.error:
-        row["error"] = cal.error
-    row["warnings"] = warn
-    return row
-
-
 # ----------------------------------------------------------------- schedule options and lag rule
 
 def _sched_options(con, pid: int) -> tuple[dict[str, str], str]:
@@ -1636,17 +1325,6 @@ def _lag_hpd(con, pred, succ, proj_id: Optional[int] = None, rule: Optional[str]
     else:
         rule, h = "rcal_Predecessor", pred["hpd"]
     return float(h or 8), LAG_RULES[rule]
-
-
-def _lag_cal_of(rule: str, p_cal, s_cal, proj_cal) -> Optional[_Cal]:
-    """Calendar a lag is counted on under the lag rule (None: 24-hour days; default: the predecessor's)."""
-    return {"rcal_Successor": s_cal, "rcal_24Hour": None, "rcal_ProjDefault": proj_cal}.get(rule, p_cal)
-
-
-def _lag_hpd_of(rule: str, p_hpd, s_hpd, proj_cal) -> float:
-    """Hours per lag day under the lag rule, from loaded calendars (_lag_hpd reads the database)."""
-    return {"rcal_Successor": s_hpd, "rcal_24Hour": 24.0,
-            "rcal_ProjDefault": proj_cal.hpd if proj_cal else 8.0}.get(rule, p_hpd) or 8.0
 
 
 def _lag_hpd_sql(con, pid: int) -> tuple[str, str]:
@@ -3265,6 +2943,8 @@ def _weighted_score(checks: Mapping) -> dict:
     points = round(100 * earned / top, 1) if top else None
     grade = None if points is None else next((g for g, lo in HC_GRADES if points >= lo), "F")
     return {"points": points, "grade": grade, "earned": earned, "max": top, "checks": rows}
+
+
 HC_TOTALS = ("open_incomplete_activities", "relationships", "open_successor_links", "non_fs_links")
 
 
@@ -14852,7 +14532,7 @@ def _eppm_pull_now(p: dict, projects: list[str], include_baseline: bool = True, 
         route = "rest"
     pw = _eppm_secret(credentials.eppm_key(p["name"]), "P6 password")
     try:
-        m = _eppm_store.pull(p, projects, pw, spw, include_baseline, route, server_module=sys.modules[__name__])
+        m = _eppm_store.pull(p, projects, pw, spw, include_baseline, route, server_module=sys.modules["p6mcp.server"])
     except (rest.EppmError, sql.SqlError, _eppm_store.PullError) as e:
         raise ValueError(str(e)) from None
     except OSError as e:
@@ -14864,6 +14544,7 @@ def _eppm_pull_now(p: dict, projects: list[str], include_baseline: bool = True, 
             "projects": m["projects"], "rows": m["rows"], "warnings": m["warnings"],
             "next": "Every tool now reads the working copy. Edits change the copy only (p6_eppm_status lists them) "
                     "until p6_eppm_push."}
+
 
 def _srv_time(v: Any) -> str:
     """A server LastUpdateDate as 'YYYY-MM-DD HH:MM:SS' on the server's clock (offset dropped, as the filters take it)."""
