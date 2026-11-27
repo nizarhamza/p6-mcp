@@ -158,7 +158,7 @@ def _cum(items: Sequence[tuple], edges: Sequence[datetime]) -> list[float]:
 def _value_at(items: Sequence[tuple], t: datetime) -> float:
     """Cumulative quantity of items at t, linear over calendar time between their dates whatever calendar or
     curve they carry: the planned value definition of to_date (p6_progress_curve), p6_project_summary and the
-    dashboard, kept as it was before the working time spread of the periods (3.6.0)."""
+    dashboard, kept as it was before the working time spread of the periods (3.5.0)."""
     return _cum([it[:3] for it in items], [t])[0]
 
 

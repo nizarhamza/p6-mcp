@@ -1,4 +1,4 @@
-"""Time-phased spread (3.6.0): p6_progress_curve periods over working time and resource curves, stored period
+"""Time-phased spread (3.5.0): p6_progress_curve periods over working time and resource curves, stored period
 actuals (TRSRCFIN), and p6_resource_loading against max units. The synthetic project enriched by
 test_dashboard.enrich: ENG (labor) 120 units on A1020 (not started, planned 2026-03-16 08:00 to 2026-04-03 17:00)
 and on A1010 (in progress, 60 actual, 60 remaining); the calendar works Monday to Friday 8 h with a holiday on
