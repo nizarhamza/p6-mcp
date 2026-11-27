@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "catalog": "nizarhamza/p6-mcp-shop",
-  "commit": "09ca541c263f4daf59e78c544903919753a7a4bf",
+  "commit": "3b082c3cf91e3f62fa1c5fd4c87a08d6848bc949",
   "skills": [
     {
       "name": "baseline-variance",
@@ -20,8 +20,8 @@
     },
     {
       "name": "float-near-critical",
-      "version": 1,
-      "sha256": "93496d7324474e1a3badc086eff52ca431d4e731dbb55e7708be36a7123d13cb"
+      "version": 2,
+      "sha256": "35ecc90fb48348396193c662925ebea0b2de0c0927f404e8d041bf13f6c7d1e5"
     },
     {
       "name": "list",
@@ -35,8 +35,8 @@
     },
     {
       "name": "lookahead-brief",
-      "version": 4,
-      "sha256": "ab33069c040dda9b6dd93dd361b5313fbd44d40c63f0ea931decfe28d22d0061"
+      "version": 5,
+      "sha256": "6c1e17d30581e09f1e84f8b73f60a21f37236b55d7ce23a74410c97cd385aea2"
     },
     {
       "name": "milestone-tracker",
@@ -45,8 +45,13 @@
     },
     {
       "name": "progress-earned-value",
+      "version": 2,
+      "sha256": "72317f5ff7b99bb1272ce3e1a6dcfbee999f2759daa0f5a464b12fa24bbaebb5"
+    },
+    {
+      "name": "resource-loading-review",
       "version": 1,
-      "sha256": "ad99d3cb13bada5da9bf724ac1fd188170f5cf01ca28f526d40858348e2704e5"
+      "sha256": "9e45ed8b017a77565ab4984374adb6df01af8e56f2a89bf84e56278667113bb3"
     },
     {
       "name": "resource-wbs-summary",
@@ -64,6 +69,11 @@
       "sha256": "6236cf4045502f7d74d0a12fd589b4895f3e83f84e6b63243409b10896cec67f"
     },
     {
+      "name": "trend-report",
+      "version": 1,
+      "sha256": "aecb6b9357eef8590d583813c2c2e248d990c693eb3d995011862ce111da0c64"
+    },
+    {
       "name": "update-import-safely",
       "version": 3,
       "sha256": "934f8e63f5c6ed8a929f8e5c52d5d588ee66e6dab19d4c942b2c8293699d694f"
@@ -75,8 +85,8 @@
     },
     {
       "name": "weekly-update-review",
-      "version": 3,
-      "sha256": "fdaeba0ea7058f606adf5f733c21ad4172f8a0f214279b61e8625f0e0280734c"
+      "version": 4,
+      "sha256": "7bec471d7740efd892ba4f12e54620461c6de043efc9db053c4947cc85791f2f"
     }
   ]
 }
