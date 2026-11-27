@@ -126,7 +126,8 @@ def test_requests_are_audited_without_query_strings(live):
 
 
 def test_rate_limit(live):
-    live["guard"].limiter = RateLimiter({"/token": (60, 2)})
+    # a frozen clock: with the real one, a slow runner refilled a token between requests (one a second)
+    live["guard"].limiter = RateLimiter({"/token": (60, 2)}, clock=lambda: 0.0)
     codes = [req(live, "POST", "/token", data={"grant_type": "x"}).status_code for _ in range(3)]
     assert codes[:2] == [400, 400] and codes[2] == 429
     r = req(live, "POST", "/token", data={"grant_type": "x"})
