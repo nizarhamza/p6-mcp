@@ -14,8 +14,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-
-from p6mcp import settings_logic
+from conftest import free_port
 
 httpx = pytest.importorskip("httpx2")
 pytest.importorskip("mcp.server.auth.settings")
@@ -63,7 +62,7 @@ def live(p6, tmp_path):
     st = p6.config.load()
     store = Store(str(tmp_path / "auth.db"))
     app = remote.build_app(st, relay_secret=SECRET, store=store, fetch=fake_fetch)
-    port = settings_logic.free_port(41900)
+    port = free_port()
     srv = remote.make_server(app, port)
     th = threading.Thread(target=srv.run, daemon=True)
     th.start()

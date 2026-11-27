@@ -7,6 +7,7 @@ import time
 import uuid
 
 import pytest
+from conftest import free_port
 
 from p6mcp import config, runtime, supervisor
 
@@ -91,8 +92,8 @@ def test_real_http_server_process(tmp_path, monkeypatch, golden):
     db = str(tmp_path / "demo.db")
     shutil.copyfile(golden, db)
     cfg = tmp_path / "config.json"
-    from p6mcp import credentials, settings_logic
-    port = settings_logic.free_port(42100)
+    from p6mcp import credentials
+    port = free_port()
     config.save({"databases": [{"name": "d", "path": db, "confirmed": True}], "active_database": "d",
                  "transport": "http", "http_port": port}, str(cfg))
     monkeypatch.setenv("P6MCP_CONFIG", str(cfg))

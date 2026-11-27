@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import socket
 import sqlite3
 import sys
 
@@ -57,6 +58,27 @@ def server(tmp_path_factory, golden):
             os.environ.pop(k, None)
         else:
             os.environ[k] = v
+
+
+PORT_SLOTS = 64  # free_port: a worker only takes ports whose remainder is its own slot
+
+
+def free_port() -> int:
+    """A port no other test of this run can take, for a test that starts a server.
+
+    Never a fixed start number with settings_logic.free_port (it checks, then the server binds later): pytest-xdist
+    workers, or two runs on the same machine, would race for the same port, and uvicorn's SO_REUSEADDR lets a second
+    server bind it on Windows without an error. The OS picks a free port (bind to port 0); a worker keeps only ports
+    whose remainder modulo PORT_SLOTS is its worker number, so two workers of one run never get the same port."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
+    slot = int(worker[2:]) % PORT_SLOTS if worker[2:].isdigit() else 0
+    for _ in range(PORT_SLOTS * 50):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        if port % PORT_SLOTS == slot:
+            return port
+    raise RuntimeError("no free port")
 
 
 def sha(path: str) -> str:

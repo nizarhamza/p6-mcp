@@ -2,8 +2,10 @@
 part, driven offscreen with pytest-qt (dialogs answered, Credential Manager and Cloudflare faked)."""
 
 import json
+import os
 
 import pytest
+from conftest import free_port
 
 pytestmark = pytest.mark.qt
 pytest.importorskip("PySide6")
@@ -35,6 +37,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr("p6mcp.updates.check", lambda *a, **k: {"current": "1.0.0", "latest": "1.0.0",
                                                                   "newer": False, "url": "x", "error": None})
     monkeypatch.setattr("p6mcp.settings_app.window.startup.sync", lambda data: None)
+    # the tray's single instance pipe, per process: another xdist worker's tray, or the installed app, never answers
+    monkeypatch.setattr("p6mcp.settings_app.tray.instance_name", lambda: f"p6mcp-tray-test-{os.getpid()}")
     monkeypatch.setattr(SettingsWindow, "ask_close", lambda self: "discard")
     monkeypatch.setattr(SettingsWindow, "ask_changed", lambda self: "overwrite")
     answers = {"value": True, "asked": []}
@@ -327,9 +331,9 @@ def test_tray_window_waits_for_connect(qtbot, env, monkeypatch):
     the notification or tray menu opens it to type the code; the Connect listener runs while remote access is on."""
     from PySide6.QtWidgets import QApplication
 
-    from p6mcp import settings_logic, supervisor
+    from p6mcp import supervisor
     from p6mcp.settings_app import tray as tray_mod
-    port = settings_logic.free_port(43900)
+    port = free_port()
     config.save({"language": "en", "remote_enabled": True, "remote_privacy_ack": True, "remote_public_host": HOST,
                  "remote_pair_port": port})
 

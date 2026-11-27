@@ -347,7 +347,23 @@ $env:P6MCP_CONFIG = "<path>\config.json"; .venv\Scripts\python -m p6mcp     # st
 .venv\Scripts\python -m p6mcp.settings_app                                       # Settings window
 .venv\Scripts\python -m pytest -q; .venv\Scripts\ruff check .
 .venv\Scripts\python -m pytest -q -m "not slow and not qt and not parity"   # inner loop (about 45 s)
+.venv\Scripts\python -m pytest -q -n 4 --dist loadgroup                      # parallel (pytest-xdist), as CI
 ```
+
+CI and the release build run `pytest -q -n 4 --dist loadgroup` (one worker per vCPU of the windows runner; 60 to
+95 s here instead of 165 to 205 s serial). Serial runs must keep working. Each worker is its own process (its own
+golden database, server module, offscreen QApplication and `pytest_sessionfinish`), so a test must not share OS
+state with another worker or another run on the same machine:
+- a test that starts a server (uvicorn, PairListener, a child `--http` process) takes its port from
+  `conftest.free_port()` (OS-chosen, one remainder class per worker), never a fixed number or
+  `settings_logic.free_port(start)` (check then bind: two workers take the same port, and uvicorn's
+  SO_REUSEADDR lets both bind it on Windows); a server that can bind port 0 itself (`ThreadingHTTPServer`)
+  does that;
+- registry keys, Credential Manager services, named mutexes and pipes get a per-process name (test_startup
+  key `Software\P6MCP-tests\<pid>-<random>\Run`, `P6MCP_SECRET_SERVICE` with a uuid, the tray's
+  `instance_name` patched in the `env` fixtures); a test that cannot do that goes on one worker with
+  `@pytest.mark.xdist_group("name")` (`--dist loadgroup` keeps a group on one worker);
+- files only under `tmp_path` or monkeypatched APPDATA / LOCALAPPDATA / USERPROFILE.
 
 Markers: `slow` (a real process or server: subprocess, uvicorn, child processes, node), `qt` (Qt widgets),
 `parity` (engine parity cases); `tests/conftest.py` sets slow and qt from the fixtures `live`, `child_env` and

@@ -1,20 +1,25 @@
 """Run at startup, in a test registry key (never the real Run key)."""
 
+import os
 import sys
+import uuid
 
 import pytest
 
 from p6mcp import startup
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows registry")
-KEY = r"Software\P6MCP-tests\Run"
+# one key per process: pytest-xdist workers and other test runs share HKCU
+PARENT = r"Software\P6MCP-tests"
+OWN = rf"{PARENT}\{os.getpid()}-{uuid.uuid4().hex[:8]}"
+KEY = rf"{OWN}\Run"
 
 
 @pytest.fixture
 def key():
     yield KEY
     import winreg
-    for sub in (KEY, r"Software\P6MCP-tests"):
+    for sub in (KEY, OWN, PARENT):  # the shared parent goes only when no other run still has a key in it
         try:
             winreg.DeleteKey(winreg.HKEY_CURRENT_USER, sub)
         except OSError:
