@@ -239,7 +239,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 | `p6_trend` | Trend across a series of updates: finish, variances, progress, SPI, critical counts, float, DCMA score, milestone slips and what changed between updates | Read |  |
 | `p6_cpm_validate` | Runs the built-in CPM engine against P6's last F9 and explains each difference: changed since the F9, bad input, an engine rule or unknown | Read |  |
 | `p6_schedule_whatif` | What-if in memory: add or remove links, change durations or constraints, see the new finish and what a reviewer would question | Read |  |
-| `p6_schedule_risk` | Monte Carlo schedule risk in memory: finish percentiles, on-time probability, criticality index | Read |  |
+| `p6_schedule_risk` | Monte Carlo schedule risk in memory: finish percentiles, on-time probability, criticality index, correlated durations and ranked risk events | Read |  |
 
 **XER files**
 

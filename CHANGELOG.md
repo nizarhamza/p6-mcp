@@ -5,6 +5,31 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+### Added
+
+- `p6_schedule_risk` risk model: `correlations=` groups of activities (Activity IDs, a WBS code or an activity code
+  value) with a coefficient from 0 to 1 make their drawn durations move together. Method: a Gaussian copula with one
+  shared factor per group and iteration mixed with each activity's own draw, so each activity keeps its own range;
+  the rank correlation of two members is close to the coefficient (6/pi asin(c/2): 0.48 for 0.5), 1 gives every
+  member the same percentile of its range, 0 leaves the draws as they were. Limits: one group per activity (the
+  first listed), no negative correlation, no correlation between groups or with the risk events.
+- `p6_schedule_risk` risk events: `risks=` with an id, a name, a probability from 0 to 1 and an impact (days added
+  to the remaining duration of Activity IDs, a WBS or an activity code value, a number or min / likely / max drawn
+  once per firing; negative for an opportunity). Each event fires on its own in each iteration. `risk_events` ranks
+  them: how often each fired, the mean finish delay in working days when it fired and when not, their difference
+  (finish impact; with several events and wide ranges it carries sampling noise, read small values as none), the
+  expected delay and its share. `use_p6_risks=True` lists the project's P6 risks (PROJRISK, activities from
+  TASKRISK): P6 stores their probability and schedule impact as levels of its scoring matrix, so one is simulated
+  when `risks=` gives its probability and days under its Risk ID (its assigned activities when the impact names
+  none).
+- `p6_schedule_risk` runs large simulations in worker processes: `workers=` (default min(4, CPUs - 1), 1 = none)
+  when iterations x recomputed activities reach 200,000 (smaller runs would spend more starting the workers, about
+  2 to 4 s, than they save). The output is the same for any worker count, and the same as 3.5.0 for the same seed
+  when no correlation or event is given; `parallel` says how many workers ran. If the workers cannot start, every
+  iteration runs in the server, with a note. On a project of 3,120 activities (1,278 recomputed per iteration),
+  1,000 iterations took 18 to 27 s with 4 workers, 29 to 40 s with 2 and 36 to 68 s in one process (three rounds
+  on a machine busy with other work).
+
 ### Changed
 
 - The core skills shipped with the app (installed on first start, or when the skill shop cannot be reached) follow

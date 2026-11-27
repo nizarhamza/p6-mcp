@@ -5,9 +5,7 @@ from __future__ import annotations
 import bisect
 import copy
 import json
-import random
-from collections import Counter
-from datetime import datetime, timedelta
+from datetime import timedelta
 from time import monotonic
 from typing import Mapping, Optional, get_args
 
@@ -16,6 +14,7 @@ from p6mcp.registry import (
     ActivityId, CompareTo, CutPct, Limit, NonNegDays, Offset, ProjectId, RiskIterations, RiskPcts, RiskRanges, _tool,
     WhatIfEdits,
 )
+from p6mcp.registry import RiskCorrelations, RiskEvents, RiskWorkers
 from p6mcp.core.db import _check_page, _connect, _days, _db_dt, _fmt_dt, _num, _prefer, _project_id, _slice
 from p6mcp.core.editlog import _schedule_state
 from p6mcp.core.read import _critical_clause
@@ -29,6 +28,9 @@ from p6mcp.core.risk import (
     _pctl, RISK_CAVEAT, RISK_DEFAULT, RISK_ITERATIONS, _risk_pcts, _risk_ranges, RISK_SOURCES, _risk_udfs, RISK_WORK,
 )
 from p6mcp.core.reporting import _period_edges
+from p6mcp.core.risk import (
+    RISK_CAVEAT_MODEL, _risk_correlations, _risk_events, _risk_iterate, _risk_workers, _RiskSim,
+)
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
@@ -276,6 +278,8 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
                      milestones: Optional[list[ActivityId]] = None, default_range: Optional[RiskPcts] = None,
                      ranges: Optional[RiskRanges] = None, udf_optimistic: Optional[str] = None,
                      udf_most_likely: Optional[str] = None, udf_pessimistic: Optional[str] = None,
+                     correlations: Optional[RiskCorrelations] = None, risks: Optional[RiskEvents] = None,
+                     use_p6_risks: bool = False, workers: Optional[RiskWorkers] = None,
                      offset: Offset = 0, limit: Limit = 50) -> dict:
     """Monte Carlo schedule risk in memory (the database is never written): each iteration draws the remaining
     duration of every open activity (not completed, not a milestone, LOE or WBS summary) from a triangular
@@ -285,25 +289,36 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
     (code_type + code_value) or WBS (deepest node wins), and udf_optimistic / udf_most_likely /
     udf_pessimistic (number UDFs in days of the activity calendar, used for the activities that have all
     three); precedence UDF, task, code, WBS, default. Activities whose duration cannot move (expected finish in
-    use, mandatory finish) are not drawn. iterations (default 1000) are clamped to 100..5000, then to at most
-    1,500,000 activity passes (iterations_requested and iterations_note say so); seed (default 1) makes the
-    run repeatable: the same project, arguments and seed give the same output. deterministic: the engine on
-    unchanged durations (finish, finish_activity and its name, stored_finish = P6's last F9). finish: p10, p50,
-    p80, p90,
-    min, max of the project finish (latest early finish, LOE and WBS summary left out; nearest-rank
-    percentiles). on_time_probability: deterministic_pct (finish at or before the deterministic one) and
-    must_finish_pct (at or before the must finish by date; None without one). p80_buffer_wd: working days of
-    the project calendar from the deterministic finish to p80. milestones (given, else the finish activity
-    and every open constrained activity): deterministic, p10 to p90 of its finish, on_time_pct, constraint,
-    constraint_date, by_constraint_pct (its constrained date, start or finish, at or before the constraint
-    date), p80_buffer_wd (its calendar). histogram: weeks (P6 week start day) with count, pct, cum_pct.
-    Page of drivers by criticality: rows of open activities that sat on the critical path of at least one
-    iteration (the walk back from the project finish along the links that set each start or finish),
-    criticality_index (share of iterations, 0 to 1) and criticality_pct, on_deterministic_path, total_float_d
-    and rem_dur_d (stored), min_d / mode_d / max_d drawn (days of its calendar) and range_source. engine:
-    match rate of the unchanged network against the last F9 and a warning below 0.99 (see p6_cpm_validate);
-    engine_version; distribution: what was drawn; caveat: what this estimate leaves out. A logic loop is
-    refused, as P6 does."""
+    use, mandatory finish) are not drawn. correlations: groups (task_codes, wbs, or code_type + code_value)
+    with a coefficient 0 to 1: the draws of a group share one normal factor per iteration (Gaussian copula,
+    the rank correlation of two members is close to the coefficient; 1 = the same percentile of each range;
+    an activity in two groups keeps the first). risks: discrete events {id, name, probability 0 to 1, impact
+    {add_days (a number or min / likely / max, days of each activity's calendar, negative for an opportunity),
+    task_codes, wbs or code_type + code_value}}: when one fires (independently, each iteration) its days are
+    added to the remaining duration of its activities. use_p6_risks: list the project's P6 risks (P6 stores
+    their probability and impact as scale levels): one is simulated when risks= quantifies its Risk ID, on
+    its assigned activities when the impact has no selector. iterations (default 1000) are clamped to
+    100..5000, then to at most 1,500,000 activity passes (iterations_requested and iterations_note say so);
+    seed (default 1) makes the run repeatable: the same project, arguments and seed give the same output,
+    whatever workers is. workers: processes sharing the iterations (default min(4, CPUs - 1), 1 = none),
+    used for large runs only; parallel says how many ran. deterministic: the engine on unchanged durations
+    (finish, finish_activity and its name, stored_finish = P6's last F9). finish: p10, p50, p80, p90, min, max
+    of the project finish (latest early finish, LOE and WBS summary left out; nearest-rank percentiles).
+    on_time_probability: deterministic_pct (finish at or before the deterministic one) and must_finish_pct (at
+    or before the must finish by date; None without one). p80_buffer_wd: working days of the project
+    calendar from the deterministic finish to p80. milestones (given, else the finish activity and every open
+    constrained activity): deterministic, p10 to p90 of its finish, on_time_pct, constraint, constraint_date,
+    by_constraint_pct (its constrained date, start or finish, at or before the constraint date),
+    p80_buffer_wd (its calendar). histogram: weeks (P6 week start day) with count, pct, cum_pct. risk_events,
+    ranked: fired / fired_pct, mean finish delay in working days (from the deterministic finish) when it fired
+    and when not, finish_impact_wd (their difference), expected_delay_wd (impact x fired share) and share_pct
+    (of the positive expected delays). Page of drivers by criticality: rows of open activities that sat on
+    the critical path of at least one iteration (the walk back from the project finish along the links that
+    set each start or finish), criticality_index (share of iterations, 0 to 1) and criticality_pct,
+    on_deterministic_path, total_float_d and rem_dur_d (stored), min_d / mode_d / max_d drawn (days of its
+    calendar) and range_source. engine: match rate of the unchanged network against the last F9 and a warning
+    below 0.99 (see p6_cpm_validate); engine_version; distribution: what was drawn and the correlation groups;
+    caveat: what this estimate leaves out. A logic loop is refused, as P6 does."""
     offset, limit = _check_page(offset, limit)
     try:
         n_req, seed = int(iterations), int(seed)
@@ -313,13 +328,17 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
     if any(labels) and not all(labels):
         raise ValueError("udf_optimistic, udf_most_likely and udf_pessimistic go together: give all three or none")
     dflt = RISK_DEFAULT if default_range is None else _risk_pcts(default_range, "default_range")
+    n_workers = _risk_workers(workers)
     con = _connect()
     pid = _project_id(con, project)
-    con.execute("BEGIN")  # network, ranges and UDF values from one snapshot
+    con.execute("BEGIN")  # network, ranges, groups, risks and UDF values from one snapshot
     try:
         cpm = _Cpm(con, pid)
         assign, echo = _risk_ranges(con, pid, cpm, ranges)
         uvals, uinfo = _risk_udfs(con, pid, labels) if all(labels) else ({}, None)
+        cache: dict = {}
+        member, coef, cecho = _risk_correlations(con, pid, cpm, correlations, cache)
+        events, p6_block = _risk_events(con, pid, cpm, risks, bool(use_p6_risks), cache)
         week_day = _prefer(con, "week_start_day_num") or 1
     finally:
         con.rollback()
@@ -346,6 +365,8 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
                 echo[i]["applied"] += 1
             lo, mo, hi = (d["rem"] * x / 100 for x in pcts)
         dist[n] = (lo, hi, mo, src)
+        if n in member:
+            cecho[member[n]]["applied"] += 1
     sampled = list(dist)
     affected, stack = set(sampled), list(sampled)  # what a draw can move: the drawn activities and their successors
     while stack:
@@ -364,28 +385,7 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
     fixed_end = max((base[n]["ef"] for n in own_fixed), default=cpm.dd)
     fixed_top = [n for n in own_fixed if base[n]["ef"] >= fixed_end - CPM_TOL]
     counted = {n for n in own if T[n]["status_code"] != "TK_Complete"}  # open activities get a criticality index
-    fixed_ties: dict[int, tuple] = {}  # ties of the activities no draw moves, worked out once
-
-    def path(res: dict, drv: dict, end: datetime) -> set:
-        """Open activities on the critical path of one pass: from those finishing at the project finish, back
-        along the links that set each one's dates (completed activities end the walk)."""
-        stack = [n for n in own_sub if res[n]["ef"] >= end - CPM_TOL] + (fixed_top if fixed_end >= end - CPM_TOL else [])
-        seen = set(stack)
-        while stack:
-            n = stack.pop()
-            if n in affected:
-                qs = cpm.ties(drv.get(n))
-            else:
-                qs = fixed_ties.get(n)
-                if qs is None:
-                    qs = fixed_ties[n] = cpm.ties(base_drv.get(n))
-            for q in qs:
-                if q not in seen and T[q]["status_code"] != "TK_Complete":
-                    seen.add(q)
-                    stack.append(q)
-        return seen & counted
     det_end = max(fixed_end, max((base[n]["ef"] for n in own_sub), default=fixed_end))
-    det_path = path(base, base_drv, det_end)
     fm0 = cpm.finish(full)[0]
     keys = list(dict.fromkeys(milestones or ([fm0["task_code"]] if fm0 else []) + sorted(
         d["task_code"] for d in T.values() if d["cstr_type"] and d["status_code"] != "TK_Complete")))
@@ -393,20 +393,40 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
         if code not in cpm.code:
             raise ValueError(f"milestones: activity {code} not found in project {project}")
     mids = [cpm.code[c] for c in keys]
-    rng = random.Random(seed)
-    ends, crit, ms_vals = [], Counter(), {m: [] for m in mids}
-    for _ in range(n_iter):
-        rem = {n: rng.triangular(*dist[n][:3]) for n in sampled}
-        drv: dict = {}  # entries of the recomputed activities (the others keep base_drv)
-        res = cpm.forward(plan, rem, drv, (base, sub))
-        end = max(fixed_end, max((res[n]["ef"] for n in own_sub), default=fixed_end))
-        ends.append(end)
-        crit.update(path(res, drv, end))
-        for m in mids:
-            ms_vals[m].append((res[m]["es"], res[m]["ef"]))
-    ends.sort()
+    sim = _RiskSim(cpm, plan, base, base_drv, dist, affected, sub, own_sub, fixed_end, fixed_top, counted, mids, seed,
+                   member, coef, events)
+    det_path = sim.path(base, base_drv, det_end)
+    runs, par = _risk_iterate(sim, n_iter, n_workers)
+    ends, crit, ms_vals, fired = runs["ends"], runs["crit"], runs["ms"], runs["fired"]
     pct = lambda k: round(100 * k / n_iter, 2)  # noqa: E731
     pcal = cpm.pcal if cpm.pcal is not None and not cpm.pcal.error else None
+    ev_rows = []
+    if events:
+        slip = [None if pcal is None else pcal.work_days(det_end, e) for e in ends]
+        mean = lambda xs: None if not xs or pcal is None else sum(xs) / len(xs)  # noqa: E731
+        r2 = lambda x: None if x is None else round(x, 2) + 0.0  # noqa: E731
+        for k, e in enumerate(events):
+            hit = [(f >> k) & 1 for f in fired]
+            nf = sum(hit)
+            m_f = mean([s for s, h in zip(slip, hit, strict=True) if h])
+            m_n = mean([s for s, h in zip(slip, hit, strict=True) if not h])
+            impact = None if m_f is None or m_n is None else m_f - m_n
+            applied = len(e["ids"] & dist.keys())
+            lo, mo, hi = e["days"]
+            ev_rows.append({"id": e["id"], "name": e["name"], "source": e["source"], "probability": e["probability"],
+                            "add_days": {"min": lo, "likely": mo, "max": hi}, "selector": e["selector"],
+                            "activities": applied, "activities_not_drawn": len(e["ids"]) - applied,
+                            "fired": nf, "fired_pct": pct(nf), "mean_delay_fired_wd": r2(m_f),
+                            "mean_delay_not_fired_wd": r2(m_n), "finish_impact_wd": r2(impact),
+                            "expected_delay_wd": r2(None if impact is None else impact * nf / n_iter),
+                            "_x": None if impact is None else impact * nf / n_iter})
+        pos = sum(x["_x"] for x in ev_rows if x["_x"] is not None and x["_x"] > 0)
+        ev_rows.sort(key=lambda x: (x["_x"] is None, -(x["_x"] or 0.0), x["id"]))
+        for rank, x in enumerate(ev_rows, 1):
+            v = x.pop("_x")
+            x["share_pct"] = None if v is None or pos <= 0 else round(100 * max(v, 0.0) / pos, 2) + 0.0
+            x["rank"] = rank
+    ends.sort()
     p80 = _pctl(ends, 80)
     ms_rows = []
     for m in mids:
@@ -451,7 +471,9 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
                distribution={"default": dict(zip(("min_pct", "mode_pct", "max_pct"), dflt, strict=False)), "ranges": echo,
                              "udfs": uinfo, "counts": {"drawn": len(dist), **{s: sum(1 for x in dist.values()
                                                                                       if x[3] == s) for s in RISK_SOURCES},
-                                                       "duration_fixed": fixed, "recomputed_per_iteration": len(sub)}},
+                                                       "duration_fixed": fixed, "recomputed_per_iteration": len(sub),
+                                                       "correlated": sum(1 for c in sim.corr if c is not None)},
+                             "correlations": cecho},
                deterministic={"finish": _fmt_dt(det_end), "finish_activity": fm0 and fm0["task_code"],
                               "finish_activity_name": fm0 and fm0["task_name"], "stored_finish": cpm.prj["scd_end_date"]},
                finish={**{f"p{p}": _fmt_dt(_pctl(ends, p)) for p in (10, 50, 80, 90)}, "min": _fmt_dt(ends[0]),
@@ -460,7 +482,9 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
                on_time_probability={"deterministic_pct": pct(sum(e <= det_end + CPM_TOL for e in ends)),
                                     "must_finish_pct": None if must is None else pct(sum(e <= must + CPM_TOL for e in ends))},
                p80_buffer_wd=None if pcal is None else round(pcal.work_days(det_end, p80), 2) + 0.0,
-               milestones=ms_rows, histogram=hist, caveat=RISK_CAVEAT, iterations_note=None, schedule_state=state)
+               milestones=ms_rows, histogram=hist, risk_events=ev_rows, p6_risks=p6_block,
+               caveat=RISK_CAVEAT_MODEL if correlations or risks else RISK_CAVEAT, iterations_note=None,
+               parallel={"workers_requested": n_workers, **par}, schedule_state=state)
     if n_iter < min(max(n_req, RISK_ITERATIONS[0]), RISK_ITERATIONS[1]):
         out["iterations_note"] = (f"{n_iter} iterations instead of {n_req}: {len(sub)} activities are recomputed per "
                                   f"iteration and a run is capped at {RISK_WORK:,} activity passes")
