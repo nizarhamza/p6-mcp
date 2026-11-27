@@ -11068,7 +11068,7 @@ def p6_delete_project(project: ProjectList, include_baselines: bool = True, allo
 # Tables exported, in dependency order. SCHEDOPTIONS is not a table of the database: export builds it from
 # PROJPROP 'scheduling', import writes it back there. The order of the 17 tables of the reference XERs is the
 # one P6 writes; P6 sorts by dependency level, then by name within a level, and the notebook, step, expense,
-# role and risk tables (3.5.0) are placed by that rule: no P6 export of them was available to confirm it.
+# role and risk tables (3.4.0) are placed by that rule: no P6 export of them was available to confirm it.
 XER_EXPORT_TABLES = list(get_args(XerTable))
 # Tables imported row by row.
 XER_TABLES = [t for t in XER_EXPORT_TABLES if t != "SCHEDOPTIONS"]
@@ -11099,7 +11099,7 @@ XER_MEMO_COLS = {"TASKMEMO": "task_memo", "TASKPROC": "proc_descr", "PROJCOST": 
                  "PROJRISK": "risk_descr"}
 # Table names of other P6 versions read as ours (Oracle's XER data map spells the risks table PRORISK).
 XER_ALIASES = {"PRORISK": "PROJRISK"}
-# Tables added in 3.5.0 (notebooks, steps, expenses, roles, risks): skipped with a warning when this database lacks
+# Tables added in 3.4.0 (notebooks, steps, expenses, roles, risks): skipped with a warning when this database lacks
 # them or their NEXTKEY counter (the 17 older tables are required).
 XER_DETAIL_TABLES = ("COSTTYPE", "MEMOTYPE", "RISKTYPE", "ROLES", "PROJRISK", "ROLERATE", "PROJCOST", "TASKMEMO",
                      "TASKPROC", "TASKRISK")

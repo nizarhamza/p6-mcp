@@ -1,4 +1,4 @@
-"""Smaller results (3.5.0) on the synthetic project DEMO-A: detail='brief' of the activity tools (rows without null
+"""Smaller results (3.4.0) on the synthetic project DEMO-A: detail='brief' of the activity tools (rows without null
 values, get_activity links without their constant keys; fields= still applies), schedule_state.note only when the
 state needs action or explain=True, and explain=True giving back the fixed texts of p6_compare_projects. The
 expected rows are the tools' own detail='full' rows: brief must be exactly them without the null values."""

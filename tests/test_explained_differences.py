@@ -209,7 +209,7 @@ EDIT_KINDS = [[{"op": "duration", "task_code": "A1030", "remaining_days": 30}],
                          ids=["duration", "add_remaining", "add_link", "delete_link", "constraint"])
 @pytest.mark.parametrize("compare_to", ["current", "engine"])
 def test_whatif_critical_path_test_reuses_the_engine(p6, monkeypatch, edits, compare_to):
-    """The DCMA critical path test of the what-if takes the network and run it already has (3.5.0): the stored
+    """The DCMA critical path test of the what-if takes the network and run it already has (3.4.0): the stored
     database before (compare_to current), the edited network after, as the temp tables hold it. The engine is
     loaded once; the test it gives equals the one that reloads the network from the temp tables and runs it."""
     s = p6.s

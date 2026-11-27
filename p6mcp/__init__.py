@@ -4,4 +4,4 @@ and P6 EPPM servers.
 Not affiliated with, endorsed by or sponsored by Oracle. Primavera and P6 are trademarks of Oracle.
 """
 
-__version__ = "3.3.0"
+__version__ = "3.4.0"

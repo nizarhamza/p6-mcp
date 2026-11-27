@@ -1,4 +1,4 @@
-"""p6_import_xer mode update on the synthetic database (3.5.0: match keys read once per table, UPDATEs sent in
+"""p6_import_xer mode update on the synthetic database (3.4.0: match keys read once per table, UPDATEs sent in
 batches). DEMO-A gets assignments (two of the same resource on one activity), an activity code and UDF values,
 is exported, then changed by the test's SQL: names and values edited, a code assignment and a UDF value
 soft-deleted, a link and an assignment deleted, a second live activity with an existing Activity ID. The import

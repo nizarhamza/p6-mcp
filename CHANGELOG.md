@@ -5,6 +5,8 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-11-27
+
 ### Added
 
 - P6 EPPM proxy: the calls to a P6 EPPM server go through the proxy set in Windows (or the `HTTP_PROXY` and
@@ -34,7 +36,7 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   3,120-activity project a 200-row page is 17 to 19 % smaller (activity lists), 16 % for milestones and one activity
   32 %. `fields=` works with it. The default `detail="full"` keeps every key of every row, as before.
 - `explain=True` on `p6_update_integrity` and `p6_compare_projects` returns the fixed texts described below, so
-  the result is the same as in 3.4.
+  the result is the same as in 3.3.
 - `p6_calendar_check`: checks the calendars a project uses (project calendar, activity calendars, calendars of
   the assigned resources and their base calendars) over the years from the data date to the project finish.
   Findings, one row each with the calendar, date or year, a detail and the number of activities on that calendar:
@@ -646,6 +648,7 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[3.4.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.4.0
 [3.3.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.3.0
 [3.2.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.2.0
 [3.1.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.1.1
