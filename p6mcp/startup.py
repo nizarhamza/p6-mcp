@@ -75,3 +75,14 @@ def sync(data: dict, key: str = RUN_KEY) -> Optional[str]:
         return want
     disable(key)
     return None
+
+
+def heal(data: dict, key: str = RUN_KEY) -> Optional[str]:
+    """At tray start: write the entry back when the settings ask for one and the registry lacks it or names
+    another command. Never removes one (only Save does). Returns the command written, None when nothing changed."""
+    if not data.get("run_at_startup"):
+        return None
+    want = command(bool(data.get("start_minimized", True)))
+    if current(key) == want:
+        return None
+    return enable(bool(data.get("start_minimized", True)), key)
