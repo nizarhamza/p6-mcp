@@ -114,7 +114,8 @@ def test_ranges_and_udfs_by_precedence(p6):
 def test_clamp_cap_and_refusals(p6, monkeypatch):
     low = risk(p6, iterations=5)
     assert low["iterations"] == 100 and low["iterations_requested"] == 5 and "clamped" in low["iterations_note"]
-    monkeypatch.setattr(p6.s, "RISK_WORK", 1200)  # 6 activities recomputed per iteration: at most 200 iterations
+    from p6mcp.tools import engine  # p6_schedule_risk reads the cap there
+    monkeypatch.setattr(engine, "RISK_WORK", 1200)  # 6 activities recomputed per iteration: at most 200 iterations
     capped = risk(p6, iterations=1000)
     assert capped["iterations"] == 200 and capped["distribution"]["counts"]["recomputed_per_iteration"] == 6
     assert "capped at 1,200 activity passes" in capped["iterations_note"]

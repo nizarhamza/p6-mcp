@@ -30,16 +30,21 @@ def test_hints_agree_with_kinds(server):
 
 
 def test_hints_are_literal_in_the_source(server):
-    """Static scanners (M8ven) read the hints from the decorator line: a dict literal of the four booleans."""
-    with open(server.__file__, encoding="utf-8") as fh:
-        tree = ast.parse(fh.read())
+    """Static scanners (M8ven) read the hints from the decorator line: a dict literal of the four booleans.
+    The tools are declared in the modules of p6mcp/tools (one per family)."""
+    folder = os.path.join(ROOT, "p6mcp", "tools")
     found = {}
-    for node in tree.body:
-        for d in getattr(node, "decorator_list", ()):
-            if isinstance(d, ast.Call) and getattr(d.func, "id", None) == "_tool":
-                assert not d.args and [k.arg for k in d.keywords] == ["annotations"], node.name
-                assert isinstance(d.keywords[0].value, ast.Dict), node.name
-                found[node.name] = ast.literal_eval(d.keywords[0].value)
+    for name in sorted(os.listdir(folder)):
+        if not name.endswith(".py"):
+            continue
+        with open(os.path.join(folder, name), encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+        for node in tree.body:
+            for d in getattr(node, "decorator_list", ()):
+                if isinstance(d, ast.Call) and getattr(d.func, "id", None) == "_tool":
+                    assert not d.args and [k.arg for k in d.keywords] == ["annotations"], node.name
+                    assert isinstance(d.keywords[0].value, ast.Dict), node.name
+                    found[node.name] = ast.literal_eval(d.keywords[0].value)
     assert found == server.TOOL_HINTS
     for name, hints in found.items():
         assert tuple(hints) == server.HINT_KEYS, name
