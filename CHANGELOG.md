@@ -33,6 +33,25 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 - The tool list the AI app reads at the start of a chat is 11 % smaller (132 KB instead of 149 KB with every tool
   on): schema titles that repeated each parameter's name are left out, and so is the deprecated `confirm`
   parameter, which is still accepted.
+- `p6_schedule_whatif` about 45 % faster (1.6 s instead of 2.9 s on a 3,120-activity project): its DCMA critical
+  path test reuses the networks and engine runs the what-if already has (the stored database before, the edited
+  network after) instead of loading and running the engine again, and the test's delayed run skips the free float
+  and float paths it never reads. Results, `p6_health_check` included, are unchanged.
+- `p6_import_xer` in update mode about 2.5 times as fast (a dry run takes 1.05 s instead of 2.7 s for a
+  3,120-activity update): the existing rows are matched from keys read once per table instead of one query per row,
+  and the updates are sent in batches. Counts, rows, soft-deleted rows coming back, the edit log and the result are
+  unchanged.
+- Earned value (`p6_progress_curve` to date and earned points, `p6_project_summary` `spi_units`) applies each WBS
+  node's own technique: activity percent complete, 0/100, 50/50, custom percent complete, WBS milestones percent
+  complete and activity percent complete using resource curves (a node without one takes the project node's, then
+  the admin default). Before, every node counted as activity percent complete. The rules follow the P6
+  documentation; no P6 earned value figure was available to check them. `checks` adds `ev_techniques` (WBS nodes
+  per technique) and `ev_unknown_techniques`. Projects whose WBS all use activity percent complete get the same
+  values as before.
+- `p6_update_assignment` and `p6_update_assignments` say which P6 summary rows (SUMTASK, SUMTASKSPREAD,
+  SUMTRSRC) the change leaves out of date (`summaries_stale`, plus a plan line) and that Tools > Summarize in P6
+  refreshes them. The summary tables are still never written: they are time-phased spreads that could not be
+  rebuilt to match P6.
 
 ### Fixed
 
