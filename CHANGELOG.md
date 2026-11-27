@@ -5,6 +5,18 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+### Added
+
+- Cost earned value at the data date: `p6_project_summary` returns a `cost` block beside the units figures, and
+  `p6_progress_curve(measure='cost')` the same block as `to_date.cost`. It follows P6's earned value fields: BAC
+  (budgeted cost of every assignment, labor, nonlabor and material, plus expenses), PV (the baseline's planned cost
+  at the data date), EV (budgeted cost x the earned % of each activity under its WBS earned value technique), AC
+  (actual regular and overtime cost plus actual expenses), CV, SV, CPI, SPI, ETC, EAC, VAC and TCPI, with a
+  breakdown by source (labor, nonlabor, material, other, expenses). EAC follows the project's technique for
+  computing estimate to complete (its WBS node, else the admin preferences: remaining cost, PF = 1, PF = 1 / CPI,
+  PF = 1 / (CPI x SPI) or a custom PF), and every variant is given in `eac_variants`. Without a baseline PV, SV and
+  SPI are null; without costs the block says so. Units figures are unchanged.
+
 ## [3.4.0] - 2026-11-27
 
 ### Added
