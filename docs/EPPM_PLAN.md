@@ -1,7 +1,14 @@
 # P6 EPPM backend: implementation plan
 
-Status: plan agreed on 2026-11-24 (decisions D2 to D7 in section 10; D1 waits for a real server). Nothing
-below is implemented yet. Milestone 0 ran on a private test
+Status (2026-11-27): built and released. 3.0.0 shipped milestones 1 to 6 (configuration and Test connection,
+SQL and REST pull, local edits, push, server scheduling), 3.1.0 added `p6_eppm_discard` and
+`p6_update_activities`. Not built from this plan: `schedule=True` on the push (`p6_eppm_schedule` is the only
+way to schedule), proxy settings in a server profile (a custom CA bundle exists), a pull by REST object reads
+alone (the REST route needs the XER export), UDF edits in EPPM mode, and anything that waits for a real server
+(D1, OAuth on OCI, DACS prefix). The sections below keep the plan as agreed; where they differ from the code,
+the code and the milestone notes in section 9 win.
+
+Plan agreed on 2026-11-24 (decisions D2 to D7 in section 10; D1 waits for a real server). Milestone 0 ran on a private test
 server (P6 EPPM 25.12, SQL Server 2022, WebLogic 14.1.2, synthetic project DEMO-SS225) on 2026-11-24: the
 measured facts are in section 13 and the sections below are corrected from them.
 
@@ -121,8 +128,8 @@ Two ways, the first preferred when the server offers it:
   store (no `trusted_schemas` step for the user).
 - PM.exe check, P6 triggers and REFRDEL do not apply to the working copy. Local backups (before each local
   write) and `p6_restore_backup` still work on the working copy.
-- A new pull of a project with pending changes is refused unless `discard_pending=True` (destructive
-  confirmation text `DISCARD <project>`).
+- A new pull of a project with pending changes is refused unless `discard_pending=True` (the tool is marked
+  destructive; there is no confirmation text, the client asks the user first).
 
 ## 4. Push
 
@@ -132,8 +139,9 @@ Two ways, the first preferred when the server offers it:
   the ones a local restore undid (`_undone_fn`).
 - Net change per server object and field: the first `before`, the last `after`; a field set back to its
   pulled value drops out; an object created then deleted locally drops out.
-- Supported in version 1: activity fields written by `p6_update_activity`, relationships (add, update,
-  delete), assignment units (`p6_update_assignment(s)`), activity UDF values (set, clear).
+- Supported in version 1: activity fields written by `p6_update_activity(ies)`, relationships (add, update,
+  delete), assignment units (`p6_update_assignment(s)`). Activity UDF values are not: the UDF tools are outside
+  `server.EPPM_EDIT_TOOLS` until their REST calls are checked on a server.
 - Refused in EPPM mode (the tools stay listed only for the standalone database): `p6_delete_activity` (D5),
   `p6_import_xer`,
   `p6_create_eps`, `p6_delete_project`, `p6_set_schedule_options` (until the REST schedule options object is
@@ -196,7 +204,7 @@ window short.
 | `p6_eppm_projects` | read, open world | Projects the REST user can read on the server (Project ID, name, EPS, data date, last schedule, pulled or not). |
 | `p6_eppm_pull` | write (local), open world | Pulls one project (and its baseline when asked) into the working copy; refuses over pending changes unless `discard_pending=True`. |
 | `p6_eppm_status` | read | Working copy of each pulled project: pull time, route, pending changes (net), last push, whether the server changed since the pull (one cheap REST read). |
-| `p6_eppm_push` | destructive, open world | Dry run: the REST calls, conflicts, already done items; apply after the token and `confirmation_text` `PUSH <project>`. |
+| `p6_eppm_push` | destructive, open world | Dry run: the REST calls, conflicts, already done items; apply after the token and `confirmation_text` `PUSH TO <server>` (the server profile name). |
 | `p6_eppm_schedule` | write, open world | Schedules the project on the server, then pulls. |
 
 Existing tools: unchanged signatures. `p6_diagnose` reports the EPPM profile, routes and their last test,
@@ -289,7 +297,7 @@ push and schedule. `INSTRUCTIONS` (ASCII, under 1 KB) gets one line on pull, edi
    object reads alone (a server without the XER export) is not built: the export exists on every release this
    product targets.
    Milestone 4 done (local edits, `p6mcp/eppm/pending.py`): in P6 EPPM mode the edits the push supports
-   (`server.EPPM_EDIT_TOOLS`: activity, relationship, assignment and UDF edits, local backup and restore) write
+   (`server.EPPM_EDIT_TOOLS`: activity, relationship and assignment edits, local backup and restore) write
    the working copy through the usual two-step flow, with no schema gate and no PM.exe check; the others are
    refused (`p6_delete_activity` per D5). The working copy is named `eppm_<profile>.db` so the edit log keeps
    servers apart; NEXTKEY gives new relationships ids from `LOCAL_ID_BASE` (2,000,000,000). Pending changes =

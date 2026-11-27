@@ -43,7 +43,7 @@
       "applicationCategory": "BusinessApplication",
       "applicationSubCategory": "Project scheduling",
       "operatingSystem": "Windows 10, Windows 11",
-      "softwareVersion": "2.2.0",
+      "softwareVersion": "3.3.0",
       "url": "https://mcp-for-primavera-p6.pages.dev/",
       "downloadUrl": "https://github.com/nizarhamza/p6-mcp/releases/latest",
       "installUrl": "https://github.com/nizarhamza/p6-mcp/releases/latest",
@@ -179,7 +179,7 @@
   <h1 class="page-title" id="top">Ask your Primavera&nbsp;P6 schedule, in plain language</h1>
   <p class="lede"><strong>MCP for Primavera P6</strong> is a local MCP server for Claude, ChatGPT, Cursor and VS Code. It reads the P6 Professional database or XER files and computes the answer from the schedule: driving path, total float, the DCMA 14-point check, what changed since the last update, what-if and risk. When you allow it, it <strong>edits the schedule too</strong>: previewed, confirmed by you, backed up and logged.</p>
   <div class="hero-actions">
-    <a class="btn btn-primary btn-stack" href="https://github.com/nizarhamza/p6-mcp/releases/latest"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Download for Windows<small>Version 2.2.0 installer, Windows 10 and 11</small></span></a>
+    <a class="btn btn-primary btn-stack" href="https://github.com/nizarhamza/p6-mcp/releases/latest"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Download for Windows<small>Version 3.3.0 installer, Windows 10 and 11</small></span></a>
     <a class="btn btn-secondary" href="#architecture">See how it works</a>
   </div>
   <ul class="hero-meta">
@@ -198,7 +198,7 @@
           <li><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg><span>Claude Code</span></li>
           <li><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg><span>Cursor, VS Code<small>Copilot agent mode</small></span></li>
           <li><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg><span>LM Studio, Cline<small>local models</small></span></li>
-          <li><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>ChatGPT<small>Codex or a secure tunnel</small></span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>claude.ai, ChatGPT<small>browser, remote access (beta)</small></span></li>
         </ul>
       </div>
       <div class="ov-link vwire-s">
@@ -285,7 +285,7 @@
 
 <section class="doc-section" id="tools" aria-labelledby="tools-h">
   <h2 id="tools-h"><a class="anchor" href="#tools" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>65 tools, grouped by job</h2>
-  <p>37 read-only tools (11 of them in the Basic profile, for small local models), 2 that write a file, 18 write tools that stay off until you allow them, and 1 that changes the app's own settings. Pick a tool to see what it does.</p>
+  <p>39 read-only tools (11 of them in the Basic profile, for small local models), 3 that write a file, 22 write tools that stay off until you allow them, and 1 that changes the app's own settings. Pick a tool to see what it does.</p>
   <div class="toolmap" data-toolmap>
 <div class="tm-bar">
 <div class="seg" role="group" aria-label="Filter the tools">
@@ -645,7 +645,7 @@
         <p class="repo-name"><svg class="icon" aria-hidden="true"><use href="#i-git-branch"/></svg><a href="https://github.com/nizarhamza/p6-mcp">nizarhamza/p6-mcp</a></p>
         <p>The server, the Settings app, the installer and this site. Python 3.10 or later (the installer bundles 3.13), Apache 2.0.</p>
         <ul class="tree">
-          <li class="hot"><svg class="icon" aria-hidden="true"><use href="#i-file-code"/></svg><code>p6mcp/server.py</code><span>The 63 tools, the CPM engine, XER read and write</span></li>
+          <li class="hot"><svg class="icon" aria-hidden="true"><use href="#i-file-code"/></svg><code>p6mcp/server.py</code><span>The 65 tools, the CPM engine, XER read and write</span></li>
           <li><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg><code>policy.py, confirm.py</code><span>Tool profiles, the gate and the two-step writes</span></li>
           <li><svg class="icon" aria-hidden="true"><use href="#i-zap"/></svg><code>http_server.py</code><span>Local HTTP on 127.0.0.1 with a bearer token</span></li>
           <li><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><code>p6mcp/clients/</code><span>One adapter per MCP client: register, repair, remove</span></li>
@@ -688,7 +688,7 @@
   <h2 id="install-h"><a class="anchor" href="#install" aria-hidden="true" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></a>Install in five minutes</h2>
   <p>Windows 10 or 11, next to P6 Professional. Python is bundled: nothing else to install.</p>
   <ol class="steps">
-    <li data-reveal><h3>Download</h3><p><code>P6MCP-Setup-2.2.0.exe</code> from the latest release; check it against <code>SHA256SUMS.txt</code>.</p></li>
+    <li data-reveal><h3>Download</h3><p><code>P6MCP-Setup-3.3.0.exe</code> from the latest release; check it against <code>SHA256SUMS.txt</code>.</p></li>
     <li data-reveal><h3>Run the installer</h3><p>Per-user install, no administrator rights. Its last page offers to register the server with the MCP clients it finds.</p></li>
     <li data-reveal><h3>Pick your database</h3><p>In the Settings window: your P6 database, <strong>Test connection</strong> (read only), <strong>Use this database</strong>, <strong>Save</strong>.</p></li>
     <li data-reveal><h3>Ask</h3><p>Restart your MCP client and ask: "List my P6 projects".</p></li>

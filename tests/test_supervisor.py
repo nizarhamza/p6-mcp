@@ -44,6 +44,7 @@ def test_stdio_means_nothing_to_host():
     assert sup.tick().state == supervisor.DISABLED and sup.proc is None
 
 
+@pytest.mark.slow
 def test_start_port_change_and_stop():
     sup, box = make(SLEEP)
     try:
@@ -59,6 +60,7 @@ def test_start_port_change_and_stop():
         sup.stop()
 
 
+@pytest.mark.slow
 def test_crash_backoff_and_give_up():
     clock = Clock()
     sup, _ = make(CRASH, clock)
@@ -82,6 +84,7 @@ def test_crash_backoff_and_give_up():
         sup.stop()
 
 
+@pytest.mark.slow
 def test_real_http_server_process(tmp_path, monkeypatch, golden):
     """The real p6mcp-server --http child, supervised until it serves."""
     import shutil

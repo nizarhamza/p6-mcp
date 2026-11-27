@@ -5,8 +5,25 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+### Changed
+
+- Faster engine and report tools: stored dates are read once per distinct value instead of once per use. On a
+  3,120-activity project, `p6_cpm_validate` takes 0.54 s instead of 0.98 s, `p6_health_check` 1.11 s instead of
+  1.57 s, `p6_schedule_whatif` 2.65 s instead of 3.74 s, `p6_project_summary` 0.11 s instead of 0.31 s. Results
+  are unchanged.
+- `p6_export_dashboard` about twice as fast (3.9 s instead of 7.1 s on the same project): cell styles are shared
+  instead of created for every cell. The workbook is unchanged.
+- Tool results reach the AI app as compact JSON instead of indented JSON: 18 to 34 % fewer characters for the same
+  content, so long answers use less of the conversation. Results are text only (never a second structured copy).
+- The tool list the AI app reads at the start of a chat is 11 % smaller (132 KB instead of 149 KB with every tool
+  on): schema titles that repeated each parameter's name are left out, and so is the deprecated `confirm`
+  parameter, which is still accepted.
+
 ### Fixed
 
+- Remote access, Connect with this PC: the notification area app could reset the browser's connection instead of
+  answering when it refused a request (it closed the connection before reading the request body). It now reads
+  the body first, and stops waiting for a body after 10 s.
 - After an automatic update the notification area app did not start again, so remote access stayed off until the
   next Windows sign-in: setup starts it while it still holds its mutex, and the app exited at once. Setup now starts
   it with `--after-setup`, which waits for setup to end (also for "Open Settings" on the last setup page).
@@ -557,6 +574,11 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[3.3.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.3.0
+[3.2.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.2.0
+[3.1.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.1.1
+[3.1.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.1.0
+[3.0.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.0.0
 [2.2.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v2.2.0
 [2.1.1]: https://github.com/nizarhamza/p6-mcp/releases/tag/v2.1.1
 [2.1.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v2.1.0

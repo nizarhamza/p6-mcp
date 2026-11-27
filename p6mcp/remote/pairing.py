@@ -23,6 +23,8 @@ from typing import Callable, Optional
 log = logging.getLogger("p6mcp.remote.pairing")
 PATH = "/p6mcp/pair"
 MAX_BODY = 1024
+DRAIN_MAX = 64 * 1024  # a refused body up to this size is still read before the answer
+POLL_S = 0.05  # serve_forever poll: stop() returns within it (the 0.5 s default held the tray's quit)
 
 
 class _ExclusiveServer(ThreadingHTTPServer):
@@ -60,7 +62,7 @@ class PairListener:
             log.warning("Connect button listener not started on %s:%s: %s", self.host, self.port, e)
             return False
         self.error = None
-        self.thread = threading.Thread(target=self.httpd.serve_forever, name="p6mcp-pair", daemon=True)
+        self.thread = threading.Thread(target=self.httpd.serve_forever, args=(POLL_S,), name="p6mcp-pair", daemon=True)
         self.thread.start()
         log.info("Connect button listener on %s:%s", self.host, self.port)
         return True
@@ -77,6 +79,7 @@ def _handler(owner: PairListener):
     class Handler(BaseHTTPRequestHandler):
         server_version = "p6mcp-pair"
         sys_version = ""
+        timeout = 10  # socket timeout: a client that never sends its declared body does not hold a thread
 
         def log_message(self, fmt, *args):  # no request log on stderr
             pass
@@ -115,20 +118,35 @@ def _handler(owner: PairListener):
                 return
             self._send(204, None, origin, preflight=True)
 
+        def _body(self) -> Optional[bytes]:
+            """The request body, read before any answer, refusals included: closing a socket that still holds
+            unread data sends a reset, which can reach the client before the answer (a connection abort instead
+            of the 403 or 400). None = no usable body (missing, bad length, above MAX_BODY: still read and dropped
+            up to DRAIN_MAX; a larger one is left unread, the reset is then the answer)."""
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return None
+            if not 0 < n <= DRAIN_MAX:
+                return None
+            try:
+                data = self.rfile.read(n)
+            except OSError:  # timeout or reset: nothing more to read
+                self.close_connection = True
+                return None
+            return data if n <= MAX_BODY and len(data) == n else None
+
         def do_POST(self):
+            body = self._body()
             origin = self._allowed_origin()
             if self.path != PATH or not origin or not self._host_ok():
                 self._send(403, {"ok": False, "error": "forbidden"}, None)
                 return
-            try:
-                n = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                n = -1
-            if not 0 < n <= MAX_BODY:
+            if body is None:
                 self._send(400, {"ok": False, "error": "bad request"}, origin)
                 return
             try:
-                msg = json.loads(self.rfile.read(n))
+                msg = json.loads(body)
             except ValueError:
                 msg = None
             if not isinstance(msg, dict) or not all(isinstance(msg.get(k), str) for k in ("id", "code", "key")):

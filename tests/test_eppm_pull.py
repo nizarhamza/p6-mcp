@@ -160,7 +160,7 @@ def eppm_env(tmp_path, monkeypatch, golden):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
     handler = make_handler(golden)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    threading.Thread(target=srv.serve_forever, args=(0.05,), daemon=True).start()
     prof = {"name": "srv", "base_url": f"http://127.0.0.1:{srv.server_address[1]}", "context": "p6ws",
             "database": "PMDB", "user": USER, "auth": "login", "ca_bundle": None, "timeout_s": 10,
             "sql": {"driver": "mssql", "host": "db", "port": 1433, "service": "PMDB", "user": "r", "schema": "",
@@ -268,7 +268,7 @@ def test_rest_route_builds_the_copy_from_the_xer_export(p6, tmp_path, monkeypatc
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
     handler = make_handler(p6.db, data, baseline=str(BL))  # its REST objects stand in for its baseline
     srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    threading.Thread(target=srv.serve_forever, args=(0.05,), daemon=True).start()
     try:
         prof = {"name": "srv", "base_url": f"http://127.0.0.1:{srv.server_address[1]}", "context": "p6ws",
                 "database": "PMDB", "user": USER, "auth": "login", "ca_bundle": None, "timeout_s": 10, "sql": None,
