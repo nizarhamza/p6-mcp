@@ -54,6 +54,10 @@ TABLES: tuple[tuple[str, str, bool], ...] = (
     ("UDFVALUE", "proj_id IN ({S})", True),
     ("MEMOTYPE", "", True),
     ("TASKMEMO", "proj_id IN ({S})", True),
+    ("TASKPROC", "proj_id IN ({S})", True),
+    ("COSTTYPE", "", True),
+    ("PROJCOST", "proj_id IN ({S})", True),
+    ("ROLERATE", "role_id IN (SELECT role_id FROM {TASKRSRC} WHERE proj_id IN ({S}))", True),
     ("PREFER", "", True),
     ("NEXTKEY", "", True),
 )

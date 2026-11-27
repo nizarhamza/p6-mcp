@@ -19,6 +19,15 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   again. The dry run lists the schedule after the push, and one confirmation covers both steps (the text becomes
   `PUSH TO <server> AND SCHEDULE`); a push that fails or meets a conflict schedules nothing. The result and the edit
   log hold both steps.
+- `p6_export_xer` and `p6_import_xer` carry activity notebooks (TASKMEMO, topics in MEMOTYPE), steps (TASKPROC),
+  expenses (PROJCOST, categories in COSTTYPE), roles (ROLES, ROLERATE, and the role of each resource assignment)
+  and risks (RISKTYPE, PROJRISK, TASKRISK). A project exported then imported keeps them. The import matches topics,
+  expense categories, roles (by Role ID under the same parent role) and risk types by name and creates the missing
+  ones (role prices only for new roles); in update mode notebooks are matched by activity and topic, steps and
+  expenses by activity and name, risks by Risk ID, and the ones missing from the XER are kept. A table the database
+  lacks is skipped with a warning (`p6_inspect_xer`: `tables_not_in_database`). The place of these tables in the
+  file follows P6's table order rule; no P6 export containing them was available to confirm it.
+- The EPPM SQL pull also copies steps, expenses, expense categories and role prices.
 
 ### Changed
 
@@ -55,6 +64,8 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ### Fixed
 
+- Deleting an activity or a project now also deletes the UDF values of its steps, expenses and risks,
+  which were left without their row before.
 - Remote access, Connect with this PC: the notification area app could reset the browser's connection instead of
   answering when it refused a request (it closed the connection before reading the request body). It now reads
   the body first, and stops waiting for a body after 10 s.

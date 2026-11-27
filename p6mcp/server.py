@@ -208,9 +208,10 @@ Removable = Literal["TASKPRED", "TASKRSRC"]
 CstrName = Literal["none", "start_on_or_after", "start_on_or_before", "start_on", "finish_on_or_after",
                    "finish_on_or_before", "finish_on", "mandatory_start", "mandatory_finish",
                    "as_late_as_possible"]
-XerTable = Literal["CURRTYPE", "FINTMPL", "OBS", "UDFTYPE", "PROJECT", "CALENDAR", "SCHEDOPTIONS", "PROJWBS",
-                   "RSRC", "ACTVTYPE", "RSRCRATE", "TASK", "ACTVCODE", "TASKPRED", "TASKRSRC", "TASKACTV",
-                   "UDFVALUE"]
+XerTable = Literal["COSTTYPE", "CURRTYPE", "FINTMPL", "MEMOTYPE", "OBS", "RISKTYPE", "ROLES", "UDFTYPE", "PROJECT",
+                   "CALENDAR", "SCHEDOPTIONS", "PROJWBS", "RSRC", "ACTVTYPE", "PROJRISK", "ROLERATE", "RSRCRATE",
+                   "TASK", "ACTVCODE", "PROJCOST", "TASKMEMO", "TASKPRED", "TASKPROC", "TASKRSRC", "TASKACTV",
+                   "TASKRISK", "UDFVALUE"]
 DateStr = Annotated[str, Field(pattern=DATE_PATTERN, description="YYYY-MM-DD")]
 DateTimeStr = Annotated[str, Field(pattern=DATETIME_PATTERN, description="YYYY-MM-DD HH:MM")]
 Pct = Annotated[float, Field(ge=0, le=100)]
@@ -9745,9 +9746,11 @@ def p6_update_udfs(project: ProjectId, items: UdfEdits, confirm: bool = False) -
 # Rows that only point at an activity (an issue raised on it): kept, the link cleared. Every other
 # table with a task_id, pred_task_id or taskrsrc_id column holds rows of the activity and loses them.
 ACT_DEL_CLEAR = (("PROJISSU", "task_id"),)
-ACT_DEL_ORDER = ("TASKACTV", "UDFVALUE", "TASKRSRC", "TASKPRED", "TASK")  # children first, as DEL_ORDER
+ACT_DEL_ORDER = ("TASKACTV", "UDFVALUE", "TASKPROC", "PROJCOST", "TASKRSRC", "TASKPRED",
+                 "TASK")  # children first, as DEL_ORDER
 ACT_DEL_OWN = {"task_id": "_dt", "pred_task_id": "_dt", "taskrsrc_id": "_dr"}  # as DEL_OWN, activities only
-ACT_DEL_UDF = {"TASK": "_dt", "TASKRSRC": "_dr"}
+ACT_DEL_UDF = {"TASK": "_dt", "TASKRSRC": "_dr", "TASKPROC": ("proc_id", "task_id", "_dt"),
+               "PROJCOST": ("cost_item_id", "task_id", "_dt")}
 ACT_SNAPSHOT = ("task_code", "task_name", "task_type", "status_code", "wbs_id", "clndr_id", "target_drtn_hr_cnt",
                 "remain_drtn_hr_cnt", "cstr_type", "cstr_date", "act_start_date", "act_end_date", "phys_complete_pct")
 
@@ -10413,8 +10416,9 @@ def p6_set_schedule_options(project: ProjectId, options: Optional[SchedValues] =
 # A P6 GUI delete (compared on this database, 116 projects and their EPS on 2026-10-19) hard-deletes
 # the rows, children first, in this order per project; the AFTER DELETE triggers log each row in
 # REFRDEL. Nothing is soft-deleted (delete_session_id stays unused) and NEXTKEY is not touched.
-DEL_ORDER = ("TASKACTV", "UDFVALUE", "TASKRSRC", "TASKPRED", "TASK", "ACTVCODE", "ACTVTYPE", "PROJWBS",
-             "CALENDAR", "PROJECT")
+DEL_ORDER = ("TASKACTV", "UDFVALUE", "TASKPROC", "PROJCOST", "TASKRISK", "PROJRISK", "TASKRSRC", "TASKPRED", "TASK",
+             "ACTVCODE", "ACTVTYPE", "PROJWBS", "CALENDAR", "PROJECT")
+# (steps, expenses and risks after UDFVALUE, so that their UDF values are still found: placed, not measured)
 # Never deleted from: delete logs, key counters, cross references and P6 sessions.
 DEL_SKIP = {"REFRDEL", "NEXTKEY", "PKXREF", "USESSION"}
 # Column -> set of deleted ids it belongs to (temp tables built per run). Every table of the schema
@@ -10422,8 +10426,11 @@ DEL_SKIP = {"REFRDEL", "NEXTKEY", "PKXREF", "USESSION"}
 # other projects), ACTVCODE and TASKACTV through the project's activity code types.
 DEL_OWN = {"proj_id": "_dp", "task_id": "_dt", "pred_task_id": "_dt", "wbs_id": "_dw", "taskrsrc_id": "_dr",
            "actv_code_type_id": "_dct"}
-# UDFVALUE.fk_id per UDFTYPE.table_name.
-DEL_UDF = {"PROJECT": "_dp", "PROJWBS": "_dw", "TASK": "_dt", "TASKRSRC": "_dr"}
+# UDFVALUE.fk_id per UDFTYPE.table_name: a temp set, or (id column, owner column, temp set) for the rows of
+# a table owned by those ids (steps and expenses of the activities, risks of the projects).
+DEL_UDF = {"PROJECT": "_dp", "PROJWBS": "_dw", "TASK": "_dt", "TASKRSRC": "_dr",
+           "TASKPROC": ("proc_id", "task_id", "_dt"), "PROJCOST": ("cost_item_id", "proj_id", "_dp"),
+           "PROJRISK": ("risk_id", "proj_id", "_dp")}
 # Columns of rows that stay but may name a deleted project: cleared (project baseline, copy source...).
 DEL_CLEAR = (("PROJECT", "sum_base_proj_id"), ("PROJECT", "source_proj_id"), ("PROJISSU", "base_proj_id"))
 # Orphan check: column -> (parent table, key). UDFVALUE.fk_id is checked per UDFTYPE.table_name.
@@ -10457,7 +10464,9 @@ def _orphans(con) -> dict[str, int]:
                     out[f"{t}.{c} -> {pt}"] = n
     if {"fk_id", "udf_type_id"} <= _cols(con, "UDFVALUE") and _cols(con, "UDFTYPE"):
         for tn, pk in (("PROJECT", "proj_id"), ("PROJWBS", "wbs_id"), ("TASK", "task_id"), ("TASKRSRC", "taskrsrc_id"),
-                       ("RSRC", "rsrc_id")):
+                       ("RSRC", "rsrc_id"), ("TASKPROC", "proc_id"), ("PROJCOST", "cost_item_id"), ("PROJRISK", "risk_id")):
+            if pk not in _cols(con, tn):
+                continue
             n = con.execute(f"SELECT COUNT(*) FROM UDFVALUE v JOIN UDFTYPE u ON u.udf_type_id = v.udf_type_id "
                             f"WHERE u.table_name = ? AND NOT EXISTS (SELECT 1 FROM {tn} p WHERE p.{pk} = v.fk_id)",
                             (tn,)).fetchone()[0]
@@ -10492,8 +10501,16 @@ def _owned_where(con, t: str, own: Mapping[str, str], udf: Mapping[str, str]) ->
     conds = [f"{c} IN (SELECT id FROM temp.{s})" for c, s in own.items()
              if c in _cols(con, t) and not (c == "actv_code_type_id" and t == "ACTVTYPE")]
     if t == "UDFVALUE" and _cols(con, "UDFTYPE"):
-        conds += [f"(fk_id IN (SELECT id FROM temp.{s}) AND udf_type_id IN (SELECT udf_type_id FROM UDFTYPE "
-                  f"WHERE table_name = '{tn}'))" for tn, s in udf.items()]
+        for tn, s in udf.items():
+            if isinstance(s, tuple):  # rows of tn owned by the ids: the UDF values go before them (DEL_ORDER)
+                pk, owner, s = s
+                if not {pk, owner} <= _cols(con, tn):
+                    continue
+                ids = f"SELECT {pk} FROM {tn} WHERE {owner} IN (SELECT id FROM temp.{s})"
+            else:
+                ids = f"SELECT id FROM temp.{s}"
+            conds.append(f"(fk_id IN ({ids}) AND udf_type_id IN (SELECT udf_type_id FROM UDFTYPE "
+                         f"WHERE table_name = '{tn}'))")
     return conds
 
 
@@ -10722,8 +10739,10 @@ def p6_delete_project(project: ProjectList, include_baselines: bool = True, allo
 
 # ----------------------------------------------------------------- XER import / export
 
-# Tables exported, in dependency order (this is also the order P6 writes them). SCHEDOPTIONS is not a
-# table of the database: export builds it from PROJPROP 'scheduling', import writes it back there.
+# Tables exported, in dependency order. SCHEDOPTIONS is not a table of the database: export builds it from
+# PROJPROP 'scheduling', import writes it back there. The order of the 17 tables of the reference XERs is the
+# one P6 writes; P6 sorts by dependency level, then by name within a level, and the notebook, step, expense,
+# role and risk tables (3.5.0) are placed by that rule: no P6 export of them was available to confirm it.
 XER_EXPORT_TABLES = list(get_args(XerTable))
 # Tables imported row by row.
 XER_TABLES = [t for t in XER_EXPORT_TABLES if t != "SCHEDOPTIONS"]
@@ -10731,9 +10750,12 @@ XER_TABLES = [t for t in XER_EXPORT_TABLES if t != "SCHEDOPTIONS"]
 XER_PK = {"CURRTYPE": "curr_id", "FINTMPL": "fintmpl_id", "OBS": "obs_id", "UDFTYPE": "udf_type_id",
           "PROJECT": "proj_id", "CALENDAR": "clndr_id", "PROJWBS": "wbs_id", "RSRC": "rsrc_id",
           "ACTVTYPE": "actv_code_type_id", "RSRCRATE": "rsrc_rate_id", "TASK": "task_id",
-          "ACTVCODE": "actv_code_id", "TASKPRED": "task_pred_id", "TASKRSRC": "taskrsrc_id"}
+          "ACTVCODE": "actv_code_id", "TASKPRED": "task_pred_id", "TASKRSRC": "taskrsrc_id",
+          "COSTTYPE": "cost_type_id", "MEMOTYPE": "memo_type_id", "RISKTYPE": "risk_type_id", "ROLES": "role_id",
+          "PROJRISK": "risk_id", "ROLERATE": "role_rate_id", "PROJCOST": "cost_item_id", "TASKMEMO": "memo_id",
+          "TASKPROC": "proc_id"}
 # Id columns that point to a table carried by the XER. Any other *_id column refers to data
-# the XER does not contain (roles, accounts, curves, locations...) and is cleared on import.
+# the XER does not contain (cost accounts, responsible managers, curves, locations...) and is cleared on import.
 XER_FK = {"proj_id": "PROJECT", "pred_proj_id": "PROJECT", "orig_proj_id": "PROJECT",
           "sum_base_proj_id": "PROJECT", "source_proj_id": "PROJECT",
           "wbs_id": "PROJWBS", "parent_wbs_id": "PROJWBS", "obs_id": "OBS", "parent_obs_id": "OBS",
@@ -10741,9 +10763,26 @@ XER_FK = {"proj_id": "PROJECT", "pred_proj_id": "PROJECT", "orig_proj_id": "PROJ
           "parent_rsrc_id": "RSRC", "curr_id": "CURRTYPE", "fintmpl_id": "FINTMPL",
           "actv_code_type_id": "ACTVTYPE", "actv_code_id": "ACTVCODE",
           "parent_actv_code_id": "ACTVCODE", "udf_type_id": "UDFTYPE",
-          "task_id": "TASK", "pred_task_id": "TASK"}
+          "task_id": "TASK", "pred_task_id": "TASK", "memo_type_id": "MEMOTYPE", "cost_type_id": "COSTTYPE",
+          "role_id": "ROLES", "parent_role_id": "ROLES", "risk_type_id": "RISKTYPE",
+          "parent_risk_type_id": "RISKTYPE", "risk_id": "PROJRISK"}
 # UDFVALUE.fk_id points to the table named in UDFTYPE.table_name.
-UDF_FK_TABLES = {"PROJECT", "PROJWBS", "TASK", "RSRC", "TASKRSRC"}
+UDF_FK_TABLES = {"PROJECT", "PROJWBS", "TASK", "RSRC", "TASKRSRC", "PROJCOST", "TASKPROC", "PROJRISK"}
+# Memo columns (HTML text): stored as P6 stores them in a BLOB column (UTF-8 BOM, text, NUL).
+XER_MEMO_COLS = {"TASKMEMO": "task_memo", "TASKPROC": "proc_descr", "PROJCOST": "cost_descr", "ROLES": "role_descr",
+                 "PROJRISK": "risk_descr"}
+# Table names of other P6 versions read as ours (Oracle's XER data map spells the risks table PRORISK).
+XER_ALIASES = {"PRORISK": "PROJRISK"}
+# Tables added in 3.5.0 (notebooks, steps, expenses, roles, risks): skipped with a warning when this database lacks
+# them or their NEXTKEY counter (the 17 older tables are required).
+XER_DETAIL_TABLES = ("COSTTYPE", "MEMOTYPE", "RISKTYPE", "ROLES", "PROJRISK", "ROLERATE", "PROJCOST", "TASKMEMO",
+                     "TASKPROC", "TASKRISK")
+# Project rows with their own id matched on update by these columns (after id mapping), each database row once.
+XER_CHILD_KEYS = {"PROJRISK": ("proj_id", "risk_code"), "TASKMEMO": ("task_id", "memo_type_id"),
+                  "TASKPROC": ("task_id", "proc_name"), "PROJCOST": ("task_id", "cost_name")}
+# Ids a child row needs: without them it is skipped (skipped_unmapped).
+XER_CHILD_NEEDS = {"PROJRISK": ("proj_id",), "TASKMEMO": ("task_id", "memo_type_id"), "TASKPROC": ("task_id",),
+                   "PROJCOST": ("task_id",), "TASKRISK": ("task_id", "risk_id")}
 # Global rows (no proj_id) matched by name on import and reused: (key columns, query on those keys).
 XER_MATCH = {
     "CURRTYPE": (("curr_short_name",), "SELECT curr_id FROM CURRTYPE WHERE curr_short_name = ?"),
@@ -10756,7 +10795,16 @@ XER_MATCH = {
     "RSRC": (("rsrc_short_name",), "SELECT rsrc_id FROM RSRC WHERE rsrc_short_name = ?"),
     "ACTVTYPE": (("actv_code_type_scope", "actv_code_type"), "SELECT actv_code_type_id FROM ACTVTYPE WHERE "
                  "proj_id IS NULL AND actv_code_type_scope = ? AND actv_code_type = ?"),
+    "MEMOTYPE": (("memo_type",), "SELECT memo_type_id FROM MEMOTYPE WHERE memo_type = ?"),
+    "COSTTYPE": (("cost_type",), "SELECT cost_type_id FROM COSTTYPE WHERE cost_type = ?"),
+    "ROLES": (("role_short_name", "parent_role_id"),
+              "SELECT role_id FROM ROLES WHERE role_short_name = ? AND parent_role_id IS ?"),
+    "RISKTYPE": (("risk_type", "parent_risk_type_id"),
+                 "SELECT risk_type_id FROM RISKTYPE WHERE risk_type = ? AND parent_risk_type_id IS ?"),
 }
+# Hierarchical global tables matched under their parent: the parent column of the key is mapped first (a Role ID
+# is only unique under its parent role).
+XER_MATCH_PARENT = {"ROLES": "parent_role_id", "RISKTYPE": "parent_risk_type_id"}
 # Never copied from an XER row: set by triggers / this server, or meaningless across databases.
 XER_SKIP_COLS = {"create_date", "create_user", "update_date", "update_user",
                  "delete_session_id", "delete_date", "guid"}
@@ -10794,7 +10842,7 @@ def _xer_read_meta(path: str) -> tuple[list[str], dict[str, list[dict]], dict]:
     """XER file -> (header, tables, meta). A UTF-8 BOM is skipped; text is UTF-8, else cp1252
     (utf8_error_at = file offset of the first non UTF-8 byte). A repeated %T block adds to its
     table, %R lines before their %F are not read, and rows with more or fewer values than fields
-    are counted (missing values read as empty, extra ones dropped)."""
+    are counted (missing values read as empty, extra ones dropped). XER_ALIASES names are read as ours."""
     with open(path, "rb") as fh:
         raw = fh.read()
     bom = raw.startswith(b"\xef\xbb\xbf")
@@ -10815,6 +10863,7 @@ def _xer_read_meta(path: str) -> tuple[list[str], dict[str, list[dict]], dict]:
             header = line.split("\t")
         elif line.startswith("%T\t"):
             cur, fields = line[3:].strip(), None
+            cur = XER_ALIASES.get(cur, cur)
             blocks[cur] += 1
             tables.setdefault(cur, [])
         elif line.startswith("%F\t"):
@@ -10949,6 +10998,16 @@ def _xer_preflight(header: list[str], x: dict, meta: dict, xer_project: Optional
     pks = {t: ids(t) for t in UDF_FK_TABLES}
     add("info", "udf_values_unmapped", [f"{utab.get(v.get('udf_type_id'))} {v.get('fk_id')}" for v in x.get("UDFVALUE", [])
                                         if v.get("fk_id") not in pks.get(utab.get(v.get("udf_type_id")), ())], "skipped")
+    memo_types, risks = ids("MEMOTYPE"), ids("PROJRISK")
+    add("info", "activity_details_unmapped",
+        [f"{t} {r.get(XER_PK.get(t, 'risk_id'))}: task {r.get('task_id')}" for t in ("TASKMEMO", "TASKPROC", "PROJCOST",
+                                                                                   "TASKRISK")
+         for r in x.get(t, []) if r.get("task_id") not in task_ids]
+        + [f"TASKMEMO {r.get('memo_id')}: topic {r.get('memo_type_id')}" for r in x.get("TASKMEMO", [])
+           if r.get("task_id") in task_ids and r.get("memo_type_id") not in memo_types]
+        + [f"TASKRISK task {r.get('task_id')}: risk {r.get('risk_id')}" for r in x.get("TASKRISK", [])
+           if r.get("task_id") in task_ids and r.get("risk_id") not in risks],
+        "notebooks, steps, expenses or risk links of an activity, topic or risk not in the file: skipped")
     add("info", "project_baseline_not_imported", [] if xp.get("sum_base_proj_id") is None else [xp["sum_base_proj_id"]],
         "the project baseline link (sum_base_proj_id) is not carried over")
     add("info", "encoding", [] if meta.get("encoding") == "utf-8" else [
@@ -10956,8 +11015,12 @@ def _xer_preflight(header: list[str], x: dict, meta: dict, xer_project: Optional
     if con is None:
         out["note"] = "No database: dropped_columns, code lengths and db_preview not checked."
         return out
+    absent = [t for t in XER_TABLES if x.get(t) and (not _cols(con, t) or (
+        t in XER_DETAIL_TABLES and t in XER_PK and not _has_next_key(con, t, XER_PK[t])))]
+    add("warnings", "tables_not_in_database", [f"{t}: {len(x[t])} rows" for t in absent],
+        "this database has no such table (or no NEXTKEY counter for it): the rows are not imported")
     out["dropped_columns"] = {t: sorted(fields[t] - _cols(con, t)) for t in XER_TABLES
-                              if fields.get(t) and fields[t] - _cols(con, t)}
+                              if fields.get(t) and _cols(con, t) and fields[t] - _cols(con, t)}
     long = []
     for key, rows, col in (("task_code_len", tasks, "task_code"), ("proj_short_len", [xp], "proj_short_name"),
                            ("wbs_short_len", [w for w in wbs if w.get("wbs_id") not in node_ids], "wbs_short_name"),
@@ -10970,12 +11033,39 @@ def _xer_preflight(header: list[str], x: dict, meta: dict, xer_project: Optional
                                           (xp["proj_short_name"],)).fetchone() is not None
     if preview:
         out["db_preview"] = {}
-        for t, (keys, sql) in XER_MATCH.items():
+        for t in XER_MATCH:
             rows = [r for r in x.get(t, []) if r.get("proj_id") is None]
-            if rows:
-                hit = sum(1 for r in rows if con.execute(sql + _alive(con, t), [r.get(k) for k in keys]).fetchone())
+            if rows and t not in absent:
+                hit = len(_preview_matches(con, t, rows))
                 out["db_preview"][t] = {"matched": hit, "would_create": len(rows) - hit}
     return out
+
+
+def _preview_matches(con, table: str, rows: list[dict]) -> dict:
+    """{xer id: database id} of the global rows an import would match (XER_MATCH), without writing. Under
+    XER_MATCH_PARENT a row matches only when its parent does (a new parent has no children yet)."""
+    keys, sql = XER_MATCH[table]
+    par, pk = XER_MATCH_PARENT.get(table), XER_PK[table]
+    xids = {r.get(pk) for r in rows}
+    found: dict = {}
+    done: set = set()
+    pending = list(rows)
+    while pending:
+        later = [r for r in pending if par and r.get(par) in xids and r.get(par) not in done and r.get(par) != r.get(pk)]
+        for r in pending:
+            if any(r is q for q in later):
+                continue
+            done.add(r.get(pk))
+            if par and r.get(par) in xids and r.get(par) not in found:
+                continue  # the parent would be created
+            vals = [found.get(r.get(k)) if k == par else r.get(k) for k in keys]
+            hit = con.execute(sql + _alive(con, table), vals).fetchone()
+            if hit:
+                found[r.get(pk)] = hit[0]
+        if len(later) == len(pending):  # parent cycle: the rest would be created
+            break
+        pending = later
+    return found
 
 
 def _insert(con, table: str, row: dict) -> None:
@@ -11026,7 +11116,49 @@ class _XerImport:
             elif k.endswith("_id") and k != "fk_id":
                 v = None
             out[k] = v
+        memo = XER_MEMO_COLS.get(table)
+        if isinstance(out.get(memo), str) and _col_type(self.con, table, memo) == "BLOB":
+            out[memo] = _memo_blob(out[memo])
         return out
+
+    def can(self, table: str) -> bool:
+        """True when this database can take the rows of table: the table exists and, for a table with its own
+        id, NEXTKEY has its counter. Otherwise its rows are skipped with one warning."""
+        if not _cols(self.con, table):
+            why = "is not in this database"
+        elif table in XER_PK and not _has_next_key(self.con, table, XER_PK[table]):
+            why = "has no NEXTKEY counter in this database"
+        else:
+            return True
+        if self.x.get(table):
+            self.warnings.append(f"{table} {why}: {len(self.x[table])} XER row(s) not imported.")
+            self.count(table, "skipped_unmapped", 0)
+        return False
+
+    def children(self, table: str, rows: list[dict]) -> None:
+        """Project rows with their own id (risks, notebooks, steps, expenses): ids mapped, then in update mode
+        matched on XER_CHILD_KEYS (each database row once, lowest id first) and updated, else inserted. A row
+        whose XER_CHILD_NEEDS ids do not map is skipped_unmapped."""
+        if not rows or not self.can(table):
+            return
+        pk, keys, used = XER_PK[table], XER_CHILD_KEYS[table], set()
+        for r in rows:
+            row = self.prep(table, r)
+            if any(row.get(c) is None for c in XER_CHILD_NEEDS[table]):
+                self.count(table, "skipped_unmapped")
+                continue
+            hit = None
+            if self.mode == "update":
+                where = " AND ".join(f"{c} IS ?" for c in keys)
+                hit = next((h[0] for h in self.con.execute(
+                    f"SELECT {pk} FROM {table} WHERE {where}" + _alive(self.con, table) + f" ORDER BY {pk}",
+                    [row.get(c) for c in keys]) if h[0] not in used), None)
+            if hit:
+                self.upd_row(table, hit, r)
+            else:
+                hit = self.new_row(table, r)
+            self.idmap[table][r.get(pk)] = hit
+            used.add(hit)
 
     def new_row(self, table: str, xrow: dict, extra: Optional[dict] = None) -> int:
         row = self.prep(table, xrow)
@@ -11122,7 +11254,26 @@ class _XerImport:
 
     def match_global(self, table: str, rows: list[dict], parent_col: Optional[str] = None) -> None:
         keys, sql = XER_MATCH[table]
-        self.match_or_create(table, rows, lambda r: [r.get(k) for k in keys], sql, parent_col)
+        par = XER_MATCH_PARENT.get(table)  # matched under the parent the import mapped (None at the top)
+
+        def key(r):
+            return [self.idmap[table].get(r.get(k)) if k == par else r.get(k) for k in keys]
+        self.match_or_create(table, rows, key, sql, parent_col or par)
+
+
+def _col_type(con, table: str, col: str) -> Optional[str]:
+    """Declared type of a column, upper case (None when the column does not exist)."""
+    return next((str(r[2]).upper() for r in con.execute(f"PRAGMA table_info({table})") if r[1].lower() == col), None)
+
+
+def _memo_blob(text: str) -> bytes:
+    """Memo text as P6 stores it in a BLOB column: UTF-8 with a BOM, then a NUL (_blob_text reads it back)."""
+    return b"\xef\xbb\xbf" + text.encode("utf-8") + b"\x00"
+
+
+def _has_next_key(con, table: str, id_col: str) -> bool:
+    return con.execute("SELECT 1 FROM NEXTKEY WHERE lower(key_name) = lower(?)", (f"{table}_{id_col}",)).fetchone() \
+        is not None
 
 
 def _import_target(con, mode: str, project: Optional[str], xp: dict) -> Optional[dict]:
@@ -11242,8 +11393,11 @@ def p6_import_xer(
     dry run sets would_refuse and refuse_reasons (it imports nothing when the XER has no project WBS
     node). The target of update and baseline must be a project, not an EPS node. data_date shows
     database -> XER.
-    Global data (currencies, OBS, UDF types, calendars, resources, code types and codes) is matched
-    by name and reused; missing items are created. Resource rates are only imported for new resources.
+    Global data (currencies, OBS, UDF types, calendars, resources, code types and codes, notebook
+    topics, expense categories, roles and risk types) is matched by name and reused; missing items
+    are created. Resource and role rates are only imported for new resources and roles. Notebooks,
+    steps, expenses and risks are imported with the activities (update mode: matched by activity and
+    topic, step name, expense name or Risk ID; the ones missing from the XER are kept).
     xer_project selects the project when the XER contains several. Press F9 in P6 afterwards."""
     if mode not in get_args(ImportMode):
         raise ValueError("mode must be new, update or baseline")
@@ -11329,6 +11483,9 @@ def p6_import_xer(
         imp.match_global("FINTMPL", x.get("FINTMPL", []))
         imp.match_global("OBS", x.get("OBS", []), parent_col="parent_obs_id")
         imp.match_global("UDFTYPE", x.get("UDFTYPE", []))
+        for t in ("MEMOTYPE", "COSTTYPE", "ROLES", "RISKTYPE"):  # notebook topics, expense categories, roles
+            if x.get(t) and imp.can(t):
+                imp.match_global(t, x[t])
 
         # ---- project id first: project calendars and code types belong to it
         if mode == "update":
@@ -11385,11 +11542,12 @@ def p6_import_xer(
                                        imp.idmap["ACTVCODE"].get(r.get("parent_actv_code_id"))),
                             "SELECT actv_code_id FROM ACTVCODE WHERE actv_code_type_id = ? AND short_name = ? "
                             "AND parent_actv_code_id IS ?", parent_col="parent_actv_code_id")
-        for r in x.get("RSRCRATE", []):
-            if r.get("rsrc_id") in imp.created["RSRC"]:
-                imp.new_row("RSRCRATE", r)
-            else:
-                imp.count("RSRCRATE", "kept_existing")
+        for t, owner, col in (("RSRCRATE", "RSRC", "rsrc_id"), ("ROLERATE", "ROLES", "role_id")):
+            for r in (x.get(t, []) if t == "RSRCRATE" or imp.can(t) else []):  # rates of new resources and roles
+                if r.get(col) in imp.created[owner]:
+                    imp.new_row(t, r)
+                else:
+                    imp.count(t, "kept_existing")
 
         # ---- WBS: project node maps to the project node, others matched by path in update mode
         wbs = x.get("PROJWBS", [])
@@ -11504,6 +11662,17 @@ def p6_import_xer(
                 asg_ix.setdefault((task, rsrc), []).append(hit)
             used.add(hit)
         imp.flush()
+
+        # ---- risks, notebooks, steps and expenses (before the UDF values that may point to them)
+        for t in ("PROJRISK", "TASKMEMO", "TASKPROC", "PROJCOST"):
+            imp.children(t, x.get(t, []))
+        if x.get("TASKRISK") and imp.can("TASKRISK"):
+            for r in x["TASKRISK"]:
+                row = imp.prep("TASKRISK", r)
+                if any(row.get(c) is None for c in XER_CHILD_NEEDS["TASKRISK"]):
+                    imp.count("TASKRISK", "skipped_unmapped")
+                    continue
+                _upsert(imp, "TASKRISK", row, ("task_id", "risk_id"))
 
         # ---- activity code assignments and UDF values (upsert on their composite keys)
         # keys present (soft-deleted rows too: an upsert revives them); rows of other activities checked one by one
@@ -11670,9 +11839,15 @@ def p6_export_xer(project: ProjectId, path: str, tables: Optional[list[XerTable]
     """Export one project to an XER file (read only on the database). An existing file is refused
     unless overwrite=True.
     tables: which XER tables to write, any of
-      CURRTYPE, FINTMPL, OBS, UDFTYPE, PROJECT, CALENDAR, SCHEDOPTIONS, PROJWBS, RSRC, ACTVTYPE,
-      RSRCRATE, TASK, ACTVCODE, TASKPRED, TASKRSRC, TASKACTV, UDFVALUE (default: all).
-    Global data is limited to what the project uses (calendars, resources, codes, UDF types, OBS).
+      COSTTYPE, CURRTYPE, FINTMPL, MEMOTYPE, OBS, RISKTYPE, ROLES, UDFTYPE, PROJECT, CALENDAR,
+      SCHEDOPTIONS, PROJWBS, RSRC, ACTVTYPE, PROJRISK, ROLERATE, RSRCRATE, TASK, ACTVCODE, PROJCOST,
+      TASKMEMO, TASKPRED, TASKPROC, TASKRSRC, TASKACTV, TASKRISK, UDFVALUE (default: all; a table
+      this database lacks is skipped with a warning).
+    Activity notebooks (TASKMEMO, topics in MEMOTYPE), steps (TASKPROC), expenses (PROJCOST,
+    categories in COSTTYPE), roles (ROLES, ROLERATE) and risks (RISKTYPE, PROJRISK, TASKRISK) are
+    written with the activities.
+    Global data is limited to what the project uses (calendars, resources, roles, codes, UDF types,
+    OBS, notebook topics, expense categories, risk types).
     SCHEDOPTIONS carries the project's schedule options (skipped with a warning when none are stored).
     xer_version: version written in the header (default: this database's P6 version); lower it
     when the file must be imported into an older P6."""
@@ -11705,12 +11880,30 @@ def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[s
     pid = _project_id(con, project)
     al = lambda t: _alive(con, t)  # noqa: E731
     one = lambda sql: {r[0] for r in con.execute(sql) if r[0] is not None}  # noqa: E731
+    has = lambda t, *c: set(c) <= _cols(con, t)  # noqa: E731  (tables and columns vary between P6 versions)
+
+    def tree(table: str, pk: str, parent: str, start: set) -> set:
+        """start plus the parents of its rows (roles, risk types)."""
+        got = set(start)
+        while has(table, pk, parent):
+            more = one(f"SELECT {parent} FROM {table} WHERE {pk} IN {_ids_sql(got)}") - got
+            if not more:
+                break
+            got |= more
+        return got
 
     tasks = one(f"SELECT task_id FROM TASK WHERE proj_id = {pid}{al('TASK')}")
     trsrc = one(f"SELECT taskrsrc_id FROM TASKRSRC WHERE proj_id = {pid}{al('TASKRSRC')}")
     wbs = one(f"SELECT wbs_id FROM PROJWBS WHERE proj_id = {pid}{al('PROJWBS')}")
+    risks = one(f"SELECT risk_id FROM PROJRISK WHERE proj_id = {pid}{al('PROJRISK')}") \
+        if has("PROJRISK", "risk_id", "proj_id") else set()
+    steps = one(f"SELECT proc_id FROM TASKPROC WHERE task_id IN {_ids_sql(tasks)}{al('TASKPROC')}") \
+        if has("TASKPROC", "proc_id", "task_id") else set()
+    costs = one(f"SELECT cost_item_id FROM PROJCOST WHERE proj_id = {pid}{al('PROJCOST')}") \
+        if has("PROJCOST", "cost_item_id", "proj_id") else set()
     rsrc = one(f"SELECT rsrc_id FROM TASKRSRC WHERE proj_id = {pid}{al('TASKRSRC')}") | \
-        one(f"SELECT rsrc_id FROM TASK WHERE proj_id = {pid}{al('TASK')}")
+        one(f"SELECT rsrc_id FROM TASK WHERE proj_id = {pid}{al('TASK')}") | \
+        (one(f"SELECT rsrc_id FROM PROJRISK WHERE risk_id IN {_ids_sql(risks)}") if has("PROJRISK", "rsrc_id") else set())
     while True:  # parents of used resources
         more = one(f"SELECT parent_rsrc_id FROM RSRC WHERE rsrc_id IN {_ids_sql(rsrc)}") - rsrc
         if not more: break
@@ -11730,10 +11923,20 @@ def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[s
         more = one(f"SELECT parent_obs_id FROM OBS WHERE obs_id IN {_ids_sql(obs)}") - obs
         if not more: break
         obs |= more
+    roles = tree("ROLES", "role_id", "parent_role_id",
+                 (one(f"SELECT role_id FROM TASKRSRC WHERE proj_id = {pid}{al('TASKRSRC')}")
+                  if has("TASKRSRC", "role_id") else set())
+                 | (one(f"SELECT role_id FROM RSRC WHERE rsrc_id IN {_ids_sql(rsrc)}") if has("RSRC", "role_id") else set()))
+    risk_types = tree("RISKTYPE", "risk_type_id", "parent_risk_type_id",
+                      one(f"SELECT risk_type_id FROM PROJRISK WHERE risk_id IN {_ids_sql(risks)}")
+                      if has("PROJRISK", "risk_type_id") else set())
     udf_where = (f"(u.table_name = 'TASK' AND v.fk_id IN {_ids_sql(tasks)}) OR "
                  f"(u.table_name = 'PROJWBS' AND v.fk_id IN {_ids_sql(wbs)}) OR "
                  f"(u.table_name = 'TASKRSRC' AND v.fk_id IN {_ids_sql(trsrc)}) OR "
                  f"(u.table_name = 'RSRC' AND v.fk_id IN {_ids_sql(rsrc)}) OR "
+                 f"(u.table_name = 'TASKPROC' AND v.fk_id IN {_ids_sql(steps)}) OR "
+                 f"(u.table_name = 'PROJCOST' AND v.fk_id IN {_ids_sql(costs)}) OR "
+                 f"(u.table_name = 'PROJRISK' AND v.fk_id IN {_ids_sql(risks)}) OR "
                  f"(u.table_name = 'PROJECT' AND v.fk_id = {pid})")
     udf_types = one(f"SELECT v.udf_type_id FROM UDFVALUE v JOIN UDFTYPE u ON u.udf_type_id = v.udf_type_id "
                     f"WHERE {udf_where}")
@@ -11755,6 +11958,18 @@ def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[s
         "TASKRSRC": f"proj_id = {pid}",
         "TASKACTV": f"task_id IN {_ids_sql(tasks)}",
         "UDFVALUE": f"EXISTS (SELECT 1 FROM UDFTYPE u WHERE u.udf_type_id = v.udf_type_id AND ({udf_where}))",
+        "MEMOTYPE": f"memo_type_id IN (SELECT memo_type_id FROM TASKMEMO WHERE task_id IN {_ids_sql(tasks)})"
+                    if has("TASKMEMO", "memo_type_id", "task_id") else "0=1",
+        "TASKMEMO": f"task_id IN {_ids_sql(tasks)}",
+        "TASKPROC": f"proc_id IN {_ids_sql(steps)}",
+        "COSTTYPE": f"cost_type_id IN (SELECT cost_type_id FROM PROJCOST WHERE cost_item_id IN {_ids_sql(costs)})"
+                    if has("PROJCOST", "cost_type_id") else "0=1",
+        "PROJCOST": f"cost_item_id IN {_ids_sql(costs)}",
+        "ROLES": f"role_id IN {_ids_sql(roles)}",
+        "ROLERATE": f"role_id IN {_ids_sql(roles)}",
+        "RISKTYPE": f"risk_type_id IN {_ids_sql(risk_types)}",
+        "PROJRISK": f"risk_id IN {_ids_sql(risks)}",
+        "TASKRISK": f"task_id IN {_ids_sql(tasks)} AND risk_id IN {_ids_sql(risks)}",
     }
     if xer_version is None:
         try:
@@ -11809,7 +12024,9 @@ def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[s
                     f"(first: {', '.join(keys[:10])}).")
     deps = {"TASK": ["PROJWBS", "CALENDAR"], "TASKPRED": ["TASK"], "TASKRSRC": ["TASK", "RSRC"],
             "TASKACTV": ["TASK", "ACTVTYPE", "ACTVCODE"], "UDFVALUE": ["UDFTYPE"],
-            "PROJWBS": ["PROJECT"], "RSRCRATE": ["RSRC"], "ACTVCODE": ["ACTVTYPE"]}
+            "PROJWBS": ["PROJECT"], "RSRCRATE": ["RSRC"], "ACTVCODE": ["ACTVTYPE"],
+            "TASKMEMO": ["TASK", "MEMOTYPE"], "TASKPROC": ["TASK"], "PROJCOST": ["TASK", "COSTTYPE"],
+            "ROLERATE": ["ROLES"], "PROJRISK": ["RISKTYPE"], "TASKRISK": ["TASK", "PROJRISK"]}
     for t, needs in deps.items():
         miss = [n for n in needs if t in tables and n not in tables]
         if miss:

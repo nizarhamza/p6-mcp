@@ -126,7 +126,7 @@ def build(paths: Sequence[str], dest: str) -> dict:
             offset = k * ID_STEP
             info = {"path": os.path.abspath(path), "xer_version": header[1] if len(header) > 1 else None,
                     "id_offset": offset, "projects": [], "rows": {}, "warnings": []}
-            fields = xer_fields(path)
+            fields = {s.XER_ALIASES.get(t, t): f for t, f in xer_fields(path).items()}
             for t in [t for t in fields if t not in tables]:  # tables without rows keep their columns
                 tables[t] = []
             for t, rows in tables.items():
