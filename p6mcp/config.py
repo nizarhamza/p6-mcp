@@ -46,6 +46,7 @@ DEFAULTS: dict[str, Any] = {
     "xer_files": [],              # XER-only mode: the files loaded together (two updates to compare...)
     "xer_confirmed": False,       # the files were loaded and checked in the Settings app
     "eppm_profiles": [],          # P6 EPPM servers [{name, base_url, context, database, user, auth, ca_bundle,
+                                  #   proxy (system/none/custom), proxy_url, proxy_user,
                                   #   timeout_s, sql {driver, host, port, service, user, schema, table_prefix}
                                   #   or null, confirmed, tested_at, ...}]; passwords in the Credential Manager
     "eppm_active": None,          # name of the active entry of eppm_profiles (data_source eppm)
@@ -341,6 +342,7 @@ def _check_eppm(out: dict) -> list[str]:
             errs.append(f"{at}.auth must be one of {list(EPPM_AUTH)}")
         if p.get("ca_bundle") is not None and not _text(p.get("ca_bundle"), empty_ok=True):
             errs.append(f"{at}.ca_bundle must be the path of a certificate file or null")
+        errs += _check_proxy(p, at)
         t = p.get("timeout_s", 120)
         if not isinstance(t, int) or isinstance(t, bool) or not 5 <= t <= 900:
             errs.append(f"{at}.timeout_s must be a whole number of seconds between 5 and 900")
@@ -367,6 +369,26 @@ def _check_eppm(out: dict) -> list[str]:
     act = out["eppm_active"]
     if act is not None and act not in names:
         errs.append(f"eppm_active {act!r} is not in eppm_profiles")
+    return errs
+
+
+def _check_proxy(p: dict, at: str) -> list[str]:
+    """proxy (system, none or custom), proxy_url (http://host:port, never with a user or a password) and
+    proxy_user of a P6 EPPM server profile (p6mcp/eppm/proxy.py)."""
+    from p6mcp.eppm import proxy
+    errs = []
+    mode = p.get("proxy", "system")
+    if mode not in proxy.MODES:
+        errs.append(f"{at}.proxy must be one of {list(proxy.MODES)}")
+    url = p.get("proxy_url")
+    if url not in (None, ""):
+        why = proxy.check_url(url)
+        if why:
+            errs.append(f"{at}.proxy_url: {why}")
+    elif mode == "custom":
+        errs.append(f"{at}.proxy_url must be set when proxy is custom (http://host:port)")
+    if p.get("proxy_user") is not None and not _text(p.get("proxy_user"), empty_ok=True):
+        errs.append(f"{at}.proxy_user must be text or null")
     return errs
 
 

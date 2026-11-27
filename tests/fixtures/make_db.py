@@ -93,8 +93,9 @@ SCHEMA = {
         ("delete_session_id", "INTEGER"), ("delete_date", "TEXT"),
     ],
     "ROLES": [
-        ("role_id", "INTEGER PRIMARY KEY"), ("seq_num", "INTEGER"), ("role_short_name", "TEXT"),
-        ("create_date", "TEXT"), ("create_user", "TEXT"), ("update_date", "TEXT"), ("update_user", "TEXT"),
+        ("role_id", "INTEGER PRIMARY KEY"), ("parent_role_id", "INTEGER"), ("seq_num", "INTEGER"),
+        ("role_short_name", "TEXT"), ("role_name", "TEXT"), ("role_descr", "BLOB"), ("create_date", "TEXT"),
+        ("create_user", "TEXT"), ("update_date", "TEXT"), ("update_user", "TEXT"),
         ("delete_session_id", "INTEGER"), ("delete_date", "TEXT"),
     ],
     "TASKRSRC": [
@@ -136,8 +137,9 @@ SCHEMA = {
         ("delete_session_id", "INTEGER"), ("delete_date", "TEXT"),
     ],
     "MEMOTYPE": [
-        ("memo_type_id", "INTEGER PRIMARY KEY"), ("seq_num", "INTEGER"), ("memo_type", "TEXT"),
-        ("create_date", "TEXT"), ("create_user", "TEXT"), ("update_date", "TEXT"), ("update_user", "TEXT"),
+        ("memo_type_id", "INTEGER PRIMARY KEY"), ("seq_num", "INTEGER"), ("eps_flag", "TEXT"), ("proj_flag", "TEXT"),
+        ("wbs_flag", "TEXT"), ("task_flag", "TEXT"), ("memo_type", "TEXT"), ("create_date", "TEXT"),
+        ("create_user", "TEXT"), ("update_date", "TEXT"), ("update_user", "TEXT"),
         ("delete_session_id", "INTEGER"), ("delete_date", "TEXT"),
     ],
     "TASKMEMO": [
@@ -156,6 +158,25 @@ _STAMPS = [("create_date", "TEXT"), ("create_user", "TEXT"), ("update_date", "TE
 SCHEMA["FINTMPL"] = [("fintmpl_id", "INTEGER PRIMARY KEY"), ("fintmpl_name", "TEXT")] + _STAMPS
 SCHEMA["RSRCRATE"] = [("rsrc_rate_id", "INTEGER PRIMARY KEY"), ("rsrc_id", "INTEGER"),
                       ("cost_per_qty", "REAL")] + _STAMPS
+# Activity steps, expenses, role prices and risks (XER round trip, 3.5.0)
+SCHEMA["TASKPROC"] = [("proc_id", "INTEGER PRIMARY KEY"), ("task_id", "INTEGER"), ("proj_id", "INTEGER"),
+                      ("seq_num", "INTEGER"), ("proc_name", "TEXT"), ("complete_flag", "TEXT"), ("proc_wt", "REAL"),
+                      ("complete_pct", "REAL"), ("proc_descr", "BLOB")] + _STAMPS
+SCHEMA["COSTTYPE"] = [("cost_type_id", "INTEGER PRIMARY KEY"), ("seq_num", "INTEGER"), ("cost_type", "TEXT")] + _STAMPS
+SCHEMA["PROJCOST"] = [("cost_item_id", "INTEGER PRIMARY KEY"), ("acct_id", "INTEGER"), ("cost_type_id", "INTEGER"),
+                      ("proj_id", "INTEGER"), ("task_id", "INTEGER"), ("cost_name", "TEXT"), ("po_number", "TEXT"),
+                      ("vendor_name", "TEXT"), ("act_cost", "REAL"), ("cost_per_qty", "REAL"), ("remain_cost", "REAL"),
+                      ("target_cost", "REAL"), ("cost_load_type", "TEXT"), ("auto_compute_act_flag", "TEXT"),
+                      ("target_qty", "REAL"), ("qty_name", "TEXT"), ("cost_descr", "BLOB")] + _STAMPS
+SCHEMA["ROLERATE"] = [("role_rate_id", "INTEGER PRIMARY KEY"), ("role_id", "INTEGER"), ("cost_per_qty", "REAL"),
+                      ("start_date", "TEXT"), ("max_qty_per_hr", "REAL")] + _STAMPS
+SCHEMA["RISKTYPE"] = [("risk_type_id", "INTEGER PRIMARY KEY"), ("seq_num", "INTEGER"), ("risk_type", "TEXT"),
+                      ("parent_risk_type_id", "INTEGER")] + _STAMPS
+SCHEMA["PROJRISK"] = [("risk_id", "INTEGER PRIMARY KEY"), ("risk_code", "TEXT"), ("proj_id", "INTEGER"),
+                      ("status_code", "TEXT"), ("risk_name", "TEXT"), ("risk_type_id", "INTEGER"),
+                      ("rsrc_id", "INTEGER"), ("identified_by_id", "INTEGER"),
+                      ("risk_desc", "TEXT"), ("risk_descr", "BLOB")] + _STAMPS
+SCHEMA["TASKRISK"] = [("task_id", "INTEGER"), ("risk_id", "INTEGER"), ("proj_id", "INTEGER")] + _STAMPS
 
 STAMP = "2026-01-05 09:00:00"
 DATA_DATE = "2026-03-02 08:00:00"
@@ -187,6 +208,11 @@ ACTIVITIES = [
 ]
 LINKS = [(201, 102, 101), (202, 103, 102), (203, 104, 103), (204, 105, 104), (205, 106, 105), (206, 107, 101),
          (207, 104, 107)]  # task_pred_id, successor, predecessor (FS, no lag)
+
+
+def memo(text: str) -> bytes:
+    """Memo text as P6 stores it in a BLOB: UTF-8 BOM, the HTML, a NUL."""
+    return b"\xef\xbb\xbf" + text.encode("utf-8") + b"\x00"
 
 
 def _insert(con, table, **values):
@@ -243,9 +269,44 @@ def build(path: str) -> str:
     for pid, succ, pred in LINKS:
         _insert(con, "TASKPRED", task_pred_id=pid, task_id=succ, pred_task_id=pred, proj_id=2, pred_proj_id=2,
                 pred_type="PR_FS", lag_hr_cnt=0)
+    # notebooks (one BLOB as P6 writes them, one TEXT), steps, expenses, roles and risks of DEMO-A
+    for mid, name in ((1, "Scope"), (2, "Site notes")):
+        _insert(con, "MEMOTYPE", memo_type_id=mid, seq_num=mid, eps_flag="Y", proj_flag="Y", wbs_flag="Y",
+                task_flag="Y", memo_type=name)
+    _insert(con, "TASKMEMO", memo_id=1, task_id=102, memo_type_id=1, proj_id=2,
+            task_memo=memo('<html><body>Design "basis" v2\n<p>Two lines &amp; a quote</p></body></html>'))
+    _insert(con, "TASKMEMO", memo_id=2, task_id=104, memo_type_id=2, proj_id=2,
+            task_memo="<p>Access by the north gate</p>")
+    for sid, seq, name, done, wt, descr in ((1, 10, "Concept", "Y", 1.0, memo("<p>Agreed with the client</p>")),
+                                            (2, 20, "Detail", "N", 2.0, None), (3, 30, "Approval", "N", 1.0, None)):
+        _insert(con, "TASKPROC", proc_id=sid, task_id=102, proj_id=2, seq_num=seq, proc_name=name, complete_flag=done,
+                proc_wt=wt, complete_pct=100.0 if done == "Y" else 0.0, proc_descr=descr)
+    for cid, name in ((1, "Materials"), (2, "Travel")):
+        _insert(con, "COSTTYPE", cost_type_id=cid, seq_num=cid, cost_type=name)
+    _insert(con, "PROJCOST", cost_item_id=1, cost_type_id=1, proj_id=2, task_id=103, cost_name="Switchgear", acct_id=99,
+            po_number="PO-17", vendor_name="Vendor A", act_cost=0.0, cost_per_qty=2500.0, remain_cost=10000.0,
+            target_cost=10000.0, cost_load_type="CL_Uniform", auto_compute_act_flag="N", target_qty=4.0, qty_name="ea",
+            cost_descr=memo("<p>Four panels</p>"))
+    _insert(con, "PROJCOST", cost_item_id=2, cost_type_id=2, proj_id=2, task_id=104, cost_name="Site visits",
+            act_cost=0.0, cost_per_qty=0.0, remain_cost=800.0, target_cost=800.0, cost_load_type="CL_End",
+            auto_compute_act_flag="N", target_qty=0.0)
+    for rid, parent, short, name in ((1, None, "ENG", "Engineers"), (2, 1, "LEAD", "Lead engineer"),
+                                     (3, None, "LEAD", "Site lead")):  # the Role ID LEAD twice, under other parents
+        _insert(con, "ROLES", role_id=rid, parent_role_id=parent, seq_num=rid, role_short_name=short, role_name=name)
+    _insert(con, "ROLERATE", role_rate_id=1, role_id=2, cost_per_qty=95.0, start_date="2026-01-01 00:00:00",
+            max_qty_per_hr=1.0)
+    _insert(con, "RISKTYPE", risk_type_id=1, seq_num=1, risk_type="Technical", parent_risk_type_id=None)
+    _insert(con, "RISKTYPE", risk_type_id=2, seq_num=2, risk_type="Design", parent_risk_type_id=1)
+    _insert(con, "PROJRISK", risk_id=1, risk_code="R-01", proj_id=2, status_code="RS_Open",
+            risk_name="Late design data", risk_type_id=2, risk_desc="Vendor drawings late",
+            risk_descr=memo("<p>Watch list</p>"))
+    _insert(con, "TASKRISK", task_id=104, risk_id=1, proj_id=2)
     for key, n in (("project_proj_id", 10), ("projwbs_wbs_id", 50), ("task_task_id", 200),
                    ("taskpred_task_pred_id", 300), ("calendar_clndr_id", 10), ("rsrc_rsrc_id", 10),
-                   ("taskrsrc_taskrsrc_id", 10)):
+                   ("taskrsrc_taskrsrc_id", 10), ("memotype_memo_type_id", 10), ("taskmemo_memo_id", 10),
+                   ("taskproc_proc_id", 10), ("costtype_cost_type_id", 10), ("projcost_cost_item_id", 10),
+                   ("roles_role_id", 10), ("rolerate_role_rate_id", 10), ("risktype_risk_type_id", 10),
+                   ("projrisk_risk_id", 10)):
         _insert(con, "NEXTKEY", key_name=key, key_seq_num=n)
     con.commit()
     con.close()

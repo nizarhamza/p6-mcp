@@ -9,6 +9,9 @@ Authentication (measured on P6 EPPM 25.12 on premises, docs/EPPM_PLAN.md section
 
 Answers are JSON; numbers arrive as strings ("80.0"). Errors become EppmError (a ValueError) with a message for
 the user that never contains the password.
+
+Proxy: the profile's `proxy` setting (eppm/proxy.py: the Windows or environment proxy by default, none, or a proxy URL
+of the profile), decided once per session for its one host; a loopback server is never proxied.
 """
 
 from __future__ import annotations
@@ -24,6 +27,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Callable, Optional
+
+from p6mcp.eppm import proxy as _proxy
 
 DEFAULT_CONTEXT = "p6ws"
 TOKEN_LIFETIME_S = 3600
@@ -70,9 +75,12 @@ class Session:
     def __init__(self, base_url: str, user: str, password: str, database: str = "", auth: str = "auto",
                  context: str = DEFAULT_CONTEXT, ca_bundle: Optional[str] = None, timeout_s: int = 120,
                  opener: Optional[urllib.request.OpenerDirector] = None,
-                 lock_check: Optional[Callable[[], str]] = None):
+                 lock_check: Optional[Callable[[], str]] = None, proxy: Optional[dict] = None,
+                 proxy_password: Optional[str] = None):
         """lock_check: called when a sign-in looks refused for a locked account; returns a sentence to add (the
-        read-only SQL account's count of failed sign-ins, eppm.lock_check) or ''. It must never raise."""
+        read-only SQL account's count of failed sign-ins, eppm.lock_check) or ''. It must never raise.
+        proxy: the profile's proxy settings (proxy, proxy_url, proxy_user: eppm/proxy.py), proxy_password the
+        proxy user's password. An opener given (tests) is used as it is."""
         if not (user or "").strip():
             raise EppmError("No user name: enter the P6 user of this server.")
         if not password:
@@ -81,11 +89,16 @@ class Session:
         self.rest, self.token_url = root + "/restapi", root + "/oauth/token"
         self.user, self.database, self.timeout = user, database or "", timeout_s
         self.mode = auth_mode(base_url, auth)
-        self._pw = password
+        self._pw, self._proxy_pw = password, proxy_password or ""
         self._b64 = base64.b64encode(f"{user}:{password}".encode()).decode()
         self.jar = http.cookiejar.CookieJar()
+        self.proxy = _proxy.resolve(base_url, proxy)
+        if self.proxy["mode"] == "custom" and not self.proxy["url"] and not self.proxy["bypassed"]:
+            raise EppmError("The proxy is set to 'This proxy' without an address: enter the proxy address "
+                            "(http://host:port) in the server settings, or choose another proxy setting.")
         self.opener = opener or urllib.request.build_opener(
-            urllib.request.HTTPSHandler(context=_ssl_context(ca_bundle)), urllib.request.HTTPCookieProcessor(self.jar))
+            urllib.request.HTTPSHandler(context=_ssl_context(ca_bundle)), urllib.request.HTTPCookieProcessor(self.jar),
+            _proxy.handler(self.proxy, proxy_password))
         self.bearer: Optional[str] = None
         self.bearer_until = 0.0
         self.signed_in = False
@@ -114,14 +127,27 @@ class Session:
             raise EppmError(f"Secure connection to the server failed ({e.reason or e}). If your company uses its "
                             "own certificates, set the certificate file of this server.") from e
         except (urllib.error.URLError, TimeoutError, OSError) as e:
-            reason = getattr(e, "reason", e)
-            raise EppmError(f"The server cannot be reached: {self._clean(str(reason))}") from e
+            reason = self._clean(str(getattr(e, "reason", e)))
+            if self.proxy.get("url"):
+                if "407" in reason:  # an https tunnel the proxy refused
+                    raise EppmError(self._proxy_refused()) from e
+                raise EppmError(f"The server cannot be reached through the proxy {self.proxy['url']} "
+                                f"({self.proxy['source']}): {reason}. Check the proxy setting of this server.") from e
+            raise EppmError(f"The server cannot be reached: {reason}") from e
+        if status == 407:  # plain http through the proxy: the proxy itself answers
+            raise EppmError(self._proxy_refused())
         self.calls.append({"name": name or method, "method": method, "status": status,
                            "ms": round((time.perf_counter() - t0) * 1000)})
         return status, raw
 
+    def _proxy_refused(self) -> str:
+        return (f"The proxy {self.proxy.get('url')} refused the call (HTTP 407, proxy sign-in required)"
+                + (": check the proxy user and password of this server." if self.proxy.get("user") else
+                   ": enter the proxy user and password in the server settings.")
+                + " Only Basic proxy sign-in is supported (not NTLM or Kerberos).")
+
     def _clean(self, text: str) -> str:
-        for s in (self._pw, self._b64):
+        for s in (self._pw, self._b64, self._proxy_pw):
             if s:
                 text = text.replace(s, "***")
         return text[:300]
@@ -235,17 +261,42 @@ class Session:
         return data if isinstance(data, list) else []
 
 
+def stored_proxy_password(profile: dict) -> Optional[str]:
+    """The proxy user's password from the Credential Manager (None without a proxy user or a stored one)."""
+    if not profile.get("proxy_user"):
+        return None
+    from p6mcp import credentials
+    try:
+        return credentials.get(credentials.eppm_proxy_key(profile["name"]))
+    except credentials.SecretStoreError as e:
+        raise EppmError(str(e)) from e
+
+
+def from_profile(profile: dict, password: str, opener: Optional[urllib.request.OpenerDirector] = None,
+                 lock_check: Optional[Callable[[], str]] = None, proxy_password: Optional[str] = None) -> Session:
+    """A Session with every setting of a server profile. proxy_password None = the stored one (read only when the
+    profile has a proxy user)."""
+    if proxy_password is None:
+        proxy_password = stored_proxy_password(profile)
+    return Session(profile["base_url"], profile.get("user", ""), password, profile.get("database") or "",
+                   profile.get("auth", "auto"), profile.get("context") or DEFAULT_CONTEXT,
+                   profile.get("ca_bundle") or None, int(profile.get("timeout_s", 120)), opener=opener,
+                   lock_check=lock_check, proxy={k: profile.get(k) for k in _proxy.KEYS},
+                   proxy_password=proxy_password)
+
+
 def test_connection(profile: dict, password: str,
                     opener_factory: Optional[Callable[[], urllib.request.OpenerDirector]] = None,
-                    lock_check: Optional[Callable[[], str]] = None) -> dict:
-    """Sign in, count the projects the user can read, sign out. Never raises: {ok, ...} or {ok: False, error}."""
+                    lock_check: Optional[Callable[[], str]] = None, proxy_password: Optional[str] = None) -> dict:
+    """Sign in, count the projects the user can read, sign out. Never raises: {ok, ...} or {ok: False, error}.
+    proxy = how the calls go (eppm/proxy.py resolve: no password)."""
     t0 = time.perf_counter()
     res: dict = {"ok": False, "auth": auth_mode(profile.get("base_url", ""), profile.get("auth", "auto"))}
     try:
-        s = Session(profile["base_url"], profile["user"], password, profile.get("database") or "",
-                    profile.get("auth", "auto"), profile.get("context") or DEFAULT_CONTEXT,
-                    profile.get("ca_bundle") or None, int(profile.get("timeout_s", 120)),
-                    opener=opener_factory() if opener_factory else None, lock_check=lock_check)
+        res["proxy"] = _proxy.resolve(profile.get("base_url", ""), profile)
+        s = from_profile(dict(profile, user=profile["user"]), password,
+                         opener=opener_factory() if opener_factory else None, lock_check=lock_check,
+                         proxy_password=proxy_password)
         with s:
             rows = s.read("project", ["ObjectId", "Id"])
             res.update(ok=True, projects=len(rows))

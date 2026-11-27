@@ -2,10 +2,12 @@
 
 Status (2026-11-27): built and released. 3.0.0 shipped milestones 1 to 6 (configuration and Test connection,
 SQL and REST pull, local edits, push, server scheduling), 3.1.0 added `p6_eppm_discard` and
-`p6_update_activities`. Not built from this plan: `schedule=True` on the push (`p6_eppm_schedule` is the only
-way to schedule), proxy settings in a server profile (a custom CA bundle exists), a pull by REST object reads
-alone (the REST route needs the XER export), UDF edits in EPPM mode, and anything that waits for a real server
-(D1, OAuth on OCI, DACS prefix). The sections below keep the plan as agreed; where they differ from the code,
+`p6_update_activities`. 3.5.0 adds `schedule=True` on the push (with `new_data_date` and `pull_after`, after a
+push whose calls all succeeded, under the same confirmation) and the proxy of a server profile (the Windows or
+environment proxy by default, no proxy, or a proxy URL of the profile with an optional Basic proxy user;
+`p6mcp/eppm/proxy.py`). Not built from this plan: a pull by REST object reads alone (the REST route needs the XER
+export), UDF edits in EPPM mode, and anything that waits for a real server (D1, OAuth on OCI, DACS prefix, a real
+company proxy). The sections below keep the plan as agreed; where they differ from the code,
 the code and the milestone notes in section 9 win.
 
 Plan agreed on 2026-11-24 (decisions D2 to D7 in section 10; D1 waits for a real server). Milestone 0 ran on a private test
@@ -376,7 +378,8 @@ Decided by the user on 2026-11-24, after the spike:
 - Schedule options may be stored per user on EPPM (the REST key includes UserObjectId): the working copy must
   take the options the server scheduler will use, to be confirmed in the spike.
 - OCI session lifetimes: token refresh in `rest.py`.
-- Company proxies and TLS inspection: custom CA bundle and proxy settings.
+- Company proxies and TLS inspection: custom CA bundle and proxy settings (3.5.0: Windows or environment proxy by
+  default, or one per server profile; Basic proxy sign-in only, a PAC script is not run).
 
 ## 12. Sources
 

@@ -115,3 +115,41 @@ def test_without_the_optional_columns(p6):
     assert res["applied"] and "costs unchanged" in res["done"][0], res
     got = p6.sql("SELECT target_qty, remain_qty, target_cost FROM TASKRSRC WHERE taskrsrc_id = 401")[0]
     assert got == (150, 120, 6000)
+
+
+def summary_tables(p6) -> None:
+    """P6's summary tables with a subset of their columns: SUMTRSRC enterprise rows (no project) of ENG (a
+    total and a week, plus a deleted one) and of another resource; SUMTASK empty, as in a P6 database
+    that was never summarized by WBS."""
+    con = sqlite3.connect(p6.db)
+    con.execute("CREATE TABLE SUMTASK (WBS_ID INTEGER, PROJ_ID INTEGER, ACT_WORK_QTY REAL, DELETE_SESSION_ID INTEGER)")
+    con.execute("CREATE TABLE SUMTRSRC (SUMTRSRC_ID INTEGER, PROJ_ID INTEGER, WBS_ID INTEGER, START_DATE TEXT, "
+                "END_DATE TEXT, SPREAD_TYPE TEXT, RSRC_ID INTEGER, ROLE_ID INTEGER, STAFFED_TARGET_QTY REAL, "
+                "DELETE_SESSION_ID INTEGER)")
+    for sid, spread, rsrc, deleted in ((1, None, 301, None), (2, "Week", 301, None), (3, None, 301, 7),
+                                       (4, None, 999, None)):
+        con.execute("INSERT INTO SUMTRSRC VALUES (?, NULL, NULL, '2026-03-01 00:00:00', '2026-03-08 00:00:00', ?, ?, "
+                    "NULL, 240, ?)", (sid, spread, rsrc, deleted))
+    con.commit()
+    con.close()
+
+
+def test_summaries_left_stale(p6):
+    """No summary table: nothing stale. With P6's summary rows of the resource: counted, never written."""
+    assignments(p6)
+    dry = p6.call("p6_update_assignment", project="DEMO-A", taskrsrc_id=401, budgeted_units=150)
+    assert dry["summaries_stale"] == {"stale": False, "tables": {}, "refreshed": [], "advice": None}
+    assert not any("Summaries" in line for line in dry["would_do"])
+    summary_tables(p6)
+    p6.s._cols_cache.clear()
+    p6.s._schema_cache.clear()
+    p6.set(trusted_schemas=[fingerprint(p6.db)])
+    before = p6.sql("SELECT * FROM SUMTRSRC ORDER BY sumtrsrc_id")
+    res = p6.apply("p6_update_assignment", project="DEMO-A", taskrsrc_id=401, budgeted_units=150)
+    assert res["applied"] and res["summaries_stale"]["tables"] == {"SUMTRSRC": 2}, res
+    assert res["summaries_stale"]["refreshed"] == [] and "Tools > Summarize" in res["summaries_stale"]["advice"]
+    assert "Summaries not refreshed (SUMTRSRC 2 row(s))" in res["done"][1]
+    res = p6.apply("p6_update_assignments", project="DEMO-A", items=[{"taskrsrc_id": 402, "remaining_units": 30}])
+    assert res["applied"] and res["summaries_stale"]["tables"] == {"SUMTRSRC": 2}, res
+    assert p6.sql("SELECT * FROM SUMTRSRC ORDER BY sumtrsrc_id") == before
+    assert p6.sql("SELECT COUNT(*) FROM SUMTASK") == [(0,)]
