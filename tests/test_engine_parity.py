@@ -20,6 +20,8 @@ from datetime import datetime, timedelta
 import pytest
 from conftest import fingerprint
 
+pytestmark = pytest.mark.parity
+
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "parity")
 with open(os.path.join(HERE, "manifest.json"), encoding="utf-8") as _fh:
     MANIFEST = json.load(_fh)["files"]

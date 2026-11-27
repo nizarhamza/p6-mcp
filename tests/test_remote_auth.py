@@ -73,6 +73,7 @@ def live(p6, tmp_path):
         time.sleep(0.05)
     FETCHED.clear()
     yield {"base": f"http://127.0.0.1:{port}", "port": port, "store": store, "p6": p6, "st": st}
+    srv.config.timeout_graceful_shutdown = 0.2  # 3 s in the product: open streams are not waited for here
     srv.should_exit = True
     th.join(10)
 

@@ -174,13 +174,24 @@ def build_mcp(st: config.Settings, verifier: Any, store: Optional[Store] = None,
         _auth.add_routes(srv, public_url(host), resource_url(host), store, extra, fetch, st.raw.get("language"),
                          st.raw.get("remote_pair_port"))
     listed = remote_tools(st)
+    kw = S._sdk_tool_kw(srv)
     for name in listed:
-        fn = _remote_tool(name, S.REGISTERED[name], S.ToolError, listed)
+        fn = _wired(_remote_tool(name, S.REGISTERED[name], S.ToolError, listed), S._wire)
         if S.ToolAnnotations is None:
-            srv.tool()(fn)
+            srv.tool(**kw)(fn)
         else:
-            srv.tool(annotations=S.ToolAnnotations.model_validate(S.TOOL_HINTS[name]))(fn)
+            srv.tool(annotations=S.ToolAnnotations.model_validate(S.TOOL_HINTS[name]), **kw)(fn)
+        S._slim_schema(srv, name)
     return srv
+
+
+def _wired(fn: Callable, wire: Callable) -> Callable:
+    """fn with its result sent as the local server sends it (compact JSON text). The size budget of
+    shaping.fit still measures indented JSON, so remote pages keep their length."""
+    @functools.wraps(fn)
+    def call(*a, **k):
+        return wire(fn(*a, **k))
+    return call
 
 
 # ----------------------------------------------------------------- guard and app

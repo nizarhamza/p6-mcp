@@ -37,11 +37,24 @@ p6mcp = ["locales/*.json", "data/core_skills/*.json", "remote/worker.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["--strict-markers"]
+# Inner loop (398 of 513 tests, 45 s instead of 110 s on 2026-11-27): pytest -q -m "not slow and not qt and not parity"
+# CI and releases run everything. tests/conftest.py marks tests using the fixtures live or child_env (slow) and
+# qtbot (qt) itself.
+markers = [
+    "slow: starts a real process or server (subprocess, uvicorn, child processes, node)",
+    "qt: drives Qt widgets (PySide6, pytest-qt)",
+    "parity: CPM engine against the synthetic P6 parity cases",
+]
 
 [tool.ruff]
 line-length = 120
 target-version = "py310"
-extend-exclude = ["p6mcp/server.py"]  # legacy single-file module: linted once it is split
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# The single-file server ported from the dev copy: long lines, one-line ifs and zip() without strict= stay
+# until it is split into modules; every other rule applies to it.
+"p6mcp/server.py" = ["E501", "E701", "E702", "B905"]

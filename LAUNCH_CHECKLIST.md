@@ -1,5 +1,7 @@
 # Launch checklist: MCP for Primavera P6 2.0.0
 
+> Record of the 2.0.0 launch (2026-10-29), kept as it was. The current release checklist is [docs/RELEASING.md](docs/RELEASING.md).
+
 The manual steps that follow the local commits: release, landing site and MCP directories. The repository
 keeps its name (see "Repository name" in [docs/RELEASING.md](docs/RELEASING.md)): every installed copy
 downloads its updates from it.

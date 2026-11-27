@@ -120,6 +120,18 @@ def p6(server, tmp_path, golden):
     return P6(server, tmp_path, golden)
 
 
+# markers (registered in pyproject.toml) set from the fixtures a test uses, so a new test gets them too
+FIXTURE_MARKS = {"live": "slow",  # every fixture named live runs a real uvicorn server in a thread
+                 "child_env": "slow",  # tests/test_remote_cloudflare.py: real child processes
+                 "qtbot": "qt"}
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        for name in sorted({FIXTURE_MARKS[f] for f in getattr(item, "fixturenames", ()) if f in FIXTURE_MARKS}):
+            item.add_marker(name)
+
+
 def pytest_sessionfinish(session, exitstatus):
     """Delete the Qt widgets the tests left while Python is fully alive.
 

@@ -8,6 +8,7 @@ import socket
 
 import pytest
 
+pytestmark = pytest.mark.qt
 pytest.importorskip("PySide6")
 pytestqt = pytest.importorskip("pytestqt")
 
@@ -439,7 +440,7 @@ def test_eppm_mode_in_settings(qtbot, win, monkeypatch):
     monkeypatch.setattr(eppm_panel.credentials, "delete", lambda k: vault.pop(k, None) is not None)
     Fake.sessions, Fake.seen = set(), []
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    threading.Thread(target=srv.serve_forever, args=(0.05,), daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_address[1]}"
     try:
         page = win.page(DatabasePage)

@@ -362,9 +362,9 @@ TOKENS = _confirm.TokenStore()
 # Context of the client call being run (two-step flow): {tool, params, token, expected_plan, plan}.
 # Direct calls (tests, internal use) have none and keep the plain confirm=True behaviour.
 _CALL: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar("p6_call", default=None)
-WRITE_DOC = ("\n\nTwo steps: (1) call with dry_run=true (default): nothing is written, you get the plan and a "
-             "confirmation_token. (2) Show the plan to the user; only after their explicit yes, call again with the "
-             "same arguments, dry_run=false and that confirmation_token.")
+WRITE_DOC = ("\n\nTwo steps: dry_run=true (default) writes nothing and returns the plan and a confirmation_token. "
+             "Show the plan; only after the user's explicit yes, call again with the same arguments, dry_run=false "
+             "and that token.")
 DESTRUCTIVE_DOC = " This tool deletes or replaces data: step 2 also needs confirmation_text, given by the dry run."
 
 
@@ -563,6 +563,55 @@ def _gated(fn: Callable) -> Callable:
 _ro_cons: ContextVar[Optional[list]] = ContextVar("_ro_cons", default=None)  # read connections of the running tool
 
 
+def _json_text(obj: Any) -> str:
+    """Compact JSON of a tool result, as the client receives it."""
+    try:
+        import pydantic_core  # what the SDK serializes with (same value formats), installed with mcp
+    except ImportError:
+        return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, default=str)
+    return pydantic_core.to_json(obj, fallback=str).decode()
+
+
+def _wire(res: Any) -> Any:
+    """A tool result for the SDK: dicts and lists as compact JSON text (the SDK would indent them by two
+    spaces, 13 to 27 % of the bytes and so of the client's context); anything else as it is."""
+    return _json_text(res) if isinstance(res, (dict, list)) else res
+
+
+def _slim_schema(server, name: str) -> None:
+    """Trim the input schema clients receive for a registered tool (about 15 KB of the full tool list):
+    pydantic's generated 'title' keys, which repeat each parameter's name, and the deprecated `confirm`
+    alias (still accepted: the SDK validates arguments with its own model, not with this schema)."""
+    try:
+        params = server._tool_manager.get_tool(name).parameters
+    except AttributeError:  # an SDK without this layout: leave the schema as it is
+        return
+
+    def strip(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("title"), str):
+                del node["title"]
+            for v in node.values():
+                strip(v)
+        elif isinstance(node, list):
+            for v in node:
+                strip(v)
+    strip(params)
+    props = params.get("properties")
+    if isinstance(props, dict) and "confirm" in props and "dry_run" in props:
+        del props["confirm"]
+        if isinstance(params.get("required"), list) and "confirm" in params["required"]:
+            params["required"].remove("confirm")
+
+
+def _sdk_tool_kw(server) -> dict:
+    """structured_output=False where the SDK has it (1.10+): results are text, never also structuredContent."""
+    try:
+        return {"structured_output": False} if "structured_output" in inspect.signature(server.tool).parameters else {}
+    except (TypeError, ValueError):
+        return {}
+
+
 def _tool(annotations: Mapping[str, bool]):
     """Register an MCP tool with its annotations (recorded in TOOL_HINTS even without mcp) and its
     gated callable (REGISTERED). Only the tools the startup settings allow are offered to clients
@@ -604,21 +653,22 @@ def _tool(annotations: Mapping[str, bool]):
         if not _policy.listed(name, STARTUP.tool_profile, STARTUP.allow_writes, _shop_on(STARTUP)):
             return fn
         LISTED.add(name)
-        reg = gated
-        if ToolError is not None:
-            @functools.wraps(gated)
-            def reg(*a, **k):
-                try:
-                    return gated(*a, **k)
-                except ToolError:
+
+        @functools.wraps(gated)
+        def reg(*a, **k):
+            try:
+                return _wire(gated(*a, **k))
+            except Exception as e:
+                if ToolError is None or isinstance(e, ToolError):
                     raise
-                except Exception as e:
-                    msg = str(e) if isinstance(e, (ValueError, RuntimeError)) else f"{type(e).__name__}: {e}"
-                    raise ToolError(msg) from e
+                msg = str(e) if isinstance(e, (ValueError, RuntimeError)) else f"{type(e).__name__}: {e}"
+                raise ToolError(msg) from e
+        kw = _sdk_tool_kw(mcp)
         if ToolAnnotations is None:
-            mcp.tool()(reg)
+            mcp.tool(**kw)(reg)
         else:
-            mcp.tool(annotations=ToolAnnotations.model_validate(hints))(reg)
+            mcp.tool(annotations=ToolAnnotations.model_validate(hints), **kw)(reg)
+        _slim_schema(mcp, name)
         return fn
     return deco
 
@@ -975,11 +1025,26 @@ def _parse_dt(value: str, field: str) -> tuple[datetime, bool]:
     raise ValueError(f"{field}: {value!r} is not a date. Use 'YYYY-MM-DD HH:MM'.")
 
 
+_DB_DT_SHAPE = re.compile(r"\d{4}-\d\d-\d\d(?: \d\d:\d\d(?::\d\d)?)?\Z")
+
+
 def _db_dt(v) -> Optional[datetime]:
     """DB or XER date value -> datetime ('T' or space, with or without seconds); None if empty."""
     if v is None or isinstance(v, datetime):
         return v
-    s = str(v).strip().replace("T", " ")[:19]
+    return _db_dt_text(str(v).strip().replace("T", " ")[:19])
+
+
+@functools.lru_cache(maxsize=65536)
+def _db_dt_text(s: str) -> Optional[datetime]:
+    """Cached: an engine load reads the same few thousand date strings tens of thousands of times
+    (strptime was the largest single cost of every engine tool). The zero-padded forms P6 writes
+    go through fromisoformat; anything else keeps the strptime rules."""
+    if _DB_DT_SHAPE.match(s):
+        try:
+            return datetime.fromisoformat(s)
+        except ValueError:
+            pass
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
             return datetime.strptime(s, fmt)
@@ -3257,7 +3322,7 @@ def _key_dates(net: _Net, thr: Optional[float]) -> tuple[dict, list[dict]]:
                          "detail": f"the work and lags after its constraint date reach {fm['task_code']} on "
                                    f"{_fmt_dt(proj)} ({round(need, 2)} d later), after the must finish date"})
     miles = [(d, ty, dt) for d, ty, dt in cons if d["task_type"] in ("TT_Mile", "TT_FinMile")]
-    for d, ty, dt in miles:
+    for d, _ty, dt in miles:
         dd_ = _downstream(net, d["task_id"], dt, dt)
         for e, ty2, dt2 in miles:
             if e["task_id"] == d["task_id"] or e["task_id"] not in dd_:
@@ -4445,7 +4510,7 @@ class _Cpm:
         for r in con.execute(
                 "SELECT r.task_pred_id, r.task_id, r.pred_task_id, r.pred_type, COALESCE(r.lag_hr_cnt, 0), s.proj_id, p.proj_id, "
                 "p.early_start_date, p.early_end_date, s.late_start_date, s.late_end_date, "
-                f"COALESCE(NULLIF(cp.day_hr_cnt, 0), 8), p.clndr_id, s.clndr_id, s.early_start_date, s.early_end_date "
+                "COALESCE(NULLIF(cp.day_hr_cnt, 0), 8), p.clndr_id, s.clndr_id, s.early_start_date, s.early_end_date "
                 "FROM TASKPRED r JOIN TASK s ON s.task_id = r.task_id "
                 "JOIN TASK p ON p.task_id = r.pred_task_id LEFT JOIN CALENDAR cp ON cp.clndr_id = p.clndr_id "
                 "WHERE (s.proj_id = ? OR p.proj_id = ?)" + al("TASKPRED", "r") + al("TASK", "s") + al("TASK", "p") +
@@ -4925,7 +4990,7 @@ class _Cpm:
         fin = sbound = _POS
         st = T[n]["status_code"]
         for e in plan["by_p"].get(n, ()):
-            lk, lc, eff = e[0], e[1], e[2]
+            lk, lc = e[0], e[1]
             s = T[lk["succ"]]
             if s["task_type"] == "TT_LOE":
                 continue  # a level of effort takes its late dates from its predecessors: it bounds none
@@ -5525,7 +5590,7 @@ def _cpm_classify(cpm: _Cpm, mism: dict, ev: dict, never: bool) -> dict[int, dic
         by_s.setdefault(lk["succ"], []).append(lk)
         by_p.setdefault(lk["pred"], []).append(lk["succ"])
     link_upd: dict[int, list] = {}
-    for lid, (s, p, dt) in ev["links"].items():
+    for _lid, (s, p, dt) in ev["links"].items():
         for own, other in ((s, p), (p, s)):
             if own in T:
                 link_upd.setdefault(own, []).append((T[other]["task_code"] if other in T else str(other), dt))
@@ -6073,7 +6138,7 @@ def _temp_network(con, pid: int, cpm: _Cpm, res: Optional[dict], bid: Optional[i
             r = res[n]
             if "rem_h" in r:
                 vals[0] = r["rem_h"]
-            for col, k in dated:
+            for _col, k in dated:
                 v = r.get(k)
                 vals.append(_fmt_dt(v) if isinstance(v, datetime) else ("Y" if v else "N") if k == "longest" else v)
             rich.append((*vals, n))
@@ -11642,7 +11707,7 @@ def _dash_read(con, pid: int, bid: Optional[int], codes: Optional[Sequence[str]]
     for r in con.execute(_act_from(con) + " ORDER BY COALESCE(t.act_start_date, t.early_start_date), t.task_code, "
                          "t.task_id", (pid,)):
         a = _dict(r)
-        num = lambda k: float(a.get(k) or 0)  # noqa: E731
+        num = lambda k, a=a: float(a.get(k) or 0)  # noqa: E731
         bs, bf = bl_act.get(a["task_code"], (None, None))
         s_act, f_act = _db_dt(a["act_start_date"]), _db_dt(a["act_end_date"])
         f = f_act or _db_dt(a["early_end_date"])
@@ -11849,6 +11914,9 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
     def mix(color: str, f: float) -> str:  # color moved toward white by f (0 to 1)
         return "".join(f"{round(int(color[i:i + 2], 16) + (255 - int(color[i:i + 2], 16)) * f):02X}" for i in (0, 2, 4))
 
+    fonts: dict = {}
+    aligns: dict = {}
+
     def put(ws, r: int, c: int, v, fmt: Optional[str] = None, bold: bool = False, size: float = 10,
             color: str = DASH_INK, bg: Optional[str] = None, h: Optional[str] = None, wrap: bool = False, indent: int = 0,
             valign: str = "center", font: str = "Calibri"):
@@ -11857,8 +11925,16 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
         cell = ws.cell(row=r, column=c, value=v)
         if isinstance(v, str) and v.startswith("="):
             cell.data_type = "s"  # text from the database, never a formula
-        cell.font = Font(name=font, size=size, bold=bold, color=color)
-        cell.alignment = Alignment(horizontal=h, vertical=valign, wrap_text=wrap, indent=indent)
+        # One Font / Alignment object per distinct style, as fill(): openpyxl hashes every new style
+        # object it is given, which was most of the export time on a large project.
+        fk = (font, size, bold, color)
+        if fk not in fonts:
+            fonts[fk] = Font(name=font, size=size, bold=bold, color=color)
+        cell.font = fonts[fk]
+        ak = (h, valign, wrap, indent)
+        if ak not in aligns:
+            aligns[ak] = Alignment(horizontal=h, vertical=valign, wrap_text=wrap, indent=indent)
+        cell.alignment = aligns[ak]
         if fmt:
             cell.number_format = fmt
         if bg:

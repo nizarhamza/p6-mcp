@@ -105,7 +105,7 @@ class Fake(BaseHTTPRequestHandler):
 def server():
     Fake.sessions, Fake.seen, Fake.oauth_broken, Fake.locked = set(), [], False, False
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
-    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t = threading.Thread(target=srv.serve_forever, args=(0.05,), daemon=True)
     t.start()
     yield f"http://127.0.0.1:{srv.server_address[1]}"
     srv.shutdown()
