@@ -8470,6 +8470,15 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
     con = _connect()
     pid = _project_id(con, project)
     con.execute("BEGIN")  # settings and every figure from one snapshot
+    try:
+        return _summary(con, pid, project, baseline)
+    finally:
+        con.rollback()
+
+
+def _summary(con, pid: int, project: str, baseline: Optional[str]) -> dict:
+    """p6_project_summary of the project pid, read inside the caller's snapshot (p6_trend reads it with the
+    other figures of an update)."""
     pc, tc, al = _cols(con, "PROJECT"), _cols(con, "TASK"), functools.partial(_alive, con)
     pf = ("proj_short_name", "clndr_id", "last_recalc_date", "plan_start_date", "plan_end_date", "scd_end_date",
           "last_schedule_date", "def_complete_pct_type")
@@ -8489,51 +8498,48 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
     links = ("FROM TASKPRED r JOIN TASK s ON s.task_id = r.task_id JOIN TASK p ON p.task_id = r.pred_task_id WHERE 1=1"
              + al("TASKPRED", "r") + al("TASK", "s") + al("TASK", "p"))
     one = lambda sql, args=(pid,): con.execute(sql, args).fetchone()[0]  # noqa: E731
-    try:
-        p = con.execute("SELECT " + ", ".join(c if c in pc else f"NULL AS {c}" for c in pf) + " FROM PROJECT WHERE proj_id = ?",
-                        (pid,)).fetchone()
-        node = con.execute("SELECT wbs_name FROM PROJWBS WHERE proj_id = ? AND proj_node_flag = 'Y'" + al("PROJWBS"),
-                           (pid,)).fetchone()
-        cal = con.execute(f"SELECT c.clndr_name, {HPD_SQL} FROM CALENDAR c WHERE c.clndr_id = ?" + al("CALENDAR", "c"),
-                          (p["clndr_id"],)).fetchone()
-        pcal = _calendars(con, int(p["clndr_id"])).get(int(p["clndr_id"])) if p["clndr_id"] is not None else None
-        by = {k: {r[0]: r[1] for r in con.execute(f"SELECT t.{k}, COUNT(*) {acts} GROUP BY t.{k} ORDER BY t.{k}", (pid,))}
-              for k in ("status_code", "task_type")}
-        a = con.execute(f"SELECT COUNT(*), SUM({op}), SUM({op} AND t.task_type IN ('TT_Mile', 'TT_FinMile')), "
-                        f"SUM({op} AND ({crit})), SUM({op} AND ({tf})), SUM({op} AND {lp}), "
-                        f"SUM({op} AND t.total_float_hr_cnt < 0), SUM({units('target')}), SUM({units('act')}), "
-                        f"SUM({units('remain')}), SUM({phys}), SUM({at} > 0 AND ABS(COALESCE(t.phys_complete_pct, 0) "
-                        f"- 100.0 * {units('act')} / {at}) > 0.01), "
-                        f"SUM(CASE WHEN {dur} THEN COALESCE(t.target_drtn_hr_cnt, 0) END), "
-                        f"SUM(CASE WHEN {dur} THEN COALESCE(t.target_drtn_hr_cnt, 0) - COALESCE(t.remain_drtn_hr_cnt, 0) END), "
-                        "SUM(t.status_code = 'TK_Complete'), MIN(COALESCE(t.act_start_date, t.early_start_date)), "
-                        f"MAX(COALESCE(t.act_end_date, t.early_end_date)) {acts}", [*cargs, *tf_args, pid]).fetchone()
-        rel = con.execute(f"SELECT COUNT(*), SUM(p.proj_id <> s.proj_id) {links} AND s.proj_id = ?", (pid,)).fetchone()
-        rel_out = one(f"SELECT COUNT(*) {links} AND p.proj_id = ? AND s.proj_id <> ?", (pid, pid))
-        asg = (con.execute("SELECT COUNT(*), COUNT(DISTINCT a.rsrc_id) FROM TASKRSRC a JOIN TASK t ON t.task_id = a.task_id "
-                           "WHERE t.proj_id = ?" + al("TASKRSRC", "a") + al("TASK", "t"), (pid,)).fetchone()
-               if _cols(con, "TASKRSRC") else (None, None))
-        counts = {"wbs": one("SELECT COUNT(*) FROM PROJWBS WHERE proj_id = ?" + al("PROJWBS")), "assignments": asg[0],
-                  "resources": asg[1], "calendars_used": one(f"SELECT COUNT(DISTINCT t.clndr_id) {acts}"),
-                  "code_assignments": None}
-        if _cols(con, "TASKACTV"):
-            counts["code_assignments"] = one("SELECT COUNT(*) FROM TASKACTV a JOIN TASK t ON t.task_id = a.task_id WHERE "
-                                             "t.proj_id = ?" + al("TASKACTV", "a") + al("TASK", "t"))
-        attached = ([r[0] for r in con.execute("SELECT proj_short_name FROM PROJECT WHERE orig_proj_id = ?" + al("PROJECT")
-                                               + " ORDER BY proj_short_name, proj_id", (pid,))] if "orig_proj_id" in pc else [])
-        name_of = lambda b: b and one("SELECT proj_short_name FROM PROJECT WHERE proj_id = ?", (b,))  # noqa: E731
-        bl, dd = None, _db_dt(p["last_recalc_date"])
-        if bid is not None:
-            braw = {c: (one(f"SELECT {c} FROM PROJECT WHERE proj_id = ?", (bid,)) if c in pc else None)
-                    for c in ("scd_end_date", "last_recalc_date")}
-            bfin = _db_dt(braw["scd_end_date"])
-            bl = {"finish": bfin, "raw": braw,
-                  "items": _curve_items(_measure_rows(con, bid, "units"), dd, _ev_map(con, bid)) if dd else None,
-                  "cur": _curve_items(_measure_rows(con, pid, "units"), dd, _ev_map(con, pid)) if dd else None}
-        names = (name_of(pbid), name_of(bid))
-        cost = _cost_ev(con, pid, bid, dd)
-    finally:
-        con.rollback()
+    p = con.execute("SELECT " + ", ".join(c if c in pc else f"NULL AS {c}" for c in pf) + " FROM PROJECT WHERE proj_id = ?",
+                    (pid,)).fetchone()
+    node = con.execute("SELECT wbs_name FROM PROJWBS WHERE proj_id = ? AND proj_node_flag = 'Y'" + al("PROJWBS"),
+                       (pid,)).fetchone()
+    cal = con.execute(f"SELECT c.clndr_name, {HPD_SQL} FROM CALENDAR c WHERE c.clndr_id = ?" + al("CALENDAR", "c"),
+                      (p["clndr_id"],)).fetchone()
+    pcal = _calendars(con, int(p["clndr_id"])).get(int(p["clndr_id"])) if p["clndr_id"] is not None else None
+    by = {k: {r[0]: r[1] for r in con.execute(f"SELECT t.{k}, COUNT(*) {acts} GROUP BY t.{k} ORDER BY t.{k}", (pid,))}
+          for k in ("status_code", "task_type")}
+    a = con.execute(f"SELECT COUNT(*), SUM({op}), SUM({op} AND t.task_type IN ('TT_Mile', 'TT_FinMile')), "
+                    f"SUM({op} AND ({crit})), SUM({op} AND ({tf})), SUM({op} AND {lp}), "
+                    f"SUM({op} AND t.total_float_hr_cnt < 0), SUM({units('target')}), SUM({units('act')}), "
+                    f"SUM({units('remain')}), SUM({phys}), SUM({at} > 0 AND ABS(COALESCE(t.phys_complete_pct, 0) "
+                    f"- 100.0 * {units('act')} / {at}) > 0.01), "
+                    f"SUM(CASE WHEN {dur} THEN COALESCE(t.target_drtn_hr_cnt, 0) END), "
+                    f"SUM(CASE WHEN {dur} THEN COALESCE(t.target_drtn_hr_cnt, 0) - COALESCE(t.remain_drtn_hr_cnt, 0) END), "
+                    "SUM(t.status_code = 'TK_Complete'), MIN(COALESCE(t.act_start_date, t.early_start_date)), "
+                    f"MAX(COALESCE(t.act_end_date, t.early_end_date)) {acts}", [*cargs, *tf_args, pid]).fetchone()
+    rel = con.execute(f"SELECT COUNT(*), SUM(p.proj_id <> s.proj_id) {links} AND s.proj_id = ?", (pid,)).fetchone()
+    rel_out = one(f"SELECT COUNT(*) {links} AND p.proj_id = ? AND s.proj_id <> ?", (pid, pid))
+    asg = (con.execute("SELECT COUNT(*), COUNT(DISTINCT a.rsrc_id) FROM TASKRSRC a JOIN TASK t ON t.task_id = a.task_id "
+                       "WHERE t.proj_id = ?" + al("TASKRSRC", "a") + al("TASK", "t"), (pid,)).fetchone()
+           if _cols(con, "TASKRSRC") else (None, None))
+    counts = {"wbs": one("SELECT COUNT(*) FROM PROJWBS WHERE proj_id = ?" + al("PROJWBS")), "assignments": asg[0],
+              "resources": asg[1], "calendars_used": one(f"SELECT COUNT(DISTINCT t.clndr_id) {acts}"),
+              "code_assignments": None}
+    if _cols(con, "TASKACTV"):
+        counts["code_assignments"] = one("SELECT COUNT(*) FROM TASKACTV a JOIN TASK t ON t.task_id = a.task_id WHERE "
+                                         "t.proj_id = ?" + al("TASKACTV", "a") + al("TASK", "t"))
+    attached = ([r[0] for r in con.execute("SELECT proj_short_name FROM PROJECT WHERE orig_proj_id = ?" + al("PROJECT")
+                                           + " ORDER BY proj_short_name, proj_id", (pid,))] if "orig_proj_id" in pc else [])
+    name_of = lambda b: b and one("SELECT proj_short_name FROM PROJECT WHERE proj_id = ?", (b,))  # noqa: E731
+    bl, dd = None, _db_dt(p["last_recalc_date"])
+    if bid is not None:
+        braw = {c: (one(f"SELECT {c} FROM PROJECT WHERE proj_id = ?", (bid,)) if c in pc else None)
+                for c in ("scd_end_date", "last_recalc_date")}
+        bfin = _db_dt(braw["scd_end_date"])
+        bl = {"finish": bfin, "raw": braw,
+              "items": _curve_items(_measure_rows(con, bid, "units"), dd, _ev_map(con, bid)) if dd else None,
+              "cur": _curve_items(_measure_rows(con, pid, "units"), dd, _ev_map(con, pid)) if dd else None}
+    names = (name_of(pbid), name_of(bid))
+    cost = _cost_ev(con, pid, bid, dd)
     r2, r4 = (lambda v: None if v is None else round(v, 2)), (lambda v: None if v is None else round(v, 4))  # noqa: E731
     budget, actual, remain = (float(v or 0) for v in a[7:10])
     pct = {"units": 100 * actual / (actual + remain) if actual + remain else None,
@@ -8582,6 +8588,304 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
                                               "units_vs_physical_mismatch": "activities with units where |physical % - "
                                                                             "100 x actual / (actual + remaining)| > 0.01"}},
             "baseline": base, "cost": cost, "counts": counts, "schedule_state": _schedule_state(con, pid), "notes": notes}
+
+
+# ----------------------------------------------------------------- trend across schedule updates (p6_trend)
+
+TrendMs = Literal["matched", "any", "none"]
+TrendProjects = Annotated[list[ProjectId], Field(
+    description="Project IDs of the updates of one job, in any order (the trend orders them by data date).")]
+TREND_MAX = 100  # updates in one series
+TREND_MS_CAP = 20  # milestones followed when codes= is not given
+TREND_HEAD = ("project_flag", "last_recalc_date", "last_schedule_date", "scd_end_date", "plan_end_date", "clndr_id")
+
+
+def _trend_head(con, pid: int) -> dict:
+    cols = _cols(con, "PROJECT")
+    return _dict(con.execute("SELECT proj_short_name, " + ", ".join(c if c in cols else f"NULL AS {c}" for c in TREND_HEAD)
+                             + " FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone())
+
+
+def _trend_series(names: Sequence[str]) -> list[dict]:
+    """The updates of a trend from one read snapshot, ordered by data date, then last F9, then Project ID:
+    [{pid, project, data_date, last_schedule_date}]. Refuses an unknown project, an EPS node, a Project ID
+    given twice, an update without a data date, fewer than two updates or more than TREND_MAX."""
+    twice = sorted({n for i, n in enumerate(names) if n in names[:i]})
+    if twice:
+        raise ValueError(f"Project IDs given twice: {twice}")
+    if len(names) < 2:
+        raise ValueError(f"A trend needs at least two updates; got {len(names)}: {list(names)}")
+    if len(names) > TREND_MAX:
+        raise ValueError(f"A trend holds at most {TREND_MAX} updates; got {len(names)}")
+    con = _connect()
+    con.execute("BEGIN")
+    try:
+        out = []
+        for n in names:
+            pid = _project_id(con, n)
+            h = _trend_head(con, pid)
+            if h["project_flag"] == "N":
+                raise ValueError(f"{n} is an EPS node: pass eps={n!r} for the projects below it")
+            if _db_dt(h["last_recalc_date"]) is None:
+                raise ValueError(f"{n} has no data date (PROJECT.last_recalc_date): schedule it in P6 first")
+            out.append({"pid": pid, "project": n, "data_date": h["last_recalc_date"],
+                        "last_schedule_date": h["last_schedule_date"]})
+    finally:
+        con.rollback()
+    out.sort(key=lambda u: (_db_dt(u["data_date"]), _db_dt(u["last_schedule_date"]) or datetime.min, u["project"]))
+    return out
+
+
+def _trend_check(con, u: Mapping) -> dict:
+    """The PROJECT row of update u in the current snapshot; ValueError when its data date or last F9 moved since
+    the series was read."""
+    h = _trend_head(con, u["pid"])
+    if (h["last_recalc_date"], h["last_schedule_date"]) != (u["data_date"], u["last_schedule_date"]):
+        raise ValueError(f"The schedule of {u['project']} changed during the call (data date or last F9): run it again.")
+    return h
+
+
+def _trend_ms(con, pid: int, codes: Optional[Sequence[str]]) -> dict[str, dict]:
+    """Milestones of an update by Activity ID (the lowest task_id of a repeated ID): codes= these activities (a
+    task takes its finish), else every TT_Mile / TT_FinMile; one date as p6_milestones (start of a start
+    milestone, else finish; actual else early)."""
+    q, args = _act_from(con), [pid]
+    if codes:
+        q += f" AND t.task_code IN ({', '.join('?' * len(codes))})"
+        args += list(codes)
+    else:
+        q += " AND t.task_type IN ('TT_Mile', 'TT_FinMile')"
+    out: dict[str, dict] = {}
+    for r in con.execute(q + " ORDER BY t.task_id", args):
+        m = _dict(r)
+        k = "start" if m["task_type"] == "TT_Mile" else "end"
+        raw, kind = (m[f"act_{k}_date"], "actual") if m.get(f"act_{k}_date") else (m.get(f"early_{k}_date"), "forecast")
+        out.setdefault(m["task_code"], {"task_name": m["task_name"], "task_type": m["task_type"],
+                                        "status_code": m["status_code"], "date": raw, "date_kind": kind,
+                                        "clndr_id": m["clndr_id"]})
+    return out
+
+
+def _trend_float(con, pid: int, near_days: float) -> dict:
+    """Open activities (not completed, LOE and WBS summary left out): near critical (not critical under the
+    project definition, total float at most near_days days of its calendar, compared in hours) and total float
+    statistics in days of each activity's calendar."""
+    crit, cargs = _critical_clause(con, pid, "project", None)[:2]
+    rows = con.execute(f"SELECT t.total_float_hr_cnt, {HPD_SQL}, COALESCE({crit}, 0) FROM TASK t LEFT JOIN CALENDAR c "
+                       f"ON c.clndr_id = t.clndr_id WHERE t.proj_id = ? AND t.status_code <> 'TK_Complete' AND "
+                       f"t.task_type NOT IN {SUMMARY_TYPES}" + _alive(con, "TASK", "t"), [*cargs, pid]).fetchall()
+    near = sum(1 for h, hpd, c in rows if h is not None and not c and float(h) <= near_days * float(hpd))
+    days = sorted(float(h) / float(hpd) for h, hpd, _ in rows if h is not None)
+    r2 = lambda v: None if v is None else round(v, 2) + 0.0  # noqa: E731
+    return {"near_critical": near, "total_float": {
+        "open": len(rows), "with_float": len(days), "min_d": r2(days[0] if days else None),
+        "max_d": r2(days[-1] if days else None), "mean_d": r2(sum(days) / len(days) if days else None),
+        "median_d": r2(statistics.median(days) if days else None)}}
+
+
+def _trend_changes(con, pid: int, oid: int) -> dict:
+    """What changed from update oid (before) to pid (after), matched as p6_compare_projects: activities by
+    Activity ID, links by (predecessor, successor, type, predecessor project); durations cut as
+    p6_update_integrity duration_cut (activities not started in either update, milestones, LOE and WBS summary
+    left out, original or remaining duration shorter by more than 3 minutes)."""
+    args = {"pid": pid, "oid": oid}
+    acts, lnk = _cmp_acts(con, "current"), _cmp_links(con)
+    A: dict[str, dict] = {}
+    B: dict[str, dict] = {}
+    for side, out in (("a", A), ("b", B)):
+        for r in con.execute(acts + f"SELECT task_code, task_type, status_code, orig_h, rem_h FROM {side} "
+                             "ORDER BY task_id", args):
+            out.setdefault(r["task_code"], _dict(r))  # an Activity ID twice: the lowest task_id
+    cut = 0
+    for c in set(A) & set(B):
+        a, b = A[c], B[c]
+        if a["task_type"] in ("TT_LOE", "TT_WBS", "TT_Mile", "TT_FinMile") or a["status_code"] != "TK_NotStart" \
+                or b["status_code"] != "TK_NotStart":
+            continue
+        if (b["orig_h"] or 0) - (a["orig_h"] or 0) > CPM_TF_TOL_H or (b["rem_h"] or 0) - (a["rem_h"] or 0) > CPM_TF_TOL_H:
+            cut += 1
+    ln = con.execute(lnk + "SELECT (SELECT COUNT(*) FROM la WHERE NOT EXISTS (SELECT 1 FROM lb WHERE " + LINK_KEY + ")), "
+                     "(SELECT COUNT(*) FROM lb WHERE NOT EXISTS (SELECT 1 FROM la WHERE " + LINK_KEY + "))", args).fetchone()
+    return {"activities_added": len(set(A) - set(B)), "activities_removed": len(set(B) - set(A)),
+            "links_added": ln[0], "links_removed": ln[1], "durations_cut": cut}
+
+
+def _trend(series: list[dict], baseline: Optional[str], codes: Optional[list[str]], ms_mode: str, near: float,
+           dcma: bool, page: range) -> dict:
+    """{rows, milestones, notes} of p6_trend: the rows of the updates whose index is in page (every figure of an
+    update from one read snapshot of it; changes since the previous update from one snapshot of the pair), the
+    milestones followed (every update is read for them) and notes."""
+    con = _connect()
+    info: list[dict] = []
+    for i, u in enumerate(series):
+        con.execute("BEGIN")  # one snapshot per update
+        try:
+            h = _trend_check(con, u)
+            cals = _calendars(con)
+            ms = _trend_ms(con, u["pid"], codes)
+            it = {"head": h, "ms": ms, "cal": {k: cals.get(m["clndr_id"]) for k, m in ms.items()},
+                  "pcal": cals.get(h["clndr_id"]) if h["clndr_id"] is not None else None}
+            if i in page:
+                it["summary"] = _summary(con, u["pid"], u["project"], baseline)
+                it["float"] = _trend_float(con, u["pid"], near)
+                if dcma:  # as p6_health_check with its defaults (key_dates is information only: left out)
+                    bid = _baseline_pid(con, u["pid"], baseline)
+                    cfg = _dcma_settings(con, u["pid"], {}, None)
+                    checks = _dcma(con, u["pid"], bid, cfg, "current", "remaining")[0]
+                    if "critical_path_test" not in cfg["disabled"]:
+                        checks["critical_path_test"] = _cpt(con, u["pid"])
+                    it["checks"] = checks
+            info.append(it)
+        finally:
+            con.rollback()
+    # milestones followed: codes= in that order, else the milestones of every update ('matched') or of any one
+    present = [set(it["ms"]) for it in info]
+    notes: list[str] = []
+    if codes:
+        keys = [c for c in codes if any(c in p for p in present)]
+        missing = [c for c in codes if c not in keys]
+        if missing:
+            notes.append(f"Activity IDs in none of the updates: {missing}.")
+    elif ms_mode == "none":
+        keys = []
+    else:
+        pool = set.intersection(*present) if ms_mode == "matched" else set.union(*present)
+
+        def last_date(c: str) -> tuple:
+            m = next(it["ms"][c] for it in reversed(info) if c in it["ms"])
+            return (_db_dt(m["date"]) or datetime.max, c)
+        keys = sorted(pool, key=last_date)
+        if len(keys) > TREND_MS_CAP:
+            notes.append(f"{len(keys)} milestones {'in every update' if ms_mode == 'matched' else 'in the updates'}: "
+                         f"the first {TREND_MS_CAP} by date in the latest update holding them are followed (pass "
+                         "codes= to choose).")
+            keys = keys[:TREND_MS_CAP]
+    followed = []
+    for c in keys:
+        m = next(it["ms"][c] for it in reversed(info) if c in it["ms"])
+        followed.append({"task_code": c, "task_name": m["task_name"], "task_type": m["task_type"],
+                         "updates": sum(c in p for p in present)})
+
+    def wd(cal, a: Optional[datetime], b: Optional[datetime]) -> Optional[float]:  # working days from a to b
+        return round(cal.work_days(a, b), 2) + 0.0 if cal is not None and not cal.error and a and b else None
+
+    def cd(a: Optional[datetime], b: Optional[datetime]) -> Optional[float]:
+        return round((b - a).total_seconds() / 86400, 2) + 0.0 if a and b else None
+    rows: list[dict] = []
+    first_f = _db_dt(info[0]["head"]["scd_end_date"])
+    for i in page:
+        if i >= len(series):
+            break
+        u, it = series[i], info[i]
+        sm, h, pcal = it["summary"], it["head"], it["pcal"]
+        fin, prev_f = _db_dt(h["scd_end_date"]), _db_dt(info[i - 1]["head"]["scd_end_date"]) if i else None
+        bl, pc, cr = sm["baseline"], sm["percent_complete"], sm["critical"]
+        items = []
+        for c in keys:
+            m, cal = it["ms"].get(c), it["cal"].get(c)
+            d = _db_dt(m["date"]) if m else None
+            p0, pp = info[0]["ms"].get(c), info[i - 1]["ms"].get(c) if i else None
+            items.append({"task_code": c, "date": m and m["date"], "date_kind": m and m["date_kind"],
+                          "status_code": m and m["status_code"],
+                          "slip_wd": wd(cal, _db_dt(pp["date"]), d) if pp else None,
+                          "variance_first_wd": wd(cal, _db_dt(p0["date"]), d) if p0 else None})
+        row = {"update": i + 1, "project": u["project"], "name": sm["project"]["name"], "data_date": u["data_date"],
+               "last_schedule_date": u["last_schedule_date"], "stale": sm["schedule_state"]["stale"],
+               "finish": h["scd_end_date"], "must_finish": h["plan_end_date"],
+               "finish_vs_must_finish_wd": sm["dates"]["finish_vs_must_finish_by_wd"],
+               "finish_variance_first_wd": wd(pcal, first_f, fin), "finish_variance_first_cd": cd(first_f, fin),
+               "finish_variance_previous_wd": wd(pcal, prev_f, fin) if i else None,
+               "finish_variance_previous_cd": cd(prev_f, fin) if i else None,
+               "baseline": bl["used"], "baseline_finish": bl["finish"],
+               "baseline_finish_variance_wd": bl["finish_variance_wd"],
+               "units_pct": pc["units"], "planned_units_pct": bl["planned_units_pct_at_data_date"],
+               "spi_units": bl["spi_units"], "critical": cr["critical"], "near_critical": it["float"]["near_critical"],
+               "negative_float": cr["negative_float"], "total_float": it["float"]["total_float"], "dcma": None,
+               "milestones": items, "changes": None}
+        if dcma:
+            ch = it["checks"]
+            score = _weighted_score(ch)
+            row["dcma"] = {"points": score["points"], "grade": score["grade"],
+                           "failed": [k for k, v in ch.items() if v.get("pass") is False and k not in HC_UNSCORED],
+                           "bei": ch["bei"].get("value"), "bei_pass": ch["bei"].get("pass")}
+        rows.append(row)
+    for row in rows:  # changes since the previous update: both projects in one snapshot
+        i = row["update"] - 1
+        if not i:
+            continue
+        con.execute("BEGIN")
+        try:
+            _trend_check(con, series[i])
+            _trend_check(con, series[i - 1])
+            row["changes"] = {"since": series[i - 1]["project"],
+                              **_trend_changes(con, series[i]["pid"], series[i - 1]["pid"])}
+        finally:
+            con.rollback()
+    return {"rows": rows, "milestones": followed, "notes": notes}
+
+
+def _trend_names(projects, eps: Optional[str]) -> list[str]:
+    """Project IDs of a trend: projects= as given, or the projects of the EPS node eps and of the EPS below it
+    (baselines and templates left out, as p6_list_projects)."""
+    if (projects is None) == (eps is None):
+        raise ValueError("Give projects= (the Project IDs of the updates) or eps= (an EPS ID), one of them")
+    if eps is not None:
+        names = [r["proj_short_name"] for r in _all_rows(p6_list_projects, TREND_MAX + 1, eps=eps,
+                                                         exclude_templates=True)[1]]
+        if len(names) < 2:
+            raise ValueError(f"EPS {eps} holds {len(names)} project(s) (baselines and templates left out): a trend "
+                             "needs at least two updates")
+        return names
+    if isinstance(projects, str) or not isinstance(projects, (list, tuple)):
+        raise ValueError("projects must be a list of Project IDs")
+    return [str(p).strip() for p in projects]
+
+
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+def p6_trend(projects: Optional[TrendProjects] = None, eps: Optional[str] = None, baseline: Optional[ProjectId] = None,
+             codes: Optional[MsCodes] = None, milestones: TrendMs = "matched", near_critical_days: NonNegDays = 10,
+             dcma: bool = True, offset: Offset = 0, limit: Limit = 20) -> dict:
+    """Trend across the schedule updates of one job, one row per update ordered by data date (then last F9,
+    then Project ID): projects= the Project IDs of the updates (baselines allowed), or eps= an EPS ID (every
+    project of that EPS node and of the EPS below it, baselines and templates left out); at least two
+    updates. One page (default 20 updates) {total, offset, returned, next_offset, rows, series, milestones,
+    near_critical_days, engine_version, notes}. Values of the
+    last F9 of each update, every figure of an update from one read snapshot. Row: update (1 = earliest),
+    project, name, data_date, last_schedule_date, stale (this server changed it after its F9), finish
+    (scheduled finish), must_finish, finish_vs_must_finish_wd, finish_variance_first_wd / _cd (against the
+    first update), finish_variance_previous_wd / _cd (against the previous one; None on the first): working
+    days of the update's project calendar (None when unreadable) and calendar days, positive = later;
+    baseline (the update's project baseline, or baseline= for every update), baseline_finish,
+    baseline_finish_variance_wd, units_pct (actual / at completion units), planned_units_pct (baseline
+    planned units % at the data date) and spi_units, as p6_project_summary; critical (project definition),
+    near_critical (open, not critical, total float at most near_critical_days days of its calendar),
+    negative_float, total_float of open activities (LOE and WBS summary left out) {open, with_float, min_d,
+    max_d, mean_d, median_d}; dcma {points, grade, failed, bei, bei_pass} as p6_health_check with its
+    defaults (no snapshot saved; dcma=False skips it, the slowest part); milestones: one item per milestone
+    followed {task_code, date (actual else early; start of a start milestone, else finish), date_kind,
+    status_code, slip_wd (against the previous update), variance_first_wd (against the first)}, working days
+    of the milestone's calendar in this update, None where the milestone is missing; changes since the
+    previous update {since, activities_added, activities_removed, links_added, links_removed, durations_cut}
+    (matched as p6_compare_projects; durations cut as p6_update_integrity), None on the first. Milestones
+    followed (sibling milestones: task_code, task_name, task_type, updates = how many hold it): codes= these
+    Activity IDs (any activity type: a task takes its finish), else milestones='matched' (default: TT_Mile
+    and TT_FinMile in every update), 'any' (in at least one) or 'none'; at most 20 without codes=, by date in
+    the latest update."""
+    if milestones not in get_args(TrendMs):
+        raise ValueError(f"milestones must be one of {list(get_args(TrendMs))}")
+    near = _num(near_critical_days)
+    if near is None or not math.isfinite(near) or near < 0:
+        raise ValueError("near_critical_days must be 0 or more")
+    offset, limit = _check_page(offset, limit)
+    wanted = None if codes is None else _code_list(codes, "codes")
+    series = _trend_series(_trend_names(projects, eps))
+    t = _trend(series, baseline, wanted, milestones, near, bool(dcma), range(offset, offset + limit))
+    return {**_env(len(series), offset, t["rows"]),
+            "series": {"source": "eps=" if eps is not None else "projects=", "eps": eps, "updates": len(series),
+                       "projects": [u["project"] for u in series], "first_data_date": series[0]["data_date"],
+                       "last_data_date": series[-1]["data_date"]},
+            "milestones": t["milestones"], "near_critical_days": near,
+            "engine_version": ENGINE_VERSION if dcma else None, "notes": t["notes"]}
 
 
 def _float_edges(edges_days: Optional[Sequence[float]]) -> tuple[list[float], list[str]]:
@@ -12924,9 +13228,10 @@ DASH_INK, DASH_MUTED, DASH_RULE, DASH_HEAD = "1F2937", "6B7280", "D1D5DB", "1F3A
 DASH_FLOAT = {"neg": "B2182B", "near": "E69F00", "ok": "0072B2"}  # negative, 0 to near_critical_days, above
 DASH_TINT = {"neg": "F6D5D9", "near": "FCEBC7", "ok": "D6E7F3", "pass": "DCEFE2", "fail": "F6D5D9", "na": "EEF0F3"}
 DASH_GOOD = "1B7F3B"
-# Sheets in order, with the sidebar glyph of each (Segoe UI Symbol); the Dashboard sidebar links to the others
-DASH_SHEETS = ("Dashboard", "Schedule Overview", "Critical Path", "Reports")
-DASH_NAV = {"Dashboard": "⌂", "Schedule Overview": "▤", "Critical Path": "◎", "Reports": "▥"}
+# Sheets in order, with the sidebar glyph of each (Segoe UI Symbol); the Dashboard sidebar links to the others.
+# Trend only with trend= (p6_export_dashboard).
+DASH_SHEETS = ("Dashboard", "Schedule Overview", "Critical Path", "Trend", "Reports")
+DASH_NAV = {"Dashboard": "⌂", "Schedule Overview": "▤", "Critical Path": "◎", "Trend": "↗", "Reports": "▥"}
 DASH_ACT_CAP = 20000  # activities of the Schedule Overview sheet
 DASH_TABLE_ROWS = 12  # critical and delayed activities on the Dashboard sheet
 DASH_PAGE = "F3F5F8"  # page background of the Dashboard sheet (cards and panels are white)
@@ -13256,9 +13561,11 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
     wb = Workbook()
     wb.properties.creator = "MCP for Primavera P6 server"
     wb.properties.title = f"{d['project']} project controls dashboard"
-    sheets = {DASH_SHEETS[0]: wb.active}
-    sheets[DASH_SHEETS[0]].title = DASH_SHEETS[0]
-    for n in DASH_SHEETS[1:]:
+    trend = d.get("trend")
+    names = [n for n in DASH_SHEETS if n != "Trend" or trend]
+    sheets = {names[0]: wb.active}
+    sheets[names[0]].title = names[0]
+    for n in names[1:]:
         sheets[n] = wb.create_sheet(n)
     brand = d["brand"]
     head, accent = brand["primary"], brand["accent"]  # headers, sidebar and dark bars; S-curve actual line
@@ -13519,7 +13826,11 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
                                                                                   "working days after the baseline finish"),
              ("S-curve", f"{cv['measure']['kind']} per {cv['period']}" + (f", baseline {cvb['project']}" if cvb else "")
               if cv else "not drawn"),
-             ("DCMA thresholds", hc["threshold_source"]), ("Generated", d["now"]), ("Server version", SERVER_VERSION)]
+             ("DCMA thresholds", hc["threshold_source"]),
+             *([("Trend", f"{len(trend['rows'])} updates, data dates {trend['rows'][0]['data_date'][:10]} to "
+                          f"{trend['rows'][-1]['data_date'][:10]}: " + ", ".join(u["project"] for u in trend["rows"]))]
+               if trend else []),
+             ("Generated", d["now"]), ("Server version", SERVER_VERSION)]
     r += 1
     for i, (k, v) in enumerate(facts):
         put(ws, r + i, 1, k, bold=True, size=9)
@@ -13557,6 +13868,15 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
         "S-curve: quantities are spread linearly over calendar time between the assignment dates (P6 spreads over "
         "working time and resource curves) and the actual curve is rebuilt from the actual dates, so only the values at "
         "the data date are exact. Earned value = budget x activity % complete (its percent complete type).",
+        *([f"Trend sheet: one row per update of trend=, ordered by data date, each from its own last F9: scheduled "
+           "finish and must finish date; the finish against the must finish date, the first and the previous update "
+           "and the update's baseline in working days of the update's project calendar; units % complete, baseline "
+           "planned units % at the data date and SPI (units) as the cards; critical activities (project definition), "
+           f"near critical (open, not critical, total float up to {near:g} d), negative float, minimum and median total "
+           "float of open activities; the DCMA weighted score with its failed checks and BEI; activities and links added "
+           "and removed and durations cut since the previous update (activities by Activity ID). Charts: forecast "
+           "finish and must finish, then units % complete, baseline planned % and SPI (right axis) per data date. "
+           "Milestones: those in every update (or milestones=), dates actual (A) else forecast."] if trend else []),
         *d["warnings"]]
     for i, n in enumerate(notes):
         put(ws, r + 1 + i, 1, "Warning" if i >= len(notes) - len(d["warnings"]) else None, size=9, bold=True,
@@ -13601,7 +13921,7 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
     merged(ws, 1, 1, 1, brand["company"] or "Schedule dashboard", r1=2, bold=True, size=13, color=side_ink, bg=head,
            indent=1, wrap=True)
     put(ws, 3, 1, "Primavera P6 schedule", size=9, color=side_soft, bg=head, indent=1)
-    for i, name in enumerate(DASH_SHEETS):  # one link every other row from row 12 (rows of the panels, 15 points)
+    for i, name in enumerate(names):  # one link every other row from row 12 (rows of the panels, 15 points)
         cell = ws.cell(12 + 2 * i, 1)
         cell.value = rich((DASH_NAV[name] + "  ", side_ink, True, False, 11), (name, side_ink, False, i == 0, 11))
         cell.fill = fill(mix(head, 0.18) if i == 0 else head)
@@ -13874,10 +14194,11 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
     # fixed charts: two-cell anchors that never move or size with cells (Excel's "Don't move or size with cells"),
     # from the final column widths and row heights. An absolute anchor would keep its points while printing widens
     # the columns, so the charts would print off their panels.
-    def marker(r: int, c: int, dx: int, dy: int) -> AnchorMarker:  # the point dx, dy pixels right of and below (r, c)
-        while dx >= (w := col_px(ws.column_dimensions[letter(c)].width or 8.43)):
+    def marker(r: int, c: int, dx: int, dy: int, sheet=None) -> AnchorMarker:  # dx, dy pixels right of and below (r, c)
+        sh = sheet or ws
+        while dx >= (w := col_px(sh.column_dimensions[letter(c)].width or 8.43)):
             dx, c = dx - w, c + 1
-        while dy >= (h := row_px(ws.row_dimensions[r].height)):
+        while dy >= (h := row_px(sh.row_dimensions[r].height)):
             dy, r = dy - h, r + 1
         return AnchorMarker(col=c - 1, colOff=pixels_to_EMU(dx), row=r - 1, rowOff=pixels_to_EMU(dy))
 
@@ -13891,6 +14212,108 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
     page(ws, one_page=True)
     ws.print_area = f"A1:{letter(col(NG - 1))}{LAST}"
     counts["Dashboard"] = 1
+    # ---- Trend (trend= only): a row per update, then the finish and progress charts and the milestones
+    if trend:
+        ws = sheets["Trend"]
+        tr = trend["rows"]
+        top(ws, "Trend")  # what the columns hold: the Reports notes
+        tcols = [("Update", "0", 14), ("Project", None, 22), ("Data Date", DATE, 11), ("Last F9", DATE, 11),
+                 ("Finish", DATE, 11), ("Must Finish", DATE, 11), ("vs Must Finish (wd)", SIGNED, 10),
+                 ("vs First Update (wd)", SIGNED, 10), ("vs Previous Update (wd)", SIGNED, 10),
+                 ("vs Baseline (wd)", SIGNED, 10), ("Units % Complete", PCT, 10), ("Baseline Planned %", PCT, 10),
+                 ("SPI (units)", "0.00", 9), ("Critical", "#,##0", 9), ("Near Critical", "#,##0", 9),
+                 ("Negative Float", "#,##0", 9), ("Min Total Float (d)", DAYS, 10), ("Median Total Float (d)", DAYS, 10),
+                 ("DCMA Points", "0.0", 9), ("Grade", None, 7), ("DCMA Checks Failed", None, 40), ("BEI", "0.00", 8),
+                 ("Activities Added", "#,##0", 10), ("Activities Removed", "#,##0", 10), ("Links Added", "#,##0", 9),
+                 ("Links Removed", "#,##0", 9), ("Durations Cut", "#,##0", 9)]
+        header(ws, 5, 1, [c[0] for c in tcols], [c[2] for c in tcols])
+        for i, u in enumerate(tr):
+            dc, ch, tfs = u["dcma"] or {}, u["changes"] or {}, u["total_float"]
+            vals = [u["update"], u["project"], _db_dt(u["data_date"]), _db_dt(u["last_schedule_date"]), _db_dt(u["finish"]),
+                    _db_dt(u["must_finish"]), u["finish_vs_must_finish_wd"], u["finish_variance_first_wd"],
+                    u["finish_variance_previous_wd"], u["baseline_finish_variance_wd"], u["units_pct"],
+                    u["planned_units_pct"], u["spi_units"], u["critical"], u["near_critical"], u["negative_float"],
+                    tfs["min_d"], tfs["median_d"], dc.get("points"), dc.get("grade"),
+                    ", ".join(DCMA_LABELS.get(k, k) for k in dc.get("failed", [])), dc.get("bei"),
+                    ch.get("activities_added"), ch.get("activities_removed"), ch.get("links_added"),
+                    ch.get("links_removed"), ch.get("durations_cut")]
+            for j, (v, (_, f, _w)) in enumerate(zip(vals, tcols)):
+                put(ws, 6 + i, 1 + j, v, fmt=f, size=9, h="center" if j in (0, 19) else None, wrap=j == 20,
+                    bold=u["project"] == d["project"] and j == 1)
+            ws.row_dimensions[6 + i].height = 12.75 * max(1, math.ceil(len(vals[20]) / 50))  # set: the charts sit below
+        last_row = 5 + len(tr)
+        ws.freeze_panes = "C6"
+
+        def serial(v: Optional[datetime]) -> Optional[float]:  # an Excel date number
+            return None if v is None else (v - datetime(1899, 12, 30)).total_seconds() / 86400
+
+        def tchart(ch, r: int, dx: int, w: int, h: int) -> None:  # fixed on the sheet, w x h pixels
+            ch.anchor = TwoCellAnchor(editAs="absolute", _from=marker(r, 1, dx, 4, ws), to=marker(r, 1, dx + w, 4 + h, ws))
+            ws.add_chart(ch)
+        r0, cw, chh = last_row + 2, 620, 330
+        cats = Reference(ws, min_col=3, min_row=6, max_row=last_row)
+        fin = LineChart()  # forecast finish (and must finish) per data date
+        fin.title = "Forecast finish by data date"
+        fin.visible_cells_only = False
+        must_any = any(u["must_finish"] for u in tr)
+        for c, color, dash in [(5, head, None)] + ([(6, DASH_FLOAT["neg"], "dash")] if must_any else []):
+            fin.add_data(Reference(ws, min_col=c, min_row=5, max_row=last_row), titles_from_data=True)
+            line(fin.series[-1], color, 2.25, dash)
+            fin.series[-1].marker.symbol = "circle"
+            fin.series[-1].marker.size = 6
+        fin.set_categories(cats)
+        axes(fin, "b")
+        fin.y_axis.number_format = DATE
+        fin.x_axis.number_format = DATE
+        ys = [serial(_db_dt(u[k])) for u in tr for k in ("finish", "must_finish") if _db_dt(u[k])]
+        if ys:  # a date axis from about a month before the earliest to a month after the latest date
+            fin.y_axis.scaling.min, fin.y_axis.scaling.max = math.floor(min(ys)) - 30, math.ceil(max(ys)) + 30
+        tchart(fin, r0, 4, cw, chh)
+        prog = LineChart()  # units % complete and baseline planned % (left axis), SPI units (right axis)
+        prog.title = "Progress and SPI by data date"
+        prog.visible_cells_only = False
+        for c, color, dash in ((11, accent, None), (12, "7F8A99", "dash")):
+            prog.add_data(Reference(ws, min_col=c, min_row=5, max_row=last_row), titles_from_data=True)
+            line(prog.series[-1], color, 2.25, dash)
+            prog.series[-1].marker.symbol = "circle"
+            prog.series[-1].marker.size = 6
+        prog.set_categories(cats)
+        axes(prog, "b")
+        prog.y_axis.number_format = '0"%"'
+        prog.y_axis.scaling.min, prog.y_axis.scaling.max = 0, 100
+        prog.x_axis.number_format = DATE
+        spi = LineChart()
+        spi.add_data(Reference(ws, min_col=13, min_row=5, max_row=last_row), titles_from_data=True)
+        line(spi.series[-1], "E69F00", 2.25)
+        spi.series[-1].marker.symbol = "diamond"
+        spi.series[-1].marker.size = 7
+        spi.y_axis.axId = 200
+        spi.y_axis.number_format = "0.00"
+        spi.y_axis.majorGridlines = None
+        spi.y_axis.crosses = "max"
+        spi.y_axis.delete = False
+        prog += spi
+        tchart(prog, r0, 4 + cw + 24, cw, chh)
+        # milestones followed: their date in every update, then the slip since the first update
+        mr = r0 + math.ceil((chh + 8) / row_px(None)) + 2
+        section(ws, mr, 1, 3 + len(tr), "Milestones (date in each update, actual else forecast)")
+        header(ws, mr + 1, 1, ["Activity ID", "Activity Name"] + [f"Update {u['update']}" for u in tr]
+               + ["vs First Update (wd)"])
+        for i, m in enumerate(trend["milestones"]):
+            put(ws, mr + 2 + i, 1, m["task_code"], size=9)
+            put(ws, mr + 2 + i, 2, m["task_name"], size=9, wrap=True)
+            ws.row_dimensions[mr + 2 + i].height = 12.75 * max(1, math.ceil(len(m["task_name"] or "") / 26))
+            for j, u in enumerate(tr):
+                it = u["milestones"][i]
+                put(ws, mr + 2 + i, 3 + j, _db_dt(it["date"]), fmt=DATE + ('" A"' if it["date_kind"] == "actual" else ""),
+                    size=9, h="center")
+            put(ws, mr + 2 + i, 3 + len(tr), tr[-1]["milestones"][i]["variance_first_wd"], fmt=SIGNED, size=9)
+        for c in range(3, 4 + len(tr)):  # dates with an " A" suffix
+            ws.column_dimensions[letter(c)].width = max(12, ws.column_dimensions[letter(c)].width or 0)
+        if not trend["milestones"]:
+            put(ws, mr + 2, 1, "No milestone followed in every update.", color=DASH_MUTED)
+        page(ws, title_rows="5:5")
+        counts["Trend"] = len(tr)
     wb.active = 0
     return wb, counts, card_values
 
@@ -13901,7 +14324,7 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
                         near_critical_days: NonNegDays = 10, period: Period = "month",
                         prepared_by: Optional[str] = None, revision: Optional[str] = None,
                         company: Optional[str] = None, colors: Optional[str] = None,
-                        overwrite: bool = False) -> dict:
+                        trend: Optional[TrendProjects] = None, overwrite: bool = False) -> dict:
     """Write an Excel project controls dashboard to path (.xlsx in an existing folder; an existing file
     is refused unless overwrite=True; never writes the database). Sheets: Dashboard (one A3 page, protected, objects fixed, a
     sidebar of links: cards for overall progress, critical and delayed activities, schedule variance,
@@ -13920,8 +14343,13 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
     milestone, at most 30). Slip and variance in working days: project calendar for the project
     figures, each activity's own calendar otherwise. prepared_by and revision are printed under the
     title; company (sidebar) and colors ('primary,accent' in hex: sidebar, headers and dark bars, then
-    the S-curve actual line) apply to this export only. The result gives the 7 card values as written
-    (cards) and the DCMA checks that fail (dcma_failed)."""
+    the S-curve actual line) apply to this export only. trend= the Project IDs of the earlier updates of
+    the same job (the project is added when missing and must be the latest by data date) adds a Trend
+    sheet: one row per update as p6_trend (finish, variances, progress, SPI, critical counts, float,
+    DCMA score, changes since the previous update), charts of the forecast finish and of progress and
+    SPI per data date, and the milestones of every update (or milestones=) by update. The result gives
+    the 7 card values as written (cards), the DCMA checks that fail (dcma_failed) and, with trend=,
+    trend {updates, projects}."""
     if baseline_dates not in get_args(BaselineDates):
         raise ValueError(f"baseline_dates must be one of {list(get_args(BaselineDates))}")
     if period not in get_args(Period):
@@ -13942,6 +14370,13 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
         if v and len(v) > 100:
             raise ValueError(f"{k}: at most 100 characters")
     brand = _dash_brand(company, colors)
+    series = None
+    if trend is not None:
+        names = _trend_names(trend, None)
+        series = _trend_series(names + ([] if project in names else [project]))
+        if series[-1]["project"] != project:
+            raise ValueError(f"trend=: {project} must be the latest update by data date; the latest is "
+                             f"{series[-1]['project']} ({series[-1]['data_date']})")
     path = _export_target(path, ".xlsx")
     if os.path.exists(path) and not overwrite:
         raise ValueError(f"{path} already exists: pass overwrite=True to replace it, or choose another path.")
@@ -13981,6 +14416,13 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
     seen = {(rd["project"]["last_recalc_date"], rd["project"]["last_schedule_date"]),
             (summary["dates"]["data_date"], summary["dates"]["last_schedule_run"]),
             (state["data_date"], state["last_schedule_date"])}
+    tr = None
+    if series:  # every update of the series, the exported project last
+        tr = _trend(series, baseline, codes, "matched", near, True, range(len(series)))
+        seen.add((tr["rows"][-1]["data_date"], tr["rows"][-1]["last_schedule_date"]))
+        warnings += [f"Trend: {n}" for n in tr["notes"]]
+        warnings += [f"Trend: {u['project']} was changed by this server after its last F9: its values are those of "
+                     "that F9." for u in tr["rows"] if u["stale"]]
     if len(seen) > 1:
         raise ValueError(f"The schedule of {project} changed during the export (data date or last F9): run it again.")
     source = (", ".join(os.path.basename(f) for f in SETTINGS.xer_files) if SETTINGS.xer_files  # XER-only mode
@@ -13988,7 +14430,7 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
     data = {"project": project, "name": name and name[0], "db": source, "now": datetime.now(),
             "rd": rd, "summary": summary, "curve": curve, "curve_error": curve_error, "crit": crit, "hc": hc,
             "state": state, "near": near, "baseline_dates": baseline_dates, "baseline_arg": baseline,
-            "warnings": warnings, "brand": brand, **texts}
+            "warnings": warnings, "brand": brand, **texts, **({"trend": tr} if tr else {})}
     wb, counts, cards = _dash_book(data)
     tmp = path + ".tmp"
     try:  # written beside the target, then swapped in: a failed export leaves the old file intact
@@ -14005,6 +14447,7 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
                        "critical": len(crit)},
             "cards": cards, "dcma_failed": [k for k, c in hc["checks"].items()
                                             if c.get("pass") is False and k not in HC_UNSCORED],
+            **({"trend": {"updates": len(tr["rows"]), "projects": [u["project"] for u in tr["rows"]]}} if tr else {}),
             "warnings": warnings, "schedule_state": state,
             "note": "Values of the last F9 in P6. The Dashboard sheet is protected (no password) and prints on one A3 "
                     "landscape page."}

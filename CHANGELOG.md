@@ -14,6 +14,29 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   limit); `resources` gives each resource's totals (the quantities of `p6_resource_summary`), peak period and
   over-allocated periods; `counts` the over-allocated periods, the resources over and the resources without a
   limit. `resource=`, `role=`, `from_date` / `to_date`. Read only, also for remote clients.
+- Cost earned value at the data date: `p6_project_summary` returns a `cost` block beside the units figures, and
+  `p6_progress_curve(measure='cost')` the same block as `to_date.cost`. It follows P6's earned value fields: BAC
+  (budgeted cost of every assignment, labor, nonlabor and material, plus expenses), PV (the baseline's planned cost
+  at the data date), EV (budgeted cost x the earned % of each activity under its WBS earned value technique), AC
+  (actual regular and overtime cost plus actual expenses), CV, SV, CPI, SPI, ETC, EAC, VAC and TCPI, with a
+  breakdown by source (labor, nonlabor, material, other, expenses). EAC follows the project's technique for
+  computing estimate to complete (its WBS node, else the admin preferences: remaining cost, PF = 1, PF = 1 / CPI,
+  PF = 1 / (CPI x SPI) or a custom PF), and every variant is given in `eac_variants`. Without a baseline PV, SV and
+  SPI are null; without costs the block says so. Units figures are unchanged.
+- `p6_trend`: a trend across the schedule updates of one job, one row per update ordered by data date. Give the
+  Project IDs of the updates (`projects=`), or an EPS (`eps=`: every project of that EPS and of the EPS below it,
+  baselines and templates left out). Per update: data date and last F9, scheduled finish and must finish date,
+  the finish against the must finish date, the first update, the previous update and the baseline in working days
+  of the project calendar, units % complete, baseline planned % and SPI (units) as `p6_project_summary`, critical,
+  near critical and negative float counts, total float statistics of open activities, the DCMA weighted score with
+  its failed checks and BEI as `p6_health_check` (no snapshot saved; `dcma=False` skips it), the milestones present
+  in every update (or `codes=`) with their date, slip since the previous update and variance since the first, and
+  what changed since the previous update: activities and links added and removed, durations cut (as
+  `p6_compare_projects` and `p6_update_integrity` count them). Read only, every update from its own read snapshot.
+- `p6_export_dashboard(trend=[...])`: the Project IDs of the earlier updates add a **Trend** sheet (linked from the
+  sidebar) with the per-update table, a chart of the forecast finish and must finish per data date, a chart of
+  units % complete, baseline planned % and SPI per data date, and the milestones by update; the Reports sheet
+  explains it. Without `trend=` the workbook is the same as before.
 
 ### Changed
 
@@ -26,15 +49,6 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   (monthly at most 0.5). `checks.spread` counts the spans spread over calendar time (no working time on their
   calendar), the curves applied or not found and the assignments with period actuals; the note says what is still
   approximate. The dashboard S-curve follows.
-- Cost earned value at the data date: `p6_project_summary` returns a `cost` block beside the units figures, and
-  `p6_progress_curve(measure='cost')` the same block as `to_date.cost`. It follows P6's earned value fields: BAC
-  (budgeted cost of every assignment, labor, nonlabor and material, plus expenses), PV (the baseline's planned cost
-  at the data date), EV (budgeted cost x the earned % of each activity under its WBS earned value technique), AC
-  (actual regular and overtime cost plus actual expenses), CV, SV, CPI, SPI, ETC, EAC, VAC and TCPI, with a
-  breakdown by source (labor, nonlabor, material, other, expenses). EAC follows the project's technique for
-  computing estimate to complete (its WBS node, else the admin preferences: remaining cost, PF = 1, PF = 1 / CPI,
-  PF = 1 / (CPI x SPI) or a custom PF), and every variant is given in `eac_variants`. Without a baseline PV, SV and
-  SPI are null; without costs the block says so. Units figures are unchanged.
 
 ## [3.4.0] - 2026-11-27
 

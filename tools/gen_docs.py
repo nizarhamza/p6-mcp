@@ -32,7 +32,7 @@ GROUPS: list[tuple[str, list[str]]] = [
                           "p6_progress_check"]),
     ("Progress and reporting", ["p6_progress_curve", "p6_group_summary", "p6_resource_summary",
                                 "p6_resource_loading", "p6_export_dashboard", "p6_export_lookahead"]),
-    ("Comparison, what-if and risk", ["p6_compare_projects", "p6_update_integrity", "p6_cpm_validate",
+    ("Comparison, what-if and risk", ["p6_compare_projects", "p6_update_integrity", "p6_trend", "p6_cpm_validate",
                                       "p6_schedule_whatif", "p6_schedule_risk"]),
     ("XER files", ["p6_inspect_xer", "p6_import_xer", "p6_export_xer"]),
     ("P6 EPPM server", ["p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status", "p6_eppm_discard",
@@ -88,6 +88,8 @@ SUMMARY = {
     "p6_compare_projects": "Two updates or a baseline compared activity by activity and link by link, with slip "
                            "causes and float erosion",
     "p6_update_integrity": "Review of an update against the previous one: changes a reviewer should question",
+    "p6_trend": "Trend across a series of updates: finish, variances, progress, SPI, critical counts, float, DCMA "
+                "score, milestone slips and what changed between updates",
     "p6_cpm_validate": "Runs the built-in CPM engine against P6's last F9 and explains each difference: changed "
                        "since the F9, bad input, an engine rule or unknown",
     "p6_schedule_whatif": "What-if in memory: add or remove links, change durations or constraints, see the new "

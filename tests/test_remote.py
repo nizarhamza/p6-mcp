@@ -66,6 +66,7 @@ def test_every_tool_has_a_remote_decision(server):
         if policy.is_write(t) and t not in EXPECTED_NEVER:
             assert k == "write", t
     assert kinds["p6_eppm_pull"] == "write" and kinds["p6_list_projects"] == "read"
+    assert kinds["p6_trend"] == "read"  # 3.6.0: read only, offered to remote clients
 
 
 def test_remote_listing():
