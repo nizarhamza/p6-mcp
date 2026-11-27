@@ -473,7 +473,8 @@ DanglingKind = Literal["start", "finish", "both"]
 RedundantCategory = Literal["completed_predecessor", "marked_deleted", "transitive", "duplicate"]
 
 
-WhatIfOp = Literal["add_link", "delete_link", "update_link", "duration", "constraint"]
+WhatIfOp = Literal["add_link", "delete_link", "update_link", "duration", "constraint", "add_activity"]
+FragnetType = Literal["TT_Task", "TT_Mile", "TT_FinMile"]
 
 
 class WhatIfEdit(TypedDict, total=False):
@@ -481,7 +482,10 @@ class WhatIfEdit(TypedDict, total=False):
     rel_type, lag_days, current_type (or task_pred_id for delete / update); op duration: task_code and
     remaining_days, original_days (not started only) or add_remaining_days (days added to the current
     remaining duration, any status); op constraint: task_code, constraint (as p6_update_activity),
-    constraint_date."""
+    constraint_date; op add_activity (fragnet, in memory only): task_code (a new Activity ID), task_name,
+    original_days (in days of calendar, default the project calendar; 0 for a milestone), task_type
+    (TT_Task default, TT_Mile, TT_FinMile), wbs (a WBS code, default the project node), constraint and
+    constraint_date; link it with add_link edits after it."""
     op: WhatIfOp
     predecessor_code: str
     successor_code: str
@@ -490,6 +494,10 @@ class WhatIfEdit(TypedDict, total=False):
     current_type: RelType
     lag_days: float
     task_code: str
+    task_name: str
+    task_type: FragnetType
+    calendar: str
+    wbs: str
     remaining_days: float
     original_days: float
     add_remaining_days: float
