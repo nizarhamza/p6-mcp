@@ -4669,14 +4669,23 @@ class _Cpm:
         return out, by_s, by_p
 
     # ------------------------------------------------------------------ passes
-    def run(self, drivers: Optional[dict] = None) -> dict[int, dict]:
+    def run(self, drivers: Optional[dict] = None, fields: bool = True) -> dict[int, dict]:
         """{task_id: {es, ef, ls, lf, tf_h, ff_h, rs, rf, rls, rlf, ps, pf, longest, critical, float_path,
         float_path_order[, rem_h]}} of every activity of the project (rem_h: the remaining duration F9
-        rewrites, only where it does). drivers: filled by the forward pass (ties() reads it)."""
+        rewrites, only where it does). drivers: filled by the forward pass (ties() reads it). fields=False:
+        the same forward and backward passes, but only the dates and total float (es, ef, ls, lf, tf_h) are
+        returned (no free float, paths or flags: the DCMA critical path test reads no more). The plan is kept
+        for _plan_cache (ties(), _cpm_classify) while self.links is the same list."""
         plan = self.plan()
+        self._plan = (self.links, plan)
         res = self.forward(plan, drivers=drivers)
         self.backward(plan, res)
-        self._fields(plan, res)
+        if fields:
+            self._fields(plan, res)
+        else:
+            for r in res.values():
+                if r.get("ss") is not None:  # as _fields: the first assignment's dates are the stored ones
+                    r["es"], r["ef"] = r["ss"], r["sf"]
         return res
 
     def plan(self) -> dict:
@@ -6150,15 +6159,47 @@ def _temp_network(con, pid: int, cpm: _Cpm, res: Optional[dict], bid: Optional[i
         con.execute("UPDATE PROJECT SET scd_end_date = ? WHERE proj_id = ?", (_fmt_dt(cpm.finish(res)[1]), pid))
 
 
-def _dcma_memory(pid: int, cpm: Optional[_Cpm] = None, res: Optional[dict] = None) -> tuple[dict, str]:
+def _cpm_reloaded(con, cpm: _Cpm, res: dict) -> _Cpm:
+    """The network _Cpm(con, pid) reads back from _temp_network(con, pid, cpm, res), built in memory: open
+    activities with the remaining duration F9 rewrites (rem_h) and the engine's dates, float and paths as their
+    stored values, constraint dates at whole seconds, links in task_pred_id order (new links -1, -2...)."""
+    tcols = _cols(con, "TASK")
+    net = cpm.copy()
+    dated = [(c, k) for c, k in (("early_start_date", "es"), ("early_end_date", "ef"), ("late_start_date", "ls"),
+                                 ("late_end_date", "lf"), ("total_float_hr_cnt", "tf_h"), ("free_float_hr_cnt", "ff_h"),
+                                 ("driving_path_flag", "longest"), ("float_path", "float_path"),
+                                 ("float_path_order", "float_path_order")) if c in tcols]
+    sec = lambda v: _db_dt(_fmt_dt(v)) if isinstance(v, datetime) else v  # noqa: E731
+    for n, d in net.t.items():
+        d["cstr_date"] = sec(d["cstr_date"])
+        if d["status_code"] == "TK_Complete":
+            continue
+        r = res[n]
+        if "rem_h" in r:
+            d["rem"] = d["remain_drtn_hr_cnt"] = r["rem_h"]
+        for c, k in dated:
+            v = r.get(k)
+            d[c] = sec(v) if isinstance(v, datetime) else ("Y" if v else "N") if k == "longest" else v
+    for k, lk in enumerate((lk for lk in net.links if lk["id"] is None), 1):
+        lk["id"] = -k
+    net.links.sort(key=lambda lk: lk["id"])
+    return net
+
+
+def _dcma_memory(pid: int, cpm: Optional[_Cpm] = None, res: Optional[dict] = None,
+                 stored: Optional[tuple] = None) -> tuple[dict, str]:
     """(checks, threshold source) of the DCMA assessment as p6_health_check runs it (project settings, the project
     baseline, current dates, remaining durations; key_dates left out; no snapshot): on the stored database, or
-    with cpm and res on that network with the engine's dates in temp tables (read-only connection)."""
+    with cpm and res on that network with the engine's dates in temp tables (read-only connection). The critical
+    path test reuses what the caller computed instead of loading and running the engine again: stored =
+    (cpm, res, match_rate) of the stored database; with cpm and res, the network as the temp tables hold it
+    (_cpm_reloaded) and res, its own F9."""
     con = _connect()
     con.execute("BEGIN")
     try:
         cfg = _dcma_settings(con, pid, {}, None)
         bid = _baseline_pid(con, pid, None)
+        net = stored
         if cpm is not None:
             qo = con.execute("PRAGMA query_only").fetchone()[0]
             con.execute("PRAGMA query_only = OFF")  # temp tables only: mode=ro keeps the database file read only
@@ -6166,9 +6207,12 @@ def _dcma_memory(pid: int, cpm: Optional[_Cpm] = None, res: Optional[dict] = Non
                 _temp_network(con, pid, cpm, res, bid)
             finally:
                 con.execute(f"PRAGMA query_only = {'ON' if qo else 'OFF'}")
+            if res is not None:
+                back = _cpm_reloaded(con, cpm, res)
+                net = (back, res, _cpm_compare(back, res, False)["match_rate"])
         checks = _dcma(con, pid, bid, cfg, "current", "remaining")[0]
         if "critical_path_test" not in cfg["disabled"]:
-            checks["critical_path_test"] = _cpt(con, pid)
+            checks["critical_path_test"] = _cpt(con, pid, net)
     finally:
         con.rollback()  # drops the temp tables too
     return checks, cfg["source"]
@@ -6406,7 +6450,8 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     assumptions = _whatif_assumptions(base, trial, before, r1, trace, crit_b, crit_a, opn, cut, near, lim,
                                       _finish_ties(base, r0, d0), _finish_ties(trial, r1, d1))
     if dcma:
-        cb, src = _dcma_memory(pid, base, r0) if compare_to == "engine" else _dcma_memory(pid)
+        cb, src = _dcma_memory(pid, base, r0) if compare_to == "engine" else \
+            _dcma_memory(pid, stored=(base, r0, chk["match_rate"]))
         ca = _dcma_memory(pid, trial, r1)[0]
         fb, fa = ([k for k, v in c.items() if v["pass"] is False and k not in HC_UNSCORED] for c in (cb, ca))
         assumptions["dcma"] = {
@@ -6761,20 +6806,25 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
     return out
 
 
-def _cpt(con, pid: int) -> dict:
+def _cpt(con, pid: int, net: Optional[tuple] = None) -> dict:
     """DCMA critical path test with the engine: delay the earliest most critical open activity by 100
-    working days and check that the project finish moves as much (90 % or more of its own shift)."""
+    working days and check that the project finish moves as much (90 % or more of its own shift).
+    net: (cpm, res, match_rate) of the project's network as con holds it, already loaded and run by the
+    caller (res = cpm.run(), match_rate of res against cpm's stored dates); else loaded and run here."""
     out = {"count": None, "denominator": None, "pct": None, "threshold": None, "pass": None, "activity": None,
            "activity_name": None, "sample": []}  # activity keys always present (null when not run)
-    try:
-        base = _Cpm(con, pid)
-        r0 = base.run()
-    except ValueError as e:
-        return {**out, "note": f"not run: {e}"}
-    chk = _cpm_compare(base, r0, False)
-    if chk["match_rate"] is None or chk["match_rate"] < CPM_TRUST:
-        return {**out, "engine_match_rate": chk["match_rate"],
-                "note": f"not run: the CPM engine matches the last F9 on {chk['match_rate']} of open activities "
+    if net is None:
+        try:
+            base = _Cpm(con, pid)
+            r0 = base.run()
+        except ValueError as e:
+            return {**out, "note": f"not run: {e}"}
+        rate = _cpm_compare(base, r0, False)["match_rate"]
+    else:
+        base, r0, rate = net
+    if rate is None or rate < CPM_TRUST:
+        return {**out, "engine_match_rate": rate,
+                "note": f"not run: the CPM engine matches the last F9 on {rate} of open activities "
                         f"(needs {CPM_TRUST}); see p6_cpm_validate"}
     cand = [d for d in base.t.values() if d["task_type"] in ("TT_Task", "TT_Rsrc") and base.duration_fixed(d) is None
             and r0[d["task_id"]]["tf_h"] is not None]
@@ -6786,17 +6836,17 @@ def _cpt(con, pid: int) -> dict:
     delay = 100 * (d["hpd"] or 8.0)
     trial = base.copy()
     trial.t[d["task_id"]]["rem"] = trial.t[d["task_id"]]["rem"] + delay
-    r1 = trial.run()
+    r1 = trial.run(fields=False)
     f0, f1 = base.finish(r0)[1], trial.finish(r1)[1]
     act_shift = (r1[d["task_id"]]["ef"] - r0[d["task_id"]]["ef"]).total_seconds() / 86400
     fin_shift = (f1 - f0).total_seconds() / 86400
     if act_shift <= 0:
-        return {**out, "activity": d["task_code"], "activity_name": d["task_name"], "engine_match_rate": chk["match_rate"],
+        return {**out, "activity": d["task_code"], "activity_name": d["task_name"], "engine_match_rate": rate,
                 "note": f"not evaluated: delaying {d['task_code']} did not move its own finish"}
     ok = fin_shift >= 0.9 * act_shift
     return {**out, "pass": ok, "activity": d["task_code"], "activity_name": d["task_name"], "delay_d": 100,
             "activity_finish_shift_cd": round(act_shift, 2), "project_finish_shift_cd": round(fin_shift, 2),
-            "engine_match_rate": chk["match_rate"]}
+            "engine_match_rate": rate}
 
 
 def _cmp_acts(con, dates: str, crit: tuple[str, str] = ("0", "0")) -> str:
@@ -10803,6 +10853,8 @@ class _XerImport:
         self.stats: dict[str, dict[str, int]] = {}
         self.warnings: list[str] = []
         self.now = _now_str(con)
+        self._upd: list[list] = []  # buffered UPDATEs: [sql, [params, ...]] runs in statement order (flush)
+        self._upd_sql: dict[tuple, Optional[tuple]] = {}  # (table, row keys, where keys) -> (sql, row columns)
 
     def count(self, table: str, what: str, n: int = 1) -> None:
         self.stats.setdefault(table, {}).setdefault(what, 0)
@@ -10843,8 +10895,52 @@ class _XerImport:
         row = self.prep(table, xrow)
         row.update(extra or {})
         row.update(_stamp_cols(self.con, table, self.now, create=False))
-        _update(self.con, table, {XER_PK[table]: db_id}, row)
+        self.update(table, {XER_PK[table]: db_id}, row)
         self.count(table, "updated")
+
+    def update(self, table: str, where: dict, row: dict) -> None:
+        """_update, buffered: the same statement, sent by flush() with executemany (consecutive UPDATEs with
+        the same SQL in one call, statement order kept). Call flush() before reading what they change."""
+        k = (table, tuple(row), tuple(where))
+        plan = self._upd_sql.get(k, False)
+        if plan is False:
+            cols = [c for c in row if c in _cols(self.con, table) and c not in where]
+            plan = self._upd_sql[k] = (f"UPDATE {table} SET {', '.join(c + '=?' for c in cols)} WHERE "
+                                       + " AND ".join(c + "=?" for c in where), cols) if cols else None
+        if plan is None:
+            return
+        params = [*(row[c] for c in plan[1]), *where.values()]
+        if self._upd and self._upd[-1][0] == plan[0]:
+            self._upd[-1][1].append(params)
+        else:
+            self._upd.append([plan[0], [params]])
+
+    def flush(self) -> None:
+        """Send the buffered UPDATEs (update())."""
+        for sql, rows in self._upd:
+            self.con.executemany(sql, rows)
+        self._upd = []
+
+    def index(self, sql: str, args=()) -> dict:
+        """{key: [ids in query order]} of the rows (id, *key) of sql, read once for the match lookups (find)."""
+        out: dict = {}
+        for r in self.con.execute(sql, args):
+            out.setdefault(tuple(r[1:]), []).append(r[0])
+        return out
+
+    def find(self, index: dict, key: tuple, sql: str, args, covered: bool = True) -> Optional[int]:
+        """The id sql (the match query, its first row) gives for key, from index: one candidate is the answer,
+        several run sql itself (after flush) so the database picks as before, and so does a key index does not
+        cover (covered=False). index must hold every live row sql can match for a covered key, rows inserted
+        since it was read included; a NULL compared with = matches nothing."""
+        if None in key:
+            return None
+        ids = index.get(key, ())
+        if covered and len(ids) < 2:
+            return ids[0] if ids else None
+        self.flush()
+        hit = self.con.execute(sql, args).fetchone()
+        return hit[0] if hit else None
 
     def match_or_create(self, table: str, rows: list[dict], key, find_sql: Optional[str],
                         parent_col: Optional[str] = None) -> None:
@@ -11105,6 +11201,7 @@ def p6_import_xer(
                                              "orig_proj_id": target.get("orig_proj_id"),
                                              "sum_base_proj_id": target.get("sum_base_proj_id"),
                                              "project_flag": "Y"})
+            imp.flush()
         else:
             extra = {"proj_short_name": short, "project_flag": "Y", "proj_id": pid,
                      "guid": _guid(), "sum_base_proj_id": None, "orig_proj_id": None}
@@ -11164,33 +11261,53 @@ def p6_import_xer(
             p = by_id.get(w.get("parent_wbs_id"))
             return n if p is None or n > 100 else depth(p, n + 1)
 
+        imp.flush()
+        # update mode: the match queries' keys read once (_XerImport.index / find), inserted rows added
+        wbs_sql = "SELECT wbs_id FROM PROJWBS WHERE proj_id = ? AND parent_wbs_id = ? AND wbs_short_name = ?" \
+            + _alive(con, "PROJWBS")
+        wbs_ix = imp.index("SELECT wbs_id, parent_wbs_id, wbs_short_name FROM PROJWBS WHERE proj_id = ?"
+                           + _alive(con, "PROJWBS"), (pid,)) if mode == "update" else {}
         for w in sorted((w for w in wbs if w is not node), key=depth):
             parent = imp.idmap["PROJWBS"].get(w.get("parent_wbs_id"), imp.idmap["PROJWBS"][node["wbs_id"]])
             hit = None
             if mode == "update":
-                hit = con.execute("SELECT wbs_id FROM PROJWBS WHERE proj_id = ? AND parent_wbs_id = ? "
-                                  "AND wbs_short_name = ?" + _alive(con, "PROJWBS"),
-                                  (pid, parent, w["wbs_short_name"])).fetchone()
+                hit = imp.find(wbs_ix, (parent, w["wbs_short_name"]), wbs_sql, (pid, parent, w["wbs_short_name"]))
             if hit:
-                imp.idmap["PROJWBS"][w["wbs_id"]] = hit[0]
-                imp.upd_row("PROJWBS", hit[0], w, {"parent_wbs_id": parent, "proj_id": pid})
+                imp.idmap["PROJWBS"][w["wbs_id"]] = hit
+                imp.upd_row("PROJWBS", hit, w, {"parent_wbs_id": parent, "proj_id": pid})
             else:
-                imp.idmap["PROJWBS"][w["wbs_id"]] = imp.new_row("PROJWBS", w, {"parent_wbs_id": parent})
+                new = imp.idmap["PROJWBS"][w["wbs_id"]] = imp.new_row("PROJWBS", w, {"parent_wbs_id": parent})
+                if imp.idmap["PROJECT"].get(w.get("proj_id")) == pid:
+                    wbs_ix.setdefault((parent, w["wbs_short_name"]), []).append(new)
+        imp.flush()
 
         # ---- activities
+        task_sql = "SELECT task_id FROM TASK WHERE proj_id = ? AND task_code = ?" + _alive(con, "TASK")
+        task_ix = imp.index("SELECT task_id, task_code FROM TASK WHERE proj_id = ?" + _alive(con, "TASK"),
+                            (pid,)) if mode == "update" else {}
         for t in x.get("TASK", []):
             hit = None
             if mode == "update":
-                hit = con.execute("SELECT task_id FROM TASK WHERE proj_id = ? AND task_code = ?"
-                                  + _alive(con, "TASK"), (pid, t["task_code"])).fetchone()
+                hit = imp.find(task_ix, (t["task_code"],), task_sql, (pid, t["task_code"]))
             if hit:
-                imp.idmap["TASK"][t["task_id"]] = hit[0]
-                imp.upd_row("TASK", hit[0], t)
+                imp.idmap["TASK"][t["task_id"]] = hit
+                imp.upd_row("TASK", hit, t)
             else:
-                imp.idmap["TASK"][t["task_id"]] = imp.new_row("TASK", t)
+                new = imp.idmap["TASK"][t["task_id"]] = imp.new_row("TASK", t)
+                if imp.idmap["PROJECT"].get(t.get("proj_id")) == pid:
+                    task_ix.setdefault((t["task_code"],), []).append(new)
+        imp.flush()
+        # links, assignments and codes are read once for the project's activities (tids, soft-deleted ones too);
+        # a row of another activity (a new one outside the project) is matched with its query as before
+        own = "IN (SELECT task_id FROM TASK WHERE proj_id = ?)"
+        tids = {r[0] for r in con.execute("SELECT task_id FROM TASK WHERE proj_id = ?", (pid,))}
 
         # ---- relationships (one link per pair and type: a repeated XER row is skipped)
         seen_links = set()
+        pred_sql = "SELECT task_pred_id FROM TASKPRED WHERE task_id = ? AND pred_task_id = ? AND pred_type = ?" \
+            + _alive(con, "TASKPRED")
+        pred_ix = imp.index("SELECT task_pred_id, task_id, pred_task_id, pred_type FROM TASKPRED WHERE task_id "
+                            + own + _alive(con, "TASKPRED"), (pid,)) if mode == "update" else {}
         for r in x.get("TASKPRED", []):
             succ, pred = imp.idmap["TASK"].get(r["task_id"]), imp.idmap["TASK"].get(r["pred_task_id"])
             if succ is None or pred is None:
@@ -11202,17 +11319,22 @@ def p6_import_xer(
             seen_links.add((succ, pred, r.get("pred_type")))
             hit = None
             if mode == "update":
-                hit = con.execute("SELECT task_pred_id FROM TASKPRED WHERE task_id = ? AND pred_task_id = ? "
-                                  "AND pred_type = ?" + _alive(con, "TASKPRED"),
-                                  (succ, pred, r["pred_type"])).fetchone()
+                hit = imp.find(pred_ix, (succ, pred, r["pred_type"]), pred_sql, (succ, pred, r["pred_type"]),
+                               succ in tids)
             if hit:
-                imp.upd_row("TASKPRED", hit[0], r)
-                imp.touched["TASKPRED"].add(hit[0])
+                imp.upd_row("TASKPRED", hit, r)
+                imp.touched["TASKPRED"].add(hit)
             else:
-                imp.touched["TASKPRED"].add(imp.new_row("TASKPRED", r))
+                new = imp.new_row("TASKPRED", r)
+                imp.touched["TASKPRED"].add(new)
+                pred_ix.setdefault((succ, pred, r["pred_type"]), []).append(new)
+        imp.flush()
 
         # ---- assignments (a database row is matched once: touched holds matched and new ids)
         used = imp.touched["TASKRSRC"]
+        asg_sql = "SELECT taskrsrc_id FROM TASKRSRC WHERE task_id = ? AND rsrc_id IS ?" + _alive(con, "TASKRSRC")
+        asg_ix = imp.index("SELECT taskrsrc_id, task_id, rsrc_id FROM TASKRSRC WHERE task_id " + own
+                           + _alive(con, "TASKRSRC"), (pid,)) if mode == "update" else {}
         for r in x.get("TASKRSRC", []):
             task, rsrc = imp.idmap["TASK"].get(r["task_id"]), imp.idmap["RSRC"].get(r.get("rsrc_id"))
             if task is None:
@@ -11220,24 +11342,35 @@ def p6_import_xer(
                 continue
             hit = None
             if mode == "update":
-                hit = next((h[0] for h in con.execute(
-                    "SELECT taskrsrc_id FROM TASKRSRC WHERE task_id = ? AND rsrc_id IS ?"
-                    + _alive(con, "TASKRSRC"), (task, rsrc)) if h[0] not in used), None)
+                free = [i for i in asg_ix.get((task, rsrc), ()) if i not in used]
+                if len(free) > 1 or task not in tids:  # the database's row order decides, as before
+                    imp.flush()
+                    free = [h[0] for h in con.execute(asg_sql, (task, rsrc)) if h[0] not in used]
+                hit = free[0] if free else None
             if hit:
                 imp.idmap["TASKRSRC"][r["taskrsrc_id"]] = hit
                 imp.upd_row("TASKRSRC", hit, r)
             else:
                 hit = imp.idmap["TASKRSRC"][r["taskrsrc_id"]] = imp.new_row("TASKRSRC", r)
+                asg_ix.setdefault((task, rsrc), []).append(hit)
             used.add(hit)
+        imp.flush()
 
         # ---- activity code assignments and UDF values (upsert on their composite keys)
+        # keys present (soft-deleted rows too: an upsert revives them); rows of other activities checked one by one
+        actv = (lambda k: k[0] in tids, {tuple(r) for r in con.execute(
+            "SELECT task_id, actv_code_type_id FROM TASKACTV WHERE task_id " + own, (pid,))})
         for r in x.get("TASKACTV", []):
             row = imp.prep("TASKACTV", r)
             if None in (row.get("task_id"), row.get("actv_code_type_id"), row.get("actv_code_id")):
                 imp.count("TASKACTV", "skipped_unmapped")
                 continue
-            _upsert(imp, "TASKACTV", row, ("task_id", "actv_code_type_id"))
+            _upsert(imp, "TASKACTV", row, ("task_id", "actv_code_type_id"), actv)
+        imp.flush()
         udf_tables = {u["udf_type_id"]: u["table_name"] for u in x.get("UDFTYPE", [])}
+        types = {v for v in imp.idmap["UDFTYPE"].values() if v is not None}
+        udfv = (lambda k: k[0] in types, {tuple(r) for r in con.execute(
+            f"SELECT udf_type_id, fk_id FROM UDFVALUE WHERE udf_type_id IN {_ids_sql(sorted(types))}")})
         for r in x.get("UDFVALUE", []):
             tbl = udf_tables.get(r["udf_type_id"])
             row = imp.prep("UDFVALUE", r)
@@ -11245,7 +11378,8 @@ def p6_import_xer(
             if row.get("udf_type_id") is None or row["fk_id"] is None:
                 imp.count("UDFVALUE", "skipped_unmapped")
                 continue
-            _upsert(imp, "UDFVALUE", row, ("udf_type_id", "fk_id"))
+            _upsert(imp, "UDFVALUE", row, ("udf_type_id", "fk_id"), udfv)
+        imp.flush()
 
         # ---- update: rows of the project missing from the XER, deleted only when asked (never activities)
         missing, gone_txt = None, []
@@ -11355,16 +11489,26 @@ def p6_inspect_xer(path: str, xer_project: Optional[str] = None, db_preview: boo
     return res
 
 
-def _upsert(imp: _XerImport, table: str, row: dict, key: tuple) -> None:
+def _upsert(imp: _XerImport, table: str, row: dict, key: tuple, known: Optional[tuple] = None) -> None:
+    """Update the row with these key values (a soft-deleted one comes back), else insert it. known = (covers,
+    keys): the key tuples present in the table for every key covers(k) accepts, read once (inserts added);
+    another key is looked up in the table. The UPDATE is buffered (imp.update: flush afterwards)."""
     where = {k: row[k] for k in key}
-    if imp.con.execute(f"SELECT 1 FROM {table} WHERE " + " AND ".join(k + "=?" for k in key),
-                       list(where.values())).fetchone():
+    k = tuple(where.values())
+    if known is not None and known[0](k):
+        hit = k in known[1]
+    else:
+        hit = imp.con.execute(f"SELECT 1 FROM {table} WHERE " + " AND ".join(c + "=?" for c in key), k).fetchone()
+    if hit:
         revive = {c: None for c in ("delete_session_id", "delete_date") if c in _cols(imp.con, table)}  # a soft-deleted row comes back
-        _update(imp.con, table, where, {**row, **revive, **_stamp_cols(imp.con, table, imp.now, create=False)})
+        imp.update(table, where, {**row, **revive, **_stamp_cols(imp.con, table, imp.now, create=False)})
         imp.count(table, "updated")
     else:
+        imp.flush()
         _insert(imp.con, table, {**row, **_stamp_cols(imp.con, table, imp.now, create=True)})
         imp.count(table, "inserted")
+        if known is not None and known[0](k):
+            known[1].add(k)
 
 
 def _ids_sql(ids) -> str:
