@@ -5,8 +5,25 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+### Added
+
+- `detail="brief"` on `p6_query_activities`, `p6_critical_path`, `p6_lookahead`, `p6_float_paths`, `p6_milestones`
+  and `p6_get_activity`: rows without their empty (null) values, and in `p6_get_activity` links without
+  `direction`, `lag_h` (`lag_d` stays) and `other_project` when it is the activity's own project. On a
+  3,120-activity project a 200-row page is 17 to 19 % smaller (activity lists), 16 % for milestones and one activity
+  32 %. `fields=` works with it. The default `detail="full"` keeps every key of every row, as before.
+- `explain=True` on `p6_update_integrity` and `p6_compare_projects` returns the fixed texts described below, so
+  the result is the same as in 3.4.
+
 ### Changed
 
+- Fixed texts that do not depend on the project are no longer sent with every result (visible to anyone who reads
+  these keys): `p6_update_integrity` no longer returns `definition` in each flag (and in `result` with `flag=`),
+  `p6_compare_projects` no longer returns `summary.activities.float_definition`, and `schedule_state.note` is null
+  unless it says something about this project (changes made after the last F9, or no F9 date recorded). The words
+  are in the tool descriptions and come back with `explain=True` where the tool has it. `p6_update_integrity` is
+  14 % smaller (2 KB), and every result carrying `schedule_state` loses about 120 characters. `p6_cpm_validate`
+  `rules` and `p6_milestones` `float_origin_explanation` stay: skills read them.
 - Faster engine and report tools: stored dates are read once per distinct value instead of once per use. On a
   3,120-activity project, `p6_cpm_validate` takes 0.54 s instead of 0.98 s, `p6_health_check` 1.11 s instead of
   1.57 s, `p6_schedule_whatif` 2.65 s instead of 3.74 s, `p6_project_summary` 0.11 s instead of 0.31 s. Results

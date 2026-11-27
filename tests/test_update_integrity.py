@@ -100,6 +100,20 @@ def test_reverse_page_and_refusals(demo):
             integrity(demo, **kw)
 
 
+def test_definitions_only_with_explain(demo):
+    plain, words = integrity(demo), integrity(demo, explain=True)
+    assert all(list(f) == ["count", "sample"] or k == "duration_cut" for k, f in plain["flags"].items())
+    assert {k: f["definition"] for k, f in words["flags"].items()} == demo.s.INTEGRITY_DEFS
+    assert words["caveat"] == plain["caveat"] and "not proof of manipulation" in plain["caveat"]
+    for f in words["flags"].values():
+        del f["definition"]
+    words["schedule_state"]["note"] = plain["schedule_state"]["note"]
+    assert words == plain
+    page = integrity(demo, flag="duration_cut", explain=True)
+    assert page["result"] == {"count": 2, "definition": demo.s.INTEGRITY_DEFS["duration_cut"]}
+    assert integrity(demo, flag="duration_cut")["result"] == {"count": 2}
+
+
 def test_dcma_before_and_after_through_snapshots(demo):
     prev = demo.call("p6_health_check", project=make_demo.PROJ_PREV)["snapshot"]["id"]
     cur = demo.call("p6_health_check", project=make_demo.PROJ)["snapshot"]["id"]
