@@ -425,7 +425,7 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
                         "p80_buffer_wd": None if cal is None else round(cal.work_days(det, _pctl(fins, 80)), 2) + 0.0})
     edges = _period_edges(ends[0], ends[-1], "week", week_day)
     hist, cum = [], 0
-    for a, b in zip(edges, edges[1:]):
+    for a, b in zip(edges, edges[1:], strict=False):
         k = bisect.bisect_left(ends, b) - bisect.bisect_left(ends, a)
         cum += k
         hist.append({"week_start": a.date().isoformat(), "week_end": (b - timedelta(days=1)).date().isoformat(),
@@ -448,7 +448,7 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
                        "warning": None if chk["match_rate"] is not None and chk["match_rate"] >= CPM_TRUST else (
                            f"The engine matches the last F9 on {chk['match_rate']} of the open activities (needs "
                            f"{CPM_TRUST}): the simulated dates may not follow P6's; see p6_cpm_validate.")},
-               distribution={"default": dict(zip(("min_pct", "mode_pct", "max_pct"), dflt)), "ranges": echo,
+               distribution={"default": dict(zip(("min_pct", "mode_pct", "max_pct"), dflt, strict=False)), "ranges": echo,
                              "udfs": uinfo, "counts": {"drawn": len(dist), **{s: sum(1 for x in dist.values()
                                                                                       if x[3] == s) for s in RISK_SOURCES},
                                                        "duration_fixed": fixed, "recomputed_per_iteration": len(sub)}},

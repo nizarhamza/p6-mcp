@@ -44,7 +44,8 @@ def _p6_tree(text: str, strict: bool = False) -> dict:
         while s[pos].isdigit():
             pos += 1
         num = s[start:pos]
-        eat("|"); eat("|")
+        eat("|")
+        eat("|")
         j = s.index("(", pos)
         name, pos = s[pos:j], j + 1
         j = s.index(")", pos)
@@ -61,7 +62,7 @@ def _p6_tree(text: str, strict: bool = False) -> dict:
         keys = parts[::2]
         if strict and len(set(keys)) != len(keys):  # a dict keeps one: never rewrite such a node
             raise IndexError
-        return {"name": name, "attrs": dict(zip(keys, parts[1::2])), "kids": kids, "num": num}
+        return {"name": name, "attrs": dict(zip(keys, parts[1::2], strict=False)), "kids": kids, "num": num}
 
     try:
         root = node()

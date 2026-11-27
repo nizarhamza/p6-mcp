@@ -38,16 +38,19 @@ def _commit(con: sqlite3.Connection, plan: list[str], confirm: bool, projects: I
     appends them (with tool, time, backup in force and the stale projects' last_schedule_date)."""
     mismatch = _plan_gate(plan, confirm)
     if not confirm:
-        con.rollback(); con.close()
+        con.rollback()
+        con.close()
         return {"dry_run": True, "would_do": plan,
                 "next": "Call again with confirm=True to apply"
                         + (" (the local working copy only)." if _state.SETTINGS.eppm else " (P6 must be closed).")}
     if mismatch:
-        con.rollback(); con.close()
+        con.rollback()
+        con.close()
         return {"applied": False, "error": mismatch}
     err = _guard_write()
     if err:
-        con.rollback(); con.close()
+        con.rollback()
+        con.close()
         return {"applied": False, "error": err}
     lsd = "last_schedule_date" if "last_schedule_date" in _cols(con, "PROJECT") else "NULL"
     snap = {}
@@ -65,7 +68,8 @@ def _commit(con: sqlite3.Connection, plan: list[str], confirm: bool, projects: I
         if p is not None and p not in names:
             r = con.execute("SELECT proj_short_name FROM PROJECT WHERE proj_id = ?", (p,)).fetchone()
             names[p] = r[0] if r else None
-    con.commit(); con.close()
+    con.commit()
+    con.close()
     ts, commit_id = _log_ts(), uuid.uuid4().hex[:12]
     stale = {str(p): v[1] for p, v in snap.items()}
     entries = [{"ts": ts, "commit": commit_id, "db": os.path.basename(_state.DB_PATH), "tool": tool,
@@ -266,7 +270,8 @@ def _single_link(fn: Callable, project: str, it: Mapping, confirm: bool) -> dict
         except _Refused as e:
             return {"applied": False, "error": str(e)}
         plan = [x["plan"]]
-        if backup: plan.append(f"Backup: {backup}")
+        if backup:
+            plan.append(f"Backup: {backup}")
         return _commit(con, plan, confirm, projects=x["projects"], log=x["log"])
 
 
@@ -365,7 +370,7 @@ def _link_batch(project: str, items: list, kind: str, confirm: bool, fn: Callabl
             return x
 
         b = _batch(con, items, apply_one)
-        for rep, it in zip(b["items"], items):
+        for rep, it in zip(b["items"], items, strict=False):
             rep["item"] = it
         side = _side_effects(con, lost_pred, lost_succ)
         lag = _lag_info(con, pid)
@@ -442,7 +447,8 @@ def _act_update(con, project: str, it: Mapping) -> dict:
         return out
 
     if task_name:
-        sets["task_name"] = task_name; plan.append(f"name -> {task_name}")
+        sets["task_name"] = task_name
+        plan.append(f"name -> {task_name}")
     if original_duration_days is not None:
         sets["target_drtn_hr_cnt"] = original_duration_days * hpd
         plan.append(f"orig dur {_days(t['target_drtn_hr_cnt'], hpd)} -> {original_duration_days} d")
@@ -480,7 +486,8 @@ def _act_update(con, project: str, it: Mapping) -> dict:
         sets["remain_drtn_hr_cnt"] = 0
         plan.append(f"actual finish -> {sets['act_end_date']} (Completed)")
     if physical_pct is not None:
-        sets["phys_complete_pct"] = it["physical_pct"]; plan.append(f"physical % -> {it['physical_pct']}")
+        sets["phys_complete_pct"] = it["physical_pct"]
+        plan.append(f"physical % -> {it['physical_pct']}")
     if not sets:
         raise _Refused("Nothing to change.")
     start = _db_dt(sets.get("act_start_date") or t["act_start_date"])

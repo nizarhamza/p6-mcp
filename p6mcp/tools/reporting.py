@@ -775,7 +775,7 @@ def p6_resource_loading(project: ProjectId, resource: Optional[str] = None, role
     page.update(
         project=project, data_date=_fmt_dt(dd), period=period,
         periods=[{"period": f"{a:%Y-%m}" if period == "month" else f"{a:%Y-%m-%d}", "start": f"{a:%Y-%m-%d}",
-                  "end": f"{b:%Y-%m-%d}"} for a, b in zip(edges, edges[1:])],
+                  "end": f"{b:%Y-%m-%d}"} for a, b in zip(edges, edges[1:], strict=False)],
         resources=resources,
         counts={"resources": len(resources), "over_allocated_periods": over_periods, "resources_over": resources_over,
                 "material_resources": sum(m["kind"] == "material" for m in res), "no_limit": no_limit,

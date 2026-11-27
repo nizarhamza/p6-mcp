@@ -429,7 +429,8 @@ def p6_import_xer(
             plan += gone_txt
         else:
             plan.append(f"Data date: XER {data_date['xer']}")
-        if backup: plan.append(f"Backup: {backup}")
+        if backup:
+            plan.append(f"Backup: {backup}")
         # a new project or baseline holds the XER's own F9 results; an update mixes old and new data
         sched_rows = _opt_rows(con, sched["options"]) if sched else None
         res = _commit(con, plan, confirm, projects=(pid,) if mode == "update" else (),

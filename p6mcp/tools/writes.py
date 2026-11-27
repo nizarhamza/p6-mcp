@@ -143,7 +143,8 @@ def p6_update_activity(
         except _Refused as e:
             return {"applied": False, "error": str(e)}
         plan = list(r["_lines"])
-        if backup: plan.append(f"Backup: {backup}")
+        if backup:
+            plan.append(f"Backup: {backup}")
         return _commit(con, plan, confirm, projects=r["projects"], log=r["log"])
 
 
@@ -158,7 +159,7 @@ def p6_update_activities(project: ProjectId, items: ActEdits, confirm: bool = Fa
     with _write_session(confirm) as (con, backup):
         _project_id(con, project)
         b = _batch(con, items, lambda i, it: _act_update(con, project, it))
-        for rep, it in zip(b["items"], items):
+        for rep, it in zip(b["items"], items, strict=False):
             rep["item"] = it
         word = "activity" if len(items) == 1 else "activities"
         return _batch_commit(con, b, confirm, f"Update {len(items)} {word}", backup)
@@ -220,7 +221,7 @@ def p6_update_assignments(project: ProjectId, items: AsgEdits, confirm: bool = F
             return x
 
         b = _batch(con, items, apply_one)
-        for rep, it in zip(b["items"], items):
+        for rep, it in zip(b["items"], items, strict=False):
             rep["item"] = it
         sums = _summaries_stale(con, keys)
         res = _batch_commit(con, b, confirm, f"Update units of {len(items)} assignment(s)", backup, tail=_sum_plan(sums))
@@ -256,7 +257,7 @@ def p6_update_udfs(project: ProjectId, items: UdfEdits, confirm: bool = False) -
             return _udf_set(con, project, it)
 
         b = _batch(con, items, apply_one)
-        for rep, it in zip(b["items"], items):
+        for rep, it in zip(b["items"], items, strict=False):
             rep["item"] = it
         return _udf_next(_batch_commit(con, b, confirm, f"Set {len(items)} activity UDF value(s) in {project}", backup))
 
@@ -327,7 +328,8 @@ def p6_delete_activity(project: ProjectId, task_code: ActivityId, force: bool = 
         if side["count"]:
             plan.append(f"Left without predecessor: {len(side['no_predecessor'])}, without successor: "
                         f"{len(side['no_successor'])} (side_effects)")
-        if backup: plan.append(f"Backup: {backup}")
+        if backup:
+            plan.append(f"Backup: {backup}")
         log = [{"operation": "delete_activity", "proj_id": pid, "table": "TASK",
                 "keys": {"task_id": tid, "task_code": task_code},
                 "before": {"task": snap, "rows": counts, "cleared": cleared,

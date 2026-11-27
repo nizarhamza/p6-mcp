@@ -415,11 +415,15 @@ def _num(v) -> Optional[float]:
 def _stamp_cols(con, table: str, now: str, create: bool) -> dict:
     cols = _cols(con, table)
     d = {}
-    if "update_date" in cols: d["update_date"] = now
-    if "update_user" in cols: d["update_user"] = _state.P6_USER
+    if "update_date" in cols:
+        d["update_date"] = now
+    if "update_user" in cols:
+        d["update_user"] = _state.P6_USER
     if create:
-        if "create_date" in cols: d["create_date"] = now
-        if "create_user" in cols: d["create_user"] = _state.P6_USER
+        if "create_date" in cols:
+            d["create_date"] = now
+        if "create_user" in cols:
+            d["create_user"] = _state.P6_USER
     return d
 
 

@@ -89,7 +89,7 @@ def _dash_brand(company: Optional[str] = None, colors: Optional[str] = None) -> 
     cols = [c.strip().lstrip("#") for c in str(colors or "").split(",") if c.strip()]
     if len(cols) > 2:
         raise ValueError("colors: at most two hex colors, 'primary,accent' (e.g. '1F3A5F,0072B2')")
-    for key, c in zip(("primary", "accent"), cols):
+    for key, c in zip(("primary", "accent"), cols, strict=False):
         if not re.fullmatch(r"[0-9A-Fa-f]{6}", c):
             raise ValueError(f"colors: {c!r} is not a hex color such as 1F3A5F")
         out[key] = c.upper()
@@ -506,7 +506,7 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
         ink = _ink_on(bg)
         vals = [w["code"], w["name"], b["bl_start"], b["bl_finish"], b["start"], b["finish"], b["act_start"],
                 b["act_finish"], b["pct"], b["lab_t"], b["lab_a"], b["lab_r"], b["orig_d"], b["rem_d"], b["act_d"]]
-        for j, (v, f) in enumerate(zip(vals, fmts)):
+        for j, (v, f) in enumerate(zip(vals, fmts, strict=False)):
             put(ws, r, 1 + j, v, fmt=f, size=9, bold=True, color=ink, bg=bg, indent=depth if j == 1 else 0,
                 h="center" if j == 0 else None)
         ws.row_dimensions[r].outline_level = min(depth, 7)
@@ -515,7 +515,7 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
         for a in by_wbs.get(w["wbs_id"], []):
             vals = [a["task_code"], a["task_name"], a["bl_start"], a["bl_finish"], a["start"], a["finish"], a["act_start"],
                     a["act_finish"], a["pct"], a["lab_t"], a["lab_a"], a["lab_r"], a["orig_d"], a["rem_d"], a["act_d"]]
-            for j, (v, f) in enumerate(zip(vals, fmts)):
+            for j, (v, f) in enumerate(zip(vals, fmts, strict=False)):
                 put(ws, r, 1 + j, v, fmt=f, size=9, indent=depth + 1 if j == 1 else 0, h="center" if j == 0 else None)
             ws.row_dimensions[r].outline_level = min(depth + 1, 7)
             ws.row_dimensions[r].hidden = True  # folded to the WBS bands of DASH_SO_LEVEL
@@ -558,7 +558,7 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
                     a["wbs_name"], STATUS_NAMES.get(a["status_code"], a["status_code"]), a["start"], a["finish"],
                     a["bl_finish"], a["slip_d"], a["rem_d"], a["tf_d"], status]
             for j, (v, f) in enumerate(zip(vals, (None, "0", None, None, None, None, DATE, DATE, DATE, SIGNED, DAYS, DAYS,
-                                                  None))):
+                                                  None), strict=False)):
                 put(ws, r, 1 + j, v, fmt=f, size=9, bold=j == 0, h="center" if j in (1, 12) else None)
             pill(ws, r, 13, status)
             cls = fclass(a["tf_d"])
@@ -588,7 +588,7 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
         res = "Information" if k == "key_dates" else {True: "Pass", False: "Fail", None: "Not evaluated"}[c.get("pass")]
         vals = [DCMA_LABELS.get(k, k), res, c.get("count"), c.get("denominator"), c.get("value") if ratio else c.get("pct"),
                 thr_txt]
-        for j, (v, f) in enumerate(zip(vals, (None, None, "#,##0", "#,##0", "0.00" if ratio else '0.00"%"', None))):
+        for j, (v, f) in enumerate(zip(vals, (None, None, "#,##0", "#,##0", "0.00" if ratio else '0.00"%"', None), strict=False)):
             put(ws, 6 + i, 1 + j, v, fmt=f, size=9, h="center" if j in (1, 5) else None)
         ws.cell(6 + i, 2).fill = fill(DASH_TINT["pass" if res == "Pass" else "fail" if res == "Fail" else "na"])
     counts["Reports"] = len(qrows)
@@ -951,7 +951,7 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
         status = act_status(a)
         vals = (a["task_code"], a["wbs_code"], a["task_name"], a["bl_start"], a["bl_finish"], a["start"], a["finish"],
                 a["tf_d"], a["slip_d"], status)
-        for j, ((c_a, c_b, _), v) in enumerate(zip(cols, vals)):  # j: 7 total float, 8 slip, 9 status
+        for j, ((c_a, c_b, _), v) in enumerate(zip(cols, vals, strict=False)):  # j: 7 total float, 8 slip, 9 status
             fmt = (DATE if isinstance(v, datetime) else '0.0" d"' if j == 7 else SIGNED if j == 8 else None)
             merged(ws, rr, col(c_a), col(c_b), v, fmt=fmt, size=9, indent=1 if j < 3 else 0,
                    h=None if j < 3 else "center", bold=j == 9,
@@ -1017,7 +1017,7 @@ def _dash_book(d: dict) -> tuple[Any, dict, list]:
                     ", ".join(DCMA_LABELS.get(k, k) for k in dc.get("failed", [])), dc.get("bei"),
                     ch.get("activities_added"), ch.get("activities_removed"), ch.get("links_added"),
                     ch.get("links_removed"), ch.get("durations_cut")]
-            for j, (v, (_, f, _w)) in enumerate(zip(vals, tcols)):
+            for j, (v, (_, f, _w)) in enumerate(zip(vals, tcols, strict=False)):
                 put(ws, 6 + i, 1 + j, v, fmt=f, size=9, h="center" if j in (0, 19) else None, wrap=j == 20,
                     bold=u["project"] == d["project"] and j == 1)
             ws.row_dimensions[6 + i].height = 12.75 * max(1, math.ceil(len(vals[20]) / 50))  # set: the charts sit below
