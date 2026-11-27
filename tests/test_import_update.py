@@ -61,8 +61,9 @@ def test_update_import_matches_as_the_row_queries(p6, monkeypatch):
     changed(p6)
     # two live A1030 rows: the XER row goes to the one the activity query matches (the first by rowid)
     assert [r[0] for r in p6.sql(ORACLE_TASK, "A1030")] == [104, 150]
+    from p6mcp.core import props  # the schedule option writer, the import's only caller of _update
     calls, upd = [], p6.s._update
-    monkeypatch.setattr(p6.s, "_update", lambda con, table, *a: (calls.append(table), upd(con, table, *a)))
+    monkeypatch.setattr(props, "_update", lambda con, table, *a: (calls.append(table), upd(con, table, *a)))
     before = p6.hash()
     kw = dict(path=path, mode="update", project="DEMO-A")
     dry = p6.call("p6_import_xer", **kw)

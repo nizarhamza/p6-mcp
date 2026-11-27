@@ -1,12 +1,10 @@
-"""P6 codes, names and limits shared by the tools (no logic)."""
+"""P6 codes, names and limits shared by the tools."""
 
 from __future__ import annotations
 
 import re
 import sqlite3
 from typing import Optional
-
-from p6mcp import confirm as _confirm
 
 
 MAX_ROWS = 200
@@ -50,25 +48,6 @@ SQL_COUNT_CAP, SQL_COUNT_SECONDS = 1_000_000, 3  # p6_sql_select counts at most 
 SQL_PAGE_BYTES = 150_000  # p6_sql_select ends a page early past this much row JSON (one row at least)
 SQL_QUERY_SECONDS = 30  # p6_sql_select stops a query (execute, skip and fetch) after this long
 SQL_PRAGMAS = {"table_info", "table_xinfo", "index_list", "index_info", "foreign_key_list"}  # read-only ones
-_SQL_ALLOWED = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION,
-                getattr(sqlite3, "SQLITE_RECURSIVE", 33)}
-
-
-_SQL_SECRET_COL = re.compile(r"pass(wd|word)|pwd", re.I)  # USERS.passwd, email_srv_passwd, EXTAPP, EXPPROJ...
-
-
-def _sql_authorizer(action: int, arg1, arg2, dbname, source) -> int:
-    """p6_sql_select: only reading is authorized (no write, ATTACH, schema change or PRAGMA that sets). For a remote
-    client (claude.ai, ChatGPT) credential columns read as NULL: their values would leave the PC."""
-    if action == sqlite3.SQLITE_READ and _confirm.CLIENT.get() is not None and _SQL_SECRET_COL.search(str(arg2)):
-        return sqlite3.SQLITE_IGNORE
-    if action in _SQL_ALLOWED:
-        return sqlite3.SQLITE_OK
-    if action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() in SQL_PRAGMAS:
-        return sqlite3.SQLITE_OK
-    return sqlite3.SQLITE_DENY
-
-
 ACT_EXTRA = ("cstr_type2", "cstr_date2", "restart_date", "reend_date", "expect_end_date", "suspend_date",
              "resume_date")  # TASK columns added by p6_get_activity to the list fields
 UDF_VALUE = {"FT_TEXT": "udf_text", "FT_STATICTYPE": "udf_text", "FT_START_DATE": "udf_date",
