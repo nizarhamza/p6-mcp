@@ -42,14 +42,11 @@ from __future__ import annotations
 
 import base64
 import bisect
-import contextvars
 import copy
-import dataclasses
 import difflib
 import functools
 import heapq
 import html
-import inspect
 import itertools
 import json
 import math
@@ -59,261 +56,95 @@ import re
 import sqlite3
 import statistics
 import uuid
-import subprocess
 import sys
-import urllib.parse
 from collections import Counter
 from contextlib import closing, contextmanager
-from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from time import monotonic
-from typing import Annotated, Any, Callable, get_args, Iterable, Literal, Mapping, Optional, Sequence, TypedDict, Union
-try:  # mcp >= 2.0
-    from mcp.server.mcpserver import MCPServer as FastMCP
-except ImportError:  # mcp 1.x
-    from mcp.server.fastmcp import FastMCP
-try:  # mcp >= 1.8 (1.x and 2.x)
-    from mcp.types import ToolAnnotations
-except ImportError:  # older mcp or the test stub: tools are registered without hints
-    ToolAnnotations = None
-try:  # the only exception whose text mcp 2.x passes to the client
-    from mcp.server.mcpserver.exceptions import ToolError
-except ImportError:
-    try:
-        from mcp.server.fastmcp.exceptions import ToolError
-    except ImportError:  # test stub: tools are called directly and raise their own errors
-        ToolError = None
+from typing import Annotated, Any, Callable, Iterable, Literal, Mapping, Optional, Sequence, get_args
+
 try:  # always installed with mcp
     from pydantic import Field
 except ImportError:  # test stub without pydantic: annotations are never evaluated
     def Field(*_a, **_k):
         return None
-from p6mcp import __version__ as _pkg_version
+
 from p6mcp import config as _config
-from p6mcp import confirm as _confirm
-from p6mcp import instructions as _instructions
 from p6mcp import policy as _policy
 from p6mcp import skills as _skills
-from p6mcp import schema as _schema
 from p6mcp import shop as _shop
-from p6mcp import xerstore as _xerstore
 from p6mcp.eppm import store as _eppm_store
 
+from p6mcp.core import state as _state
+from p6mcp import registry as _registry
+
+# Imported names other modules and the tests read from p6mcp.server.
+from p6mcp import __version__ as _pkg_version  # noqa: F401
+from p6mcp import confirm as _confirm  # noqa: F401
+from p6mcp import instructions as _instructions  # noqa: F401
+from p6mcp import schema as _schema  # noqa: F401
+from p6mcp import xerstore as _xerstore  # noqa: F401
+from p6mcp.registry import FastMCP, ToolAnnotations, ToolError  # noqa: F401
+from p6mcp.core.state import (  # noqa: F401  (re-exported)
+    _cols_cache, _log_cache, _refresh, _ro_cons, _schema_cache, _shop_on,
+)
+from p6mcp.core.constants import (  # noqa: F401  (re-exported)
+    ACT_EXTRA, ACT_LINKS_CAP, CAL_CHECK_KINDS, CAL_CHECK_YEARS, CAL_EXC_EACH, CAL_EXC_PAGE, CAL_EXC_ROWS, CSTR_FINISH,
+    _cstr_label, CSTR_LABELS, CSTR_TYPES, DCMA_LIMIT_DAYS, EPPM_EDIT_TOOLS, EPPM_NEXT, EPPM_TOOLS, FLOAT_EDGES,
+    HARD_CSTR, HARD_CSTR_SET, HPD_SQL, LA_AUTO_DAYS, LA_DAY_GRID_MAX, LA_EXPORT_CAP, LAG_RULES, LOOKAHEAD_DAYS, MAT_SQL,
+    MAX_ROWS, REL_TYPES, REL_TYPES_REV, SEVERITY_RANK, _SQL_ALLOWED, _sql_authorizer, SQL_COUNT_CAP, SQL_COUNT_SECONDS,
+    SQL_PAGE_BYTES, SQL_PRAGMAS, SQL_QUERY_SECONDS, _SQL_SECRET_COL, STATUS_NAMES, SUMMARY_TYPES, TYPE_NAMES,
+    UDF_INDICATOR, UDF_KINDS, UDF_PROJECT_TABLES, UDF_TEXT_MAX, UDF_VALUE, XER_READ_ONLY,
+)
+from p6mcp.registry import (  # noqa: F401  (re-exported)
+    ACT_FIELDS, ACT_HOURS, ActEdit, _ActEditKeys, ActEdits, ActField, ActFields, ActivityId, ActivityIds, AsgEdit,
+    AsgEdits, BaselineDates, _before_call, CalCheckKind, CalCheckKinds, _CALL, CompareSection, CompareTo, _confirm_text,
+    ConfirmText, ConfirmToken, CpMode, CstrName, CutPct, DanglingKind, DATE_PATTERN, DateStr, DATETIME_PATTERN,
+    DateTimeStr, DcmaCheck, Depth, DESTRUCTIVE_DOC, Detail, DetailArg, Direction, DryRun, DurationBasis, _eppm_refusal,
+    _eppm_skill_ok, EpsOrder, Explain, FloatEdges, _gated, GroupBy, HcCheck, HINT_KEYS, ImportMode, INSTRUCTIONS,
+    IntegrityFlag, _json_text, LaGrid, LegacyConfirm, Level, LevelPriority, Limit, LinkEdit, LinkEdits, _LinkEnds,
+    LinkIds, LinkNew, LinkNews, LinkRef, LinkRefs, LISTED, Measure, MsCodes, MsOrder, NewEps, _NewEpsKeys, NonNegDays,
+    NonNegQty, Offset, PathNo, Pct, Period, _plan_gate, _preview, ProjectId, ProjectIds, ProjectList, ProjOrder,
+    RedundantCategory, _register_prompts, REGISTERED, RelType, Removable, RiskIterations, RiskPcts, RiskRange,
+    RiskRanges, SampleSize, SchedValues, _sdk_tool_kw, SERVER_VERSION, _slim_schema, Status, ThresholdCheck, Thresholds,
+    TOKENS, _tool, TOOL_HINTS, TrendMs, TrendProjects, UdfEdit, _UdfEditKeys, UdfEdits, UdfFilter, _UdfFilterKeys,
+    UdfFilters, UdfNames, UdfOp, UdfValue, _version_kw, WhatIfEdit, WhatIfEdits, WhatIfOp, WindowDays, WindowWeeks,
+    _wire, WRITE_DOC, XerTable, Year,
+)
+from p6mcp.core.db import (  # noqa: F401  (re-exported)
+    _act_from, _act_row, _act_view, _alive, _all_rows, _backup, _backup_dir, _backup_file, BACKUP_NAME,
+    _backup_taken_at, _baseline_pid, _bound, _brief, _brief_on, _check_page, _cols, _connect, _days, _db_dt,
+    _DB_DT_SHAPE, _db_dt_text, _dict, _env, _fmt_dt, _guard_write, _ids_sql, _insert, _next_key, _now_str, _num,
+    _p6_running, _page, _parse_dt, _project_id, _projects_of, _prune_backups, _ro_uri, _schema_info, _slice,
+    _stamp_cols, _task, _update, _write_refusal,
+)
 from p6mcp.core.calendar import (  # noqa: F401  (re-exported)
     _Cal, CAL_EPOCH, _cal_parse, _cal_row, CAL_SCAN_DAYS, CAL_WINDOW_DAYS, _calendar, _calendars, DEFAULT_WEEK, _hm,
     _lag_cal_of, _lag_hpd_of, _resolve_dt, _shift_txt, _shifts_of, WEEKDAYS,
 )
+from p6mcp.core.editlog import (  # noqa: F401  (re-exported)
+    _caller_tool, _edit_state, _log_dir, _log_dirs, _log_entries, _log_ts, _log_write, _schedule_state, _undone_fn,
+)
 
 
-# Effective settings: refreshed by _refresh() at the start of every tool call (config.json may change
-# while the server runs). STARTUP = the settings the tool list was built with.
-SETTINGS: _config.Settings = _config.load()
-STARTUP: _config.Settings = SETTINGS
-DB_PATH = SETTINGS.db_path
-P6_USER = SETTINGS.p6_user
-BACKUP_DIR = SETTINGS.backup_dir
-LOG_DIR = SETTINGS.edit_log_dir
-SKIP_PROC = not SETTINGS.block_when_p6_running
-MAX_ROWS = 200
-HPD_SQL = "COALESCE(NULLIF(c.day_hr_cnt, 0), 8)"  # hours per day of calendar alias c (0 or NULL -> 8)
-
-REL_TYPES = {"FS": "PR_FS", "SS": "PR_SS", "FF": "PR_FF", "SF": "PR_SF"}
-REL_TYPES_REV = {v: k for k, v in REL_TYPES.items()}
-CSTR_TYPES = {
-    "none": None,
-    "start_on_or_after": "CS_MSOA",
-    "start_on_or_before": "CS_MSOB",
-    "start_on": "CS_MSO",
-    "finish_on_or_after": "CS_MEOA",
-    "finish_on_or_before": "CS_MEOB",
-    "finish_on": "CS_MEO",
-    "mandatory_start": "CS_MANDSTART",
-    "mandatory_finish": "CS_MANDFIN",
-    "as_late_as_possible": "CS_ALAP",
+# Globals that _refresh() rebinds (and that tests patch) live in their owning module: the facade reads
+# them from there on every access (PEP 562), so p6mcp.server.DB_PATH is always the current one.
+_FORWARD = {
+    'BACKUP_DIR': _state, '_backup_done': _state, 'DB_PATH': _state, 'EPPM_MANIFEST': _state, '_last_backup': _state,
+    '_last_pruned': _state, 'LOG_DIR': _state, 'P6_USER': _state, 'SETTINGS': _state, 'SKIP_PROC': _state,
+    'STARTUP': _state, 'XER_MANIFEST': _state,
+    'mcp': _registry, 'PROMPTS': _registry,
 }
-CSTR_FINISH = {"CS_MEO", "CS_MEOA", "CS_MEOB", "CS_MANDFIN"}  # a date-only constraint date takes the last shift end
-CSTR_LABELS = {"CS_MSO": "Start On", "CS_MSOA": "Start On or After", "CS_MSOB": "Start On or Before",
-               "CS_MEO": "Finish On", "CS_MEOA": "Finish On or After", "CS_MEOB": "Finish On or Before",
-               "CS_MANDSTART": "Mandatory Start", "CS_MANDFIN": "Mandatory Finish",
-               "CS_ALAP": "As Late As Possible"}  # P6 names of the constraint codes (cstr_label keys)
 
 
-def _cstr_label(code: Optional[str]) -> Optional[str]:
-    return None if code is None else CSTR_LABELS.get(code, code)
+def __getattr__(name: str):
+    mod = _FORWARD.get(name)
+    if mod is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(mod, name)
 
 
-# Schedule option sched_calendar_on_relationship_lag: calendar whose hours per day convert lag hours.
-LAG_RULES = {"rcal_Predecessor": "predecessor calendar", "rcal_Successor": "successor calendar",
-             "rcal_24Hour": "24-hour day", "rcal_ProjDefault": "project default calendar"}
-ACT_LINKS_CAP = 50  # predecessors, successors, assignments, codes, UDFs, notebooks listed by p6_get_activity
-SUMMARY_TYPES = "('TT_LOE', 'TT_WBS')"  # LOE and WBS summary activities: never listed as critical or longest path
-HARD_CSTR = "('CS_MSO', 'CS_MEO', 'CS_MSOB', 'CS_MEOB', 'CS_MANDSTART', 'CS_MANDFIN')"  # DCMA hard constraints
-HARD_CSTR_SET = frozenset(re.findall(r"CS_\w+", HARD_CSTR))
-DCMA_LIMIT_DAYS = 44.0  # DCMA default limit of high float, high duration and long lags (days of the calendar)
-MAT_SQL = "MATERIALIZED " if sqlite3.sqlite_version_info >= (3, 35, 0) else ""  # CTE hint (SQLite 3.35+)
-SQL_COUNT_CAP, SQL_COUNT_SECONDS = 1_000_000, 3  # p6_sql_select counts at most this many rows, for this long
-SQL_PAGE_BYTES = 150_000  # p6_sql_select ends a page early past this much row JSON (one row at least)
-SQL_QUERY_SECONDS = 30  # p6_sql_select stops a query (execute, skip and fetch) after this long
-SQL_PRAGMAS = {"table_info", "table_xinfo", "index_list", "index_info", "foreign_key_list"}  # read-only ones
-_SQL_ALLOWED = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION,
-                getattr(sqlite3, "SQLITE_RECURSIVE", 33)}
-
-
-_SQL_SECRET_COL = re.compile(r"pass(wd|word)|pwd", re.I)  # USERS.passwd, email_srv_passwd, EXTAPP, EXPPROJ...
-
-
-def _sql_authorizer(action: int, arg1, arg2, dbname, source) -> int:
-    """p6_sql_select: only reading is authorized (no write, ATTACH, schema change or PRAGMA that sets). For a remote
-    client (claude.ai, ChatGPT) credential columns read as NULL: their values would leave the PC."""
-    if action == sqlite3.SQLITE_READ and _confirm.CLIENT.get() is not None and _SQL_SECRET_COL.search(str(arg2)):
-        return sqlite3.SQLITE_IGNORE
-    if action in _SQL_ALLOWED:
-        return sqlite3.SQLITE_OK
-    if action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() in SQL_PRAGMAS:
-        return sqlite3.SQLITE_OK
-    return sqlite3.SQLITE_DENY
-
-
-ACT_EXTRA = ("cstr_type2", "cstr_date2", "restart_date", "reend_date", "expect_end_date", "suspend_date",
-             "resume_date")  # TASK columns added by p6_get_activity to the list fields
-UDF_VALUE = {"FT_TEXT": "udf_text", "FT_STATICTYPE": "udf_text", "FT_START_DATE": "udf_date",
-             "FT_END_DATE": "udf_date", "FT_INT": "udf_number", "FT_MONEY": "udf_number",
-             "FT_FLOAT_2_DECIMALS": "udf_number", "FT_CODE": "udf_code"}  # UDF value column per logical type
-UDF_KINDS = {"FT_TEXT": "text", "FT_STATICTYPE": "indicator", "FT_START_DATE": "start_date",
-             "FT_END_DATE": "finish_date", "FT_INT": "integer", "FT_MONEY": "cost",
-             "FT_FLOAT_2_DECIMALS": "number", "FT_CODE": "code"}  # data type names shown to clients
-UDF_TEXT_MAX = 255  # UDFVALUE.udf_text length (P6 limit)
-UDF_INDICATOR = re.compile(r"UDF_G[0-4]", re.I)  # indicator values as P6 stores them (UDF_G0 to UDF_G4)
-UDF_PROJECT_TABLES = ("PROJECT", "PROJWBS", "TASK", "TASKRSRC")  # UDF subjects whose values belong to a project
-# p6_list_calendars(include_exceptions=True): calendars and exception dates per page, dates per calendar (< 200 KB)
-CAL_EXC_ROWS, CAL_EXC_PAGE, CAL_EXC_EACH = 50, 800, 100
-LOOKAHEAD_DAYS = 14  # p6_lookahead window without days= or weeks=
-CAL_CHECK_YEARS = 10  # p6_calendar_check: years compared at most (from the start year of the span)
-# p6_calendar_check finding kinds in report order, with their severity
-CAL_CHECK_KINDS = {"calendar_missing": "error", "unreadable": "error", "base_missing": "error",
-                   "no_working_time": "error", "rsrc_dep_no_calendar": "error",
-                   "project_holiday_worked": "warning", "holiday_not_in_project": "warning",
-                   "no_exceptions_in_year": "warning", "day_hours_stale": "warning",
-                   "week_hours_stale": "info", "work_week_differs": "info"}
-SEVERITY_RANK = {"error": 0, "warning": 1, "info": 2}
-LA_EXPORT_CAP = 5000  # p6_export_lookahead: activity rows written at most
-LA_DAY_GRID_MAX = 92  # p6_export_lookahead: a day grid covers at most this many days (else weeks)
-LA_AUTO_DAYS = 42  # grid='auto': days up to this window length, weeks beyond
-FLOAT_EDGES = (-20.0, -10.0, -5.0, 0.0, 5.0, 10.0, 20.0, 44.0)  # p6_float_analysis default bucket edges (days)
-STATUS_NAMES = {"TK_NotStart": "Not Started", "TK_Active": "In Progress", "TK_Complete": "Completed"}
-TYPE_NAMES = {"TT_Task": "Task Dependent", "TT_Rsrc": "Resource Dependent", "TT_Mile": "Start Milestone",
-              "TT_FinMile": "Finish Milestone", "TT_LOE": "Level of Effort", "TT_WBS": "WBS Summary"}
-
-# Parameter types shown to MCP clients (module level: the SDK evaluates the string annotations).
-# The tools keep their own runtime checks because tests and internal calls bypass validation.
-DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
-DATETIME_PATTERN = r"^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?$"  # what _parse_dt accepts
-Limit = Annotated[int, Field(ge=1, le=MAX_ROWS, description="Rows per page (max 200).")]
-Offset = Annotated[int, Field(ge=0, description="Rows to skip: pass next_offset from the previous page.")]
-ProjectId = Annotated[str, Field(min_length=1, description="Project ID as shown in P6 (p6_list_projects).")]
-ActivityId = Annotated[str, Field(min_length=1, description="Activity ID (task_code).")]
-Status = Literal["TK_NotStart", "TK_Active", "TK_Complete"]
-RelType = Literal["FS", "SS", "FF", "SF"]
-Direction = Literal["pred", "succ", "both"]
-ImportMode = Literal["new", "update", "baseline"]
-CpMode = Literal["project", "total_float", "longest_path"]
-Removable = Literal["TASKPRED", "TASKRSRC"]
-CstrName = Literal["none", "start_on_or_after", "start_on_or_before", "start_on", "finish_on_or_after",
-                   "finish_on_or_before", "finish_on", "mandatory_start", "mandatory_finish",
-                   "as_late_as_possible"]
-XerTable = Literal["COSTTYPE", "CURRTYPE", "FINTMPL", "MEMOTYPE", "OBS", "RISKTYPE", "ROLES", "UDFTYPE", "PROJECT",
-                   "CALENDAR", "SCHEDOPTIONS", "PROJWBS", "RSRC", "ACTVTYPE", "PROJRISK", "ROLERATE", "RSRCRATE",
-                   "TASK", "ACTVCODE", "PROJCOST", "TASKMEMO", "TASKPRED", "TASKPROC", "TASKRSRC", "TASKACTV",
-                   "TASKRISK", "UDFVALUE"]
-DateStr = Annotated[str, Field(pattern=DATE_PATTERN, description="YYYY-MM-DD")]
-DateTimeStr = Annotated[str, Field(pattern=DATETIME_PATTERN, description="YYYY-MM-DD HH:MM")]
-Pct = Annotated[float, Field(ge=0, le=100)]
-NonNegDays = Annotated[float, Field(ge=0)]
-NonNegQty = Annotated[float, Field(ge=0, description="Units as P6 stores them (hours for labor).")]
-Depth = Annotated[int, Field(ge=0, description="Levels below the start node (0 = the node only).")]
-PathNo = Annotated[int, Field(ge=1, description="Float path number (1 = most critical).")]
-BaselineDates = Literal["current", "planned"]  # baseline finish: actual else early, or its planned finish
-DurationBasis = Literal["remaining", "original"]
-CompareSection = Literal["activities", "relationships"]
-DcmaCheck = Literal["logic", "logic_density", "leads", "lags", "long_lags", "fs_links", "hard_constraints", "high_float",
-                    "negative_float", "high_duration", "invalid_dates", "resources", "missed_tasks",
-                    "critical_path_test", "cpli", "bei"]
-ThresholdCheck = Literal[tuple(c for c in get_args(DcmaCheck) if c != "critical_path_test")]  # not run: no threshold
-Thresholds = Annotated[dict[ThresholdCheck, float], Field(description="Threshold per check, e.g. {'hard_constraints': 1}.")]
-SampleSize = Annotated[int, Field(ge=0, le=50, description="Sample rows per check (max 50).")]
-GroupBy = Literal["status", "task_type", "wbs", "code"]
-EpsOrder = Literal["seq", "tree"]  # p6_list_eps: P6 sequence order, or the tree (each node before its children)
-ProjOrder = Literal["project", "eps"]  # p6_list_projects: by Project ID, or by EPS (tree order) then Project ID
-Period = Literal["month", "week"]
-Measure = Literal["units", "cost"]
-Level = Annotated[int, Field(ge=1, description="Hierarchy level (1 = top).")]
-WindowDays = Annotated[int, Field(ge=1, le=366, description="Window length in calendar days (max 366).")]
-WindowWeeks = Annotated[int, Field(ge=1, le=52, description="Window length in weeks (max 52).")]
-CalCheckKind = Literal["calendar_missing", "unreadable", "base_missing", "no_working_time", "rsrc_dep_no_calendar",
-                       "project_holiday_worked", "holiday_not_in_project", "no_exceptions_in_year", "day_hours_stale",
-                       "week_hours_stale", "work_week_differs"]
-assert tuple(CAL_CHECK_KINDS) == get_args(CalCheckKind)
-CalCheckKinds = Annotated[list[CalCheckKind], Field(description="Finding kinds to list (default all).")]
-Year = Annotated[int, Field(ge=1900, le=2200, description="Calendar year, e.g. 2026.")]
-LaGrid = Literal["auto", "day", "week"]
-FloatEdges = Annotated[list[float], Field(min_length=1, description="Bucket edges in days, increasing; 0 is always added.")]
-ProjectIds = Annotated[list[ProjectId], Field(description="Project IDs (earlier updates of the same schedule).")]
-ActivityIds = Annotated[list[ActivityId], Field(description="Activity IDs (task_code).")]
-SchedValues = Annotated[dict[str, Any], Field(description="Option name -> value (names as p6_schedule_options shows them).")]
-LevelPriority = Annotated[list[str], Field(description="Leveling priorities, 'field:ASC' or 'field:DESC', e.g. ['priority_type:ASC'].")]
-
-
-class _NewEpsKeys(TypedDict):
-    eps_id: str
-    eps_name: str
-
-
-class NewEps(_NewEpsKeys, total=False):
-    """EPS node p6_import_xer creates (or reuses when eps_id exists) for a new project."""
-    parent_eps: str
-
-
-ProjectList = Annotated[Union[str, list[str]], Field(description="Project ID, or a list of Project IDs.")]
-# Parameters the server adds to every write tool (two-step flow, see p6mcp.confirm)
-DryRun = Annotated[bool, Field(description="true (default): preview only, returns the plan and a confirmation_token. "
-                                           "false: apply the previewed change (needs confirmation_token).")]
-ConfirmToken = Annotated[str, Field(description="confirmation_token returned by the dry run of this same call.")]
-ConfirmText = Annotated[str, Field(description="The exact confirmation_text_required given by the dry run.")]
-LegacyConfirm = Annotated[bool, Field(description="Deprecated alias of dry_run=false (still needs the token).")]
-UdfOp = Literal["eq", "ne", "lt", "le", "gt", "ge", "contains", "empty", "not_empty"]
-UdfValue = Annotated[Union[str, float], Field(description="Text, number, 'YYYY-MM-DD[ HH:MM]' date, indicator "
-                                                          "(UDF_G0 to UDF_G4) or code short name, per the UDF type.")]
-
-
-class _UdfFilterKeys(TypedDict):
-    udf: str
-
-
-class UdfFilter(_UdfFilterKeys, total=False):
-    """Activities whose UDF value matches: op (default eq) against value (not for empty / not_empty)."""
-    op: UdfOp
-    value: Union[str, float]
-
-
-UdfFilters = Annotated[list[UdfFilter], Field(description="UDF conditions, all must hold.")]
-UdfNames = Annotated[list[str], Field(description="UDF labels (as in P6 columns) to add to each row under 'udfs'.")]
-# Activity list row: the one list of field names (rows, fields= projection, MCP schema)
-ActField = Literal["task_code", "task_name", "status_code", "task_type", "wbs_name",
-                   "early_start_date", "early_end_date", "late_start_date", "late_end_date",
-                   "act_start_date", "act_end_date", "target_start_date", "target_end_date",
-                   "cstr_type", "cstr_label", "cstr_date", "phys_complete_pct", "driving_path_flag",
-                   "orig_dur_d", "rem_dur_d", "total_float_d", "free_float_d", "float_path", "float_path_order"]
-ActFields = Annotated[list[ActField], Field(description="Fields to return (task_code always first); default all.")]
-Detail = Literal["full", "brief"]  # rows with every key (fixed shape), or without the null values
-DetailArg = Annotated[Detail, Field(description="brief: rows without their null values; full (default): every key.")]
-Explain = Annotated[bool, Field(description="True: also return the fixed texts in words (see the description).")]
-ACT_FIELDS: tuple[str, ...] = get_args(ActField)
-ACT_HOURS = {"orig_dur_d": "target_drtn_hr_cnt", "rem_dur_d": "remain_drtn_hr_cnt",
-             "total_float_d": "total_float_hr_cnt", "free_float_d": "free_float_hr_cnt"}  # day fields, from hours
-assert set(get_args(CstrName)) == set(CSTR_TYPES)
-assert set(get_args(RelType)) == set(REL_TYPES)
-assert set(ACT_HOURS) <= set(ACT_FIELDS)
 # DCMA 14 check -> (DCMA default threshold, rule, PROJPROP 'schedule_check' target, its limit in hours, on/off flag).
 # rule: max = pct at most the threshold, min = pct at least, ratio = value at least; threshold None = report only.
 DCMA_CHECKS: dict[str, tuple] = {
@@ -347,758 +178,6 @@ HC_WARN_MAX = 2.0  # an "at most" check that fails warns while its % is at most 
 HC_WARN_MIN = 0.9  # an "at least" check that fails warns while its % or value is at least this share of it
 HC_GRADES = (("A", 90.0), ("B", 80.0), ("C", 70.0), ("D", 55.0))  # grade when points are at least; F below
 assert set(HC_WEIGHTS) <= set(DCMA_CHECKS) and set(HC_UNSCORED) <= set(DCMA_CHECKS)
-
-# built-in lines the user kept plus their own ones (Settings, Instructions page), fixed at startup
-INSTRUCTIONS = _instructions.build(STARTUP.raw)
-
-SERVER_VERSION = _pkg_version  # reported to clients as serverInfo.version where the SDK supports it
-_version_kw = {"version": SERVER_VERSION} if "version" in inspect.signature(FastMCP.__init__).parameters else {}
-mcp = FastMCP("primavera-p6", instructions=INSTRUCTIONS, **_version_kw)  # keywords: positional order differs in 1.x and 2.x
-_backup_done = False
-_last_backup: Optional[str] = None  # backup in force for this process's writes (named in the edit log)
-_last_pruned: list[str] = []  # backups the retention rule removed after the last backup
-_cols_cache: dict[str, set[str]] = {}
-_log_cache: dict[str, tuple] = {}  # edit log file -> ((mtime_ns, size), entries)
-_schema_cache: dict[str, dict] = {}  # db path -> schema.detect() (trust applied at read time)
-XER_MANIFEST: Optional[dict] = None  # XER-only mode: files, projects (Project ID renames), warnings
-XER_READ_ONLY = ("XER-only mode is read only: the XER files are analysed, never changed. Select a P6 database in "
-                 "MCP for Primavera P6 Settings to write.")
-EPPM_MANIFEST: Optional[dict] = None  # P6 EPPM mode: pull.json of the working copy (server, projects, rows)
-EPPM_TOOLS = ("p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status")
-# Edits allowed on a P6 EPPM working copy: the ones the push can send (docs/EPPM_PLAN.md 4.1), plus the local backups
-EPPM_EDIT_TOOLS = frozenset({
-    "p6_update_activity", "p6_update_activities", "p6_update_assignment", "p6_update_assignments",
-    "p6_add_relationship", "p6_add_relationships", "p6_update_relationship", "p6_update_relationships",
-    "p6_delete_relationship", "p6_delete_relationships", "p6_backup_database", "p6_restore_backup",
-    "p6_eppm_push", "p6_eppm_schedule", "p6_eppm_discard"})
-EPPM_NEXT = ("Changed in the local working copy only: nothing is sent to the P6 EPPM server until p6_eppm_push "
-             "(dry run first, then the user's yes). p6_eppm_status lists the pending changes.")
-
-
-def _eppm_refusal(tool: str) -> str:
-    if tool == "p6_delete_activity":
-        return ("Activities are not deleted through a P6 EPPM working copy in this version: delete it in P6 EPPM, "
-                "then pull again.")
-    return (f"{tool} is not available on a P6 EPPM working copy: the push to the server supports activity, "
-            "relationship and assignment edits only. Do it in P6 EPPM, then pull again.")
-
-
-TOOL_HINTS: dict[str, dict[str, bool]] = {}
-HINT_KEYS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")  # MCP tool annotations, in order
-REGISTERED: dict[str, Callable] = {}  # tool -> what a client call runs (policy gate + two-step write flow)
-LISTED: set[str] = set()  # tools offered to clients (fixed at startup)
-TOKENS = _confirm.TokenStore()
-# Context of the client call being run (two-step flow): {tool, params, token, expected_plan, plan}.
-# Direct calls (tests, internal use) have none and keep the plain confirm=True behaviour.
-_CALL: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar("p6_call", default=None)
-WRITE_DOC = ("\n\nTwo steps: dry_run=true (default) writes nothing and returns the plan and a confirmation_token. "
-             "Show the plan; only after the user's explicit yes, call again with the same arguments, dry_run=false "
-             "and that token.")
-DESTRUCTIVE_DOC = " This tool deletes or replaces data: step 2 also needs confirmation_text, given by the dry run."
-
-
-def _refresh() -> _config.Settings:
-    """Re-read the settings (cheap while config.json is unchanged). A new database clears the caches
-    tied to the old one."""
-    global SETTINGS, DB_PATH, P6_USER, BACKUP_DIR, LOG_DIR, SKIP_PROC, _backup_done, _last_backup, XER_MANIFEST
-    global EPPM_MANIFEST
-    st = _config.load()
-    XER_MANIFEST = EPPM_MANIFEST = None
-    if st.eppm:  # P6 EPPM mode: the working copy of the pulled projects, once there is one
-        EPPM_MANIFEST = _eppm_store.read_manifest(st.eppm)
-        if EPPM_MANIFEST:
-            st = dataclasses.replace(st, db_path=_eppm_store.store_path(st.eppm), db_problem=None)
-    if st.xer_files:  # XER-only mode: the read-only store built from the files (cached until they change)
-        try:
-            path, XER_MANIFEST = _xerstore.ensure(st.xer_files)
-            st = dataclasses.replace(st, db_path=path)
-        except (_xerstore.XerStoreError, OSError, ValueError) as e:
-            st = dataclasses.replace(st, db_problem=f"XER-only mode: the XER files cannot be loaded: {e}")
-    if os.path.normcase(st.db_path) != os.path.normcase(DB_PATH):
-        _cols_cache.clear()
-        _schema_cache.clear()
-        _backup_done, _last_backup = False, None
-    SETTINGS, DB_PATH, P6_USER, BACKUP_DIR, LOG_DIR = st, st.db_path, st.p6_user, st.backup_dir, st.edit_log_dir
-    SKIP_PROC = not st.block_when_p6_running
-    return st
-
-
-def _shop_on(st: _config.Settings) -> bool:
-    """The skill shop setting (on when no config file says otherwise)."""
-    return st.raw.get("shop_enabled", True) is not False
-
-
-def _before_call(tool: str) -> _config.Settings:
-    """Settings of this call; raises when the policy refuses the tool or no database is usable."""
-    st = _refresh()
-    if st.xer_files and _policy.is_write(tool):
-        raise ValueError(XER_READ_ONLY)
-    if st.eppm and _policy.is_write(tool) and tool not in EPPM_EDIT_TOOLS:
-        raise ValueError(_eppm_refusal(tool))
-    why = _policy.refusal(tool, st.tool_profile, st.allow_writes, _shop_on(st))
-    if why:
-        raise ValueError(why)
-    if not DB_PATH and tool not in _policy.NO_DB_TOOLS:
-        raise RuntimeError(st.db_problem or _config.NO_DB_MESSAGE)
-    return st
-
-
-def _schema_info() -> dict:
-    """schema.detect() of the current database (cached), with the user's trusted schemas applied."""
-    info = _schema_cache.get(DB_PATH)
-    if info is None:
-        con = _connect()
-        try:
-            info = _schema_cache[DB_PATH] = _schema.detect(con)
-        finally:
-            con.close()
-    trusted = info["fingerprint"] in SETTINGS.trusted_schemas
-    return dict(info, trusted=trusted, writable=info["readable"] and (info["known"] or trusted))
-
-
-def _write_refusal() -> Optional[str]:
-    """Why this database may not be written now (settings and schema), None when it may."""
-    if SETTINGS.xer_files:
-        return XER_READ_ONLY
-    if SETTINGS.eppm:  # the working copy is ours: no schema gate, writes as the settings allow
-        if not EPPM_MANIFEST:
-            return "Nothing pulled yet from the P6 EPPM server: pull a project with p6_eppm_pull first."
-        return _policy.write_refusal(SETTINGS.tool_profile, SETTINGS.allow_writes)
-    why = _policy.write_refusal(SETTINGS.tool_profile, SETTINGS.allow_writes)
-    if why:
-        return why
-    info = _schema_info()
-    return None if info["writable"] else _schema.write_refusal(info)
-
-
-def _plan_gate(plan: Sequence, confirm: bool) -> Optional[str]:
-    """Two-step flow: a dry run records the digest of its plan (the token is bound to it); an apply
-    call must rebuild the same plan, else the change is refused (returned message) before commit."""
-    ctx = _CALL.get()
-    if ctx is None:
-        return None
-    d = _confirm.plan_digest(plan)
-    if not confirm:
-        ctx["plan"] = d
-        return None
-    if ctx.get("expected_plan") is not None and ctx["expected_plan"] != d:
-        ctx["plan_mismatch"] = True
-        return ("The database changed since the dry run: the plan is different now. Nothing was written. Run the "
-                "dry run again, show the new plan to the user and confirm it.")
-    return None
-
-
-def _confirm_text(tool: str, params: dict) -> str:
-    """Text a destructive call must repeat (built from its arguments, so it names what goes)."""
-    if tool == "p6_delete_project":
-        p = params.get("project")
-        return "DELETE PROJECT " + ", ".join([p] if isinstance(p, str) else [str(x) for x in p or []])
-    if tool == "p6_delete_activity":
-        return f"DELETE ACTIVITY {params.get('project')} {params.get('task_code')}"
-    if tool == "p6_restore_backup":
-        return f"RESTORE {params.get('name')}"
-    if tool == "p6_eppm_push":
-        return f"PUSH TO {SETTINGS.eppm}" + (" AND SCHEDULE" if params.get("schedule") else "")
-    raise KeyError(tool)
-
-
-def _preview(tool: str, params: dict) -> dict:
-    """Dry run of a write tool that has no confirm parameter of its own."""
-    if tool == "p6_backup_database":
-        why = _write_refusal()
-        if why:
-            raise RuntimeError(why)
-        plan = [f"Copy {os.path.basename(DB_PATH)} ({os.path.getsize(DB_PATH) / 1048576:.1f} MB) to {_backup_dir()}"]
-        _plan_gate(plan, False)
-        return {"dry_run": True, "would_do": plan}
-    raise ValueError(f"{tool} has no dry run")
-
-
-def _gated(fn: Callable) -> Callable:
-    """The callable clients reach: policy check on every call; for write tools the two-step flow
-    (dry_run, confirmation_token, confirmation_text) on top of the tool's own confirm logic."""
-    name = fn.__name__
-    kind = _policy.kind(name)
-    if kind in (_policy.READ, _policy.FILE):
-        @functools.wraps(fn)
-        def call(*a, **k):
-            _before_call(name)
-            return fn(*a, **k)
-        return call
-
-    sig = inspect.signature(fn)
-    has_confirm = "confirm" in sig.parameters
-    destructive = kind == _policy.DESTRUCTIVE
-    settings_only = kind == _policy.CONFIG  # changes MCP for Primavera P6's settings: the token is bound to the config file
-
-    def scope() -> str:
-        return (SETTINGS.config_path or _config.config_path()) if settings_only else DB_PATH
-
-    @functools.wraps(fn)
-    def call(*a, dry_run: bool = True, confirmation_token: Optional[str] = None,
-             confirmation_text: Optional[str] = None, **k):
-        _before_call(name)
-        ba = sig.bind(*a, **k)
-        ba.apply_defaults()
-        params = dict(ba.arguments)
-        apply = bool(params.pop("confirm", False)) or dry_run is False
-        ctx = {"tool": name, "params": params, "token": None, "expected_plan": None, "plan": None}
-        if not apply:
-            tok = _CALL.set(ctx)
-            try:
-                res = fn(**params, confirm=False) if has_confirm else _preview(name, params)
-            finally:
-                _CALL.reset(tok)
-            if isinstance(res, dict) and res.get("dry_run") and not res.get("would_refuse"):
-                g = TOKENS.issue(name, params, scope(), ctx["plan"] or _confirm.plan_digest(res.get("would_do") or []),
-                                 owner=_confirm.OWNER.get())
-                res["confirmation_token"] = g.token
-                res["token_expires_in_s"] = int(TOKENS.ttl)
-                extra = ""
-                if destructive:
-                    res["confirmation_text_required"] = _confirm_text(name, params)
-                    extra = f", confirmation_text=\"{res['confirmation_text_required']}\""
-                res["next"] = (f"Show this plan to the user. Only after their explicit yes, call {name} again with the "
-                               f"same arguments plus dry_run=false, confirmation_token=\"{g.token}\"{extra}."
-                               + ("" if settings_only or SETTINGS.eppm else " P6 must be closed."))
-            return res
-        if destructive:
-            want = _confirm_text(name, params)
-            if (confirmation_text or "").strip() != want:
-                raise ValueError(f"{name} deletes or replaces data: pass confirmation_text=\"{want}\" exactly, as the "
-                                 "dry run asks.")
-        g = TOKENS.check(name, params, scope(), confirmation_token, owner=_confirm.OWNER.get())
-        ctx.update(token=g.token, expected_plan=g.plan)
-        tok = _CALL.set(ctx)
-        try:
-            res = fn(**params, confirm=True) if has_confirm else fn(**params)
-        finally:
-            _CALL.reset(tok)
-        if ctx.get("plan_mismatch") or not (isinstance(res, dict) and res.get("applied") is False):
-            TOKENS.consume(g.token)
-        return res
-
-    # The SDK reads __signature__ as it is (no string evaluation): give it evaluated annotations.
-    ev = inspect.signature(fn, eval_str=True)
-    ps = [p.replace(annotation=LegacyConfirm) if p.name == "confirm" else p for p in ev.parameters.values()]
-    P = inspect.Parameter
-    ps += [P("dry_run", P.POSITIONAL_OR_KEYWORD, default=True, annotation=DryRun),
-           P("confirmation_token", P.POSITIONAL_OR_KEYWORD, default=None, annotation=Optional[ConfirmToken])]
-    if destructive:
-        ps.append(P("confirmation_text", P.POSITIONAL_OR_KEYWORD, default=None, annotation=Optional[ConfirmText]))
-    call.__signature__ = ev.replace(parameters=ps)
-    call.__doc__ = (fn.__doc__ or "").rstrip() + WRITE_DOC + (DESTRUCTIVE_DOC if destructive else "")
-    return call
-
-
-_ro_cons: ContextVar[Optional[list]] = ContextVar("_ro_cons", default=None)  # read connections of the running tool
-
-
-def _json_text(obj: Any) -> str:
-    """Compact JSON of a tool result, as the client receives it."""
-    try:
-        import pydantic_core  # what the SDK serializes with (same value formats), installed with mcp
-    except ImportError:
-        return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, default=str)
-    return pydantic_core.to_json(obj, fallback=str).decode()
-
-
-def _wire(res: Any) -> Any:
-    """A tool result for the SDK: dicts and lists as compact JSON text (the SDK would indent them by two
-    spaces, 13 to 27 % of the bytes and so of the client's context); anything else as it is."""
-    return _json_text(res) if isinstance(res, (dict, list)) else res
-
-
-def _slim_schema(server, name: str) -> None:
-    """Trim the input schema clients receive for a registered tool (about 15 KB of the full tool list):
-    pydantic's generated 'title' keys, which repeat each parameter's name, and the deprecated `confirm`
-    alias (still accepted: the SDK validates arguments with its own model, not with this schema)."""
-    try:
-        params = server._tool_manager.get_tool(name).parameters
-    except AttributeError:  # an SDK without this layout: leave the schema as it is
-        return
-
-    def strip(node):
-        if isinstance(node, dict):
-            if isinstance(node.get("title"), str):
-                del node["title"]
-            for v in node.values():
-                strip(v)
-        elif isinstance(node, list):
-            for v in node:
-                strip(v)
-    strip(params)
-    props = params.get("properties")
-    if isinstance(props, dict) and "confirm" in props and "dry_run" in props:
-        del props["confirm"]
-        if isinstance(params.get("required"), list) and "confirm" in params["required"]:
-            params["required"].remove("confirm")
-
-
-def _sdk_tool_kw(server) -> dict:
-    """structured_output=False where the SDK has it (1.10+): results are text, never also structuredContent."""
-    try:
-        return {"structured_output": False} if "structured_output" in inspect.signature(server.tool).parameters else {}
-    except (TypeError, ValueError):
-        return {}
-
-
-def _tool(annotations: Mapping[str, bool]):
-    """Register an MCP tool with its annotations (recorded in TOOL_HINTS even without mcp) and its
-    gated callable (REGISTERED). Only the tools the startup settings allow are offered to clients
-    (policy.listed). The SDK gets a wrapper that turns any error into ToolError, so the client sees
-    the reason (mcp 2.x reports any other exception as a bare 'Error executing tool'). The module
-    keeps the plain function: direct calls and tests still get ValueError and friends. annotations: the
-    four MCP hints (HINT_KEYS) as a dict literal on each tool, so static scanners read them from the
-    source; openWorldHint marks the tools that reach the internet (the skill shop)."""
-    hints = dict(annotations)
-
-    def deco(tool_fn):
-        name = tool_fn.__name__
-        if tuple(hints) != HINT_KEYS or not all(isinstance(v, bool) for v in hints.values()):
-            raise ValueError(f"{name}: annotations must give {', '.join(HINT_KEYS)} in this order, as booleans")
-        if hints["readOnlyHint"] and hints["destructiveHint"]:
-            raise ValueError(f"{name}: a read-only tool cannot be destructive")
-        TOOL_HINTS[name] = hints
-
-        @functools.wraps(tool_fn)
-        def fn(*a, **k):  # closes the read-only connections the call opened (nested tool calls close their own)
-            opened = _ro_cons.get()
-            token = None
-            if opened is None:
-                opened = []
-                token = _ro_cons.set(opened)
-            mark = len(opened)
-            try:
-                return tool_fn(*a, **k)
-            finally:
-                for c in opened[mark:]:
-                    try:
-                        c.close()
-                    except sqlite3.Error:
-                        pass
-                del opened[mark:]
-                if token is not None:
-                    _ro_cons.reset(token)
-        gated = REGISTERED[name] = _gated(fn)
-        if not _policy.listed(name, STARTUP.tool_profile, STARTUP.allow_writes, _shop_on(STARTUP)):
-            return fn
-        LISTED.add(name)
-
-        @functools.wraps(gated)
-        def reg(*a, **k):
-            try:
-                return _wire(gated(*a, **k))
-            except Exception as e:
-                if ToolError is None or isinstance(e, ToolError):
-                    raise
-                msg = str(e) if isinstance(e, (ValueError, RuntimeError)) else f"{type(e).__name__}: {e}"
-                raise ToolError(msg) from e
-        kw = _sdk_tool_kw(mcp)
-        if ToolAnnotations is None:
-            mcp.tool(**kw)(reg)
-        else:
-            mcp.tool(annotations=ToolAnnotations.model_validate(hints), **kw)(reg)
-        _slim_schema(mcp, name)
-        return fn
-    return deco
-
-
-PROMPTS: dict[str, Callable[..., str]] = {}  # P6 skill -> its MCP prompt function (offered under the settings)
-
-
-def _eppm_skill_ok(cmd) -> bool:
-    """A skill works on a P6 EPPM working copy unless one of its tools is a write tool the copy refuses."""
-    return not any(_policy.is_write(t) and t not in EPPM_EDIT_TOOLS for t in cmd.tools())
-
-
-def _register_prompts() -> None:
-    """Offer the P6 skills (p6mcp.skills.offered: the skills installed and turned on, from the shop or the
-    user's own; the bundled core set until the first start has installed it) whose tools are all offered,
-    as MCP prompts (reference files inline). On a P6 EPPM server, a skill that needs a write tool the working copy
-    refuses (update-import-safely: p6_import_xer) is not offered."""
-    for cmd in _skills.offered(STARTUP.tool_profile, STARTUP.allow_writes, STARTUP.raw):
-        if STARTUP.eppm and not _eppm_skill_ok(cmd):
-            continue
-        def fn(_cmd=cmd, **values) -> str:
-            return _skills.prompt_text(_cmd, values)
-        P = inspect.Parameter
-        fn.__signature__ = inspect.Signature(
-            [P(a.name, P.KEYWORD_ONLY, default=P.empty if a.default is None else a.default, annotation=str)
-             for a in cmd.args], return_annotation=str)
-        fn.__annotations__ = {**{a.name: str for a in cmd.args}, "return": str}  # read by the SDK's pydantic
-        fn.__name__ = cmd.name.replace("-", "_")
-        fn.__doc__ = cmd.description
-        PROMPTS[cmd.name] = fn
-        if hasattr(mcp, "prompt"):
-            kw = {"title": cmd.title} if "title" in inspect.signature(mcp.prompt).parameters else {}
-            mcp.prompt(name=cmd.name, description=cmd.description, **kw)(fn)
-
-
-# ----------------------------------------------------------------- helpers
-
-def _connect(readonly: bool = True) -> sqlite3.Connection:
-    if not DB_PATH:
-        raise RuntimeError(SETTINGS.db_problem or _config.NO_DB_MESSAGE)
-    if not os.path.isfile(DB_PATH):
-        raise RuntimeError(f"The configured database was not found: {DB_PATH}. Open MCP for Primavera P6 Settings to select "
-                           "another one.")
-    if readonly:
-        con = sqlite3.connect(_ro_uri(DB_PATH), uri=True, timeout=5)
-        con.execute("PRAGMA query_only = ON")  # second lock besides mode=ro: no statement may write
-        opened = _ro_cons.get()
-        if opened is not None:  # inside a tool call: closed when the tool returns
-            opened.append(con)
-    else:
-        con = sqlite3.connect(DB_PATH, timeout=5)
-    con.row_factory = sqlite3.Row
-    return con
-
-
-def _ro_uri(path: str) -> str:
-    """Read-only SQLite URI of a file path ('#', '%', '?' and spaces escaped)."""
-    return "file:" + urllib.parse.quote(path.replace("\\", "/"), safe="/:") + "?mode=ro"
-
-
-def _cols(con: sqlite3.Connection, table: str) -> set[str]:
-    if table not in _cols_cache:
-        _cols_cache[table] = {r[1].lower() for r in con.execute(f"PRAGMA table_info({table})")}
-    return _cols_cache[table]
-
-
-def _alive(con: sqlite3.Connection, table: str, alias: str = "") -> str:
-    """Filter for logically deleted rows, if the table has the column."""
-    p = f"{alias}." if alias else ""
-    return f" AND {p}delete_session_id IS NULL" if "delete_session_id" in _cols(con, table) else ""
-
-
-def _dict(r: sqlite3.Row) -> dict:
-    """Row -> dict with lowercase keys (P6 stores column names in upper case)."""
-    return {k.lower(): r[k] for k in r.keys()}
-
-
-def _now_str(con: sqlite3.Connection) -> str:
-    """Match the date format already used in the database."""
-    sample = con.execute(
-        "SELECT update_date FROM TASK WHERE update_date IS NOT NULL LIMIT 1"
-    ).fetchone()
-    now = datetime.now()
-    if sample and isinstance(sample[0], str) and "T" in sample[0]:
-        return now.strftime("%Y-%m-%dT%H:%M:%S")
-    return now.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _p6_running() -> bool:
-    if SKIP_PROC or sys.platform != "win32":
-        return False
-    try:
-        out = subprocess.run(
-            ["tasklist", "/FI", "IMAGENAME eq PM.exe", "/NH"],
-            capture_output=True, text=True, timeout=10,
-        ).stdout
-        return "PM.exe" in out
-    except Exception:
-        return False
-
-
-def _backup_dir() -> str:
-    return BACKUP_DIR or os.path.join(os.path.dirname(DB_PATH), "p6_mcp_backups")
-
-
-def _prune_backups(keep: int, protect: Iterable[str] = ()) -> list[str]:
-    """Retention: keep the newest `keep` automatic backups of this database (plain backups, named
-    <db stem>_<stamp>[_n].db); pre_restore and other kinds are never removed. keep 0 = keep all.
-    Returns the files removed."""
-    if keep <= 0:
-        return []
-    folder, stem = _backup_dir(), os.path.splitext(os.path.basename(DB_PATH))[0].lower()
-    protect = {os.path.normcase(os.path.abspath(p)) for p in protect if p}
-    plain = []
-    for name in os.listdir(folder):
-        m = BACKUP_NAME.search(name)
-        if m and not m[2] and name.lower()[:-len(m[0])] == stem:
-            plain.append((m[1], name))
-    removed = []
-    for _, name in sorted(plain, reverse=True)[keep:]:
-        path = os.path.join(folder, name)
-        if os.path.normcase(os.path.abspath(path)) in protect:
-            continue
-        try:
-            os.remove(path)
-            removed.append(path)
-        except OSError:
-            pass  # in use or read only: kept, tried again after the next backup
-    return removed
-
-
-def _backup(kind: str = "") -> str:
-    """Copy of the database in the backup folder: <db name>_<YYYYMMDD_HHMMSS>[_kind].db (never
-    overwrites: _2, _3... appended)."""
-    global _backup_done, _last_backup, _last_pruned
-    folder = _backup_dir()
-    os.makedirs(folder, exist_ok=True)
-    base = f"{os.path.splitext(os.path.basename(DB_PATH))[0]}_{datetime.now():%Y%m%d_%H%M%S}" + (f"_{kind}" if kind else "")
-    dest, n = os.path.join(folder, base + ".db"), 1
-    while os.path.exists(dest):
-        n += 1
-        dest = os.path.join(folder, f"{base}_{n}.db")
-    try:
-        with closing(_connect(readonly=True)) as src, closing(sqlite3.connect(dest)) as dst:
-            src.backup(dst)  # consistent copy even if the file is busy
-    except BaseException:
-        if os.path.exists(dest):  # a partial copy must not look like a usable backup
-            os.remove(dest)
-        raise
-    _backup_done, _last_backup = True, dest
-    if not kind:
-        _last_pruned = _prune_backups(SETTINGS.backup_retention, protect=[dest])
-    return dest
-
-
-# ----------------------------------------------------------------- edit log (persistent)
-# One JSON line per logged change in <db folder>/p6_mcp_logs/edits_YYYYMMDD.jsonl (P6_LOG_DIR overrides
-# the folder). An entry names its database (file name), so copies sharing a folder keep apart.
-# schedule_state reads it: a project is stale while an entry recorded under its current
-# PROJECT.last_schedule_date exists and was not undone by a restore.
-
-def _log_dir() -> str:
-    return LOG_DIR or os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "p6_mcp_logs")
-
-
-def _log_ts() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-
-
-def _log_dirs() -> list[str]:
-    """Folders read for this database's entries: the configured one, then the v2 folder beside the
-    database when it differs (history written before the move to the configured folder)."""
-    out = [_log_dir()]
-    if SETTINGS.legacy_log_dir and os.path.normcase(SETTINGS.legacy_log_dir) != os.path.normcase(out[0]):
-        out.append(SETTINGS.legacy_log_dir)
-    return out
-
-
-def _log_write(entries: Sequence[dict]) -> str:
-    folder = _log_dir()
-    os.makedirs(folder, exist_ok=True)
-    ctx = _CALL.get()
-    if ctx is not None:  # a client call: record what was asked and which dry run it confirmed
-        entries = [dict(e, params=ctx["params"], confirmation=(ctx.get("token") or "")[:12] or None)
-                   for e in entries]
-    client = _confirm.CLIENT.get()
-    if client is not None:  # a remote client (claude.ai, ChatGPT): which connection made the change
-        entries = [dict(e, client=client) for e in entries]
-    path = os.path.join(folder, f"edits_{datetime.now():%Y%m%d}.jsonl")
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write("".join(json.dumps(e, ensure_ascii=False, default=str) + "\n" for e in entries))
-    return path
-
-
-def _log_entries() -> list[dict]:
-    """Entries of this database, oldest first (files are cached until they change; an unreadable
-    line, e.g. cut by a crash, is skipped)."""
-    db, out = os.path.basename(DB_PATH).lower(), []
-    files = [os.path.join(folder, name) for folder in _log_dirs() if os.path.isdir(folder)
-             for name in sorted(os.listdir(folder)) if re.fullmatch(r"edits_\d{8}\.jsonl", name)]
-    for path in files:
-        st = os.stat(path)
-        hit = _log_cache.get(path)
-        if hit is None or hit[0] != (st.st_mtime_ns, st.st_size):
-            rows = []
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    try:
-                        e = json.loads(line)
-                    except ValueError:
-                        continue
-                    if isinstance(e, dict) and "ts" in e:
-                        rows.append(e)
-            hit = _log_cache[path] = ((st.st_mtime_ns, st.st_size), rows)
-        out += [e for e in hit[1] if str(e.get("db", "")).lower() == db]
-    out.sort(key=lambda e: e["ts"])  # stable: entries of one commit keep their order
-    return out
-
-
-def _undone_fn(entries: Sequence[dict]) -> Callable[[dict], bool]:
-    """True for an entry made after a backup that a later p6_restore_backup copied back in."""
-    wins = [(e.get("backup_copied_at") or e["backup_taken_at"], e["ts"]) for e in entries
-            if e.get("operation") == "restore_backup" and e.get("backup_taken_at")]
-    return lambda e: e.get("operation") != "restore_backup" and any(a < e["ts"] < b for a, b in wins)
-
-
-def _edit_state(pid: int, lsd: Optional[str]) -> Optional[dict]:
-    """Confirmed writes that made the project stale under its current last_schedule_date, from the log."""
-    es = _log_entries()
-    undone, key = _undone_fn(es), str(pid)
-    hit = [e for e in es if key in (e.get("stale") or {}) and e["stale"][key] == lsd and not undone(e)]
-    if not hit:
-        return None
-    last = hit[-1]
-    return {"at": last["ts"][:19], "change": last.get("change"), "writes": len({e.get("commit") for e in hit}),
-            "log_entries": len(hit)}
-
-
-def _caller_tool() -> Optional[str]:
-    """Name of the p6_* tool on the call stack (the one being run)."""
-    f = sys._getframe(1)
-    while f is not None:
-        if f.f_code.co_name in TOOL_HINTS:
-            return f.f_code.co_name
-        f = f.f_back
-    return None
-
-
-def _guard_write() -> Optional[str]:
-    if SETTINGS.eppm:  # P6 never opens the working copy of a P6 EPPM server
-        return None
-    if _p6_running():
-        return "P6 (PM.exe) is running. Close P6 completely, then retry."
-    return None
-
-
-def _next_key(con: sqlite3.Connection, table: str, id_col: str) -> int:
-    """Reserve the next ID from NEXTKEY (key <table>_<id_col>, case ignored), never below MAX(id)+1.
-    No loose match: a suffix match could pick, and then lower, another table's counter."""
-    row = con.execute(
-        "SELECT key_name, key_seq_num FROM NEXTKEY WHERE lower(key_name) = lower(?)",
-        (f"{table}_{id_col}",),
-    ).fetchone()
-    if row is None:
-        raise RuntimeError(f"No NEXTKEY entry found for {table}.{id_col}; run p6_diagnose.")
-    max_id = con.execute(f"SELECT COALESCE(MAX({id_col}),0) FROM {table}").fetchone()[0]
-    new_id = max(int(row["key_seq_num"]), int(max_id) + 1)
-    con.execute(
-        "UPDATE NEXTKEY SET key_seq_num = ? WHERE key_name = ?", (new_id + 1, row["key_name"])
-    )
-    return new_id
-
-
-def _project_id(con, project: str) -> int:
-    r = con.execute(
-        "SELECT proj_id FROM PROJECT WHERE proj_short_name = ?" + _alive(con, "PROJECT"),
-        (project,),
-    ).fetchone()
-    if not r:
-        raise ValueError(f"Project not found: {project}")
-    return r[0]
-
-
-def _task(con, project: str, task_code: str) -> sqlite3.Row:
-    pid = _project_id(con, project)
-    r = con.execute(
-        f"SELECT t.*, {HPD_SQL} AS hpd FROM TASK t "
-        "LEFT JOIN CALENDAR c ON c.clndr_id = t.clndr_id "
-        "WHERE t.proj_id = ? AND t.task_code = ?" + _alive(con, "TASK", "t"),
-        (pid, task_code),
-    ).fetchone()
-    if not r:
-        raise ValueError(f"Activity {task_code} not found in project {project}")
-    return r
-
-
-def _days(hours, hpd) -> Optional[float]:
-    if hours is None:
-        return None
-    return round(float(hours) / float(hpd or 8), 2)
-
-
-def _act_view(r: sqlite3.Row) -> dict:
-    """Activity row with every ACT_FIELDS key (None when the column is missing); hours -> days
-    with the activity calendar (hpd)."""
-    d = _dict(r)
-    hpd = d.get("hpd") or 8
-    d["cstr_label"] = _cstr_label(d.get("cstr_type"))
-    return {k: _days(d.get(ACT_HOURS[k]), hpd) if k in ACT_HOURS else d.get(k) for k in ACT_FIELDS}
-
-
-def _brief_on(detail: str) -> bool:
-    """detail= of the activity tools: 'full' (every key, the fixed shape) or 'brief' (no null values)."""
-    if detail not in get_args(Detail):
-        raise ValueError(f"detail must be one of {list(get_args(Detail))}")
-    return detail == "brief"
-
-
-def _brief(d: Mapping) -> dict:
-    """A row without its null values (detail='brief')."""
-    return {k: v for k, v in d.items() if v is not None}
-
-
-def _act_row(fields: Optional[Sequence[str]] = None, detail: str = "full") -> Callable[[sqlite3.Row], dict]:
-    """Row builder for activity lists: _act_view, or task_code plus the fields asked for (checked
-    before any SQL runs); detail='brief' leaves the null values out."""
-    brief = _brief_on(detail)
-    if fields is None:
-        return (lambda r: _brief(_act_view(r))) if brief else _act_view
-    fields = [fields] if isinstance(fields, str) else list(fields)
-    bad = [f for f in fields if f not in ACT_FIELDS]
-    if bad:
-        raise ValueError(f"Unknown field(s) {bad}; allowed: {list(ACT_FIELDS)}")
-    keep = list(dict.fromkeys(["task_code", *fields]))
-
-    def row_fn(r: sqlite3.Row) -> dict:
-        v = _act_view(r)
-        return {k: v[k] for k in keep if not (brief and v[k] is None)}
-    return row_fn
-
-
-def _act_from(con) -> str:
-    """Base of every activity list: TASK t with hpd (CALENDAR c) and wbs_name (PROJWBS w).
-    One parameter: proj_id. Add conditions with AND, then ORDER BY ending with t.task_id."""
-    return (f"SELECT t.*, {HPD_SQL} AS hpd, w.wbs_name AS wbs_name FROM TASK t "
-            "LEFT JOIN CALENDAR c ON c.clndr_id = t.clndr_id "
-            "LEFT JOIN PROJWBS w ON w.wbs_id = t.wbs_id" + _alive(con, "PROJWBS", "w")
-            + " WHERE t.proj_id = ?" + _alive(con, "TASK", "t"))
-
-
-def _bound(value: str, field: str, end: bool) -> str:
-    """User date -> DB date string for a >= (start) or <= (end, whole day when no time) filter."""
-    dt, has_time = _parse_dt(value, field)
-    return _fmt_dt(dt) if has_time or not end else dt.strftime("%Y-%m-%d 23:59:59")
-
-
-def _parse_dt(value: str, field: str) -> tuple[datetime, bool]:
-    """User date -> (datetime, has_time). Accepts YYYY-MM-DD, YYYY-MM-DD HH:MM[:SS], 'T' allowed."""
-    v = str(value).strip()
-    if re.match(DATETIME_PATTERN, v):
-        v = v.replace("T", " ")
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-            try:
-                return datetime.strptime(v, fmt), fmt != "%Y-%m-%d"
-            except ValueError:
-                pass
-    raise ValueError(f"{field}: {value!r} is not a date. Use 'YYYY-MM-DD HH:MM'.")
-
-
-_DB_DT_SHAPE = re.compile(r"\d{4}-\d\d-\d\d(?: \d\d:\d\d(?::\d\d)?)?\Z")
-
-
-def _db_dt(v) -> Optional[datetime]:
-    """DB or XER date value -> datetime ('T' or space, with or without seconds); None if empty."""
-    if v is None or isinstance(v, datetime):
-        return v
-    return _db_dt_text(str(v).strip().replace("T", " ")[:19])
-
-
-@functools.lru_cache(maxsize=65536)
-def _db_dt_text(s: str) -> Optional[datetime]:
-    """Cached: an engine load reads the same few thousand date strings tens of thousands of times
-    (strptime was the largest single cost of every engine tool). The zero-padded forms P6 writes
-    go through fromisoformat; anything else keeps the strptime rules."""
-    if _DB_DT_SHAPE.match(s):
-        try:
-            return datetime.fromisoformat(s)
-        except ValueError:
-            pass
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(s, fmt)
-        except ValueError:
-            pass
-    return None
-
-
-def _fmt_dt(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _blob_text(v) -> str:
@@ -1192,88 +271,6 @@ def _props(con, pid: int, prop_name: str) -> Optional[dict]:
         return _p6_tree(_blob_text(r[0]))
     except ValueError as e:
         return {"name": None, "attrs": {}, "kids": [], "error": f"PROJPROP {prop_name}: {e}"}
-
-
-def _baseline_pid(con, pid: int, baseline: Optional[str]) -> Optional[int]:
-    """Project to compare with: the Project ID given (baselines included), else the project
-    baseline (PROJECT.sum_base_proj_id), else None."""
-    if baseline:
-        r = con.execute("SELECT proj_id FROM PROJECT WHERE proj_short_name = ? "
-                        "AND COALESCE(project_flag, 'Y') = 'Y'" + _alive(con, "PROJECT"), (baseline,)).fetchone()
-        if not r:
-            raise ValueError(f"Project or baseline not found: {baseline}")
-        return r[0]
-    if "sum_base_proj_id" not in _cols(con, "PROJECT"):
-        return None
-    r = con.execute("SELECT b.proj_id FROM PROJECT p JOIN PROJECT b ON b.proj_id = p.sum_base_proj_id "
-                    "WHERE p.proj_id = ? AND b.proj_id <> p.proj_id" + _alive(con, "PROJECT", "b"),
-                    (pid,)).fetchone()
-    return r[0] if r else None
-
-
-def _schedule_state(con, pid: int, explain: bool = False) -> dict:
-    """Data date, last F9 time and whether this server changed the project since that F9, from the
-    persistent edit log (entries recorded under the current PROJECT.last_schedule_date: a P6
-    reschedule changes it and clears the flag); update_date is never used. note: None when the state
-    needs nothing (current F9 recorded, no edit since: its text would only repeat the server
-    instructions), the text when it does or with explain=True."""
-    cols = _cols(con, "PROJECT")
-    sel = ", ".join(c if c in cols else f"NULL AS {c}" for c in ("last_recalc_date", "last_schedule_date"))
-    row = con.execute(f"SELECT {sel} FROM PROJECT WHERE proj_id = ? AND COALESCE(project_flag, 'Y') = 'Y'"
-                      + _alive(con, "PROJECT"), (pid,)).fetchone()
-    if row is None:
-        raise ValueError(f"Project id not found: {pid}")
-    e = _edit_state(pid, row["last_schedule_date"])
-    note = "Dates, float and paths come from the last F9 in P6."
-    if e:
-        note += " This server changed the schedule after that: open P6 and press F9 before trusting them."
-    if not row["last_schedule_date"]:
-        note += (" last_schedule_date is empty (never scheduled in a P6 version that records it,"
-                 " or imported from an XER without it).")
-    note += " Edits are tracked in the edit log next to the database (p6_edit_log)."
-    return {"data_date": row["last_recalc_date"], "last_schedule_date": row["last_schedule_date"],
-            "stale": bool(e), "edited_since_last_schedule": e,
-            "note": note if explain or e or not row["last_schedule_date"] else None}
-
-
-# ----------------------------------------------------------------- paging
-
-def _check_page(offset: int, limit: int) -> tuple[int, int]:
-    offset, limit = int(offset), int(limit)
-    if offset < 0:
-        raise ValueError("offset must be 0 or more")
-    if limit < 1:
-        raise ValueError("limit must be 1 or more")
-    return offset, min(limit, MAX_ROWS)
-
-
-def _env(total: Optional[int], offset: int, rows: list[dict], more: Optional[bool] = None, **extra) -> dict:
-    """List envelope. next_offset is None on the last page (more= decides when total is unknown)."""
-    end = offset + len(rows)
-    nxt = end if (end < total if total is not None else more) else None
-    return {"total": total, "offset": offset, "returned": len(rows), "next_offset": nxt, "rows": rows, **extra}
-
-
-def _page(con, sql: str, args: Sequence | Mapping = (), offset: int = 0, limit: int = MAX_ROWS,
-          row_fn: Callable[[sqlite3.Row], dict] = _dict) -> dict:
-    """COUNT and one page of sql (which must carry its ORDER BY) in one read snapshot."""
-    offset, limit = _check_page(offset, limit)
-    own = not con.in_transaction
-    if own:
-        con.execute("BEGIN")
-    try:
-        total = con.execute(f"SELECT COUNT(*) FROM (\n{sql}\n)", args).fetchone()[0]
-        rows = [row_fn(r) for r in con.execute(f"{sql}\nLIMIT {limit} OFFSET {offset}", args)]
-    finally:
-        if own:
-            con.rollback()
-    return _env(total, offset, rows)
-
-
-def _slice(rows: list[dict], offset: int, limit: int) -> dict:
-    """Same envelope for a list built in Python."""
-    offset, limit = _check_page(offset, limit)
-    return _env(len(rows), offset, rows[offset:offset + limit])
 
 
 # ----------------------------------------------------------------- schedule options and lag rule
@@ -2603,16 +1600,6 @@ def p6_float_paths(project: ProjectId, path: Optional[PathNo] = None, include_co
     return res
 
 
-# ----------------------------------------------------------------- analysis: DCMA 14, progress, compare
-
-def _num(v) -> Optional[float]:
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
-
-
 def _dcma_settings(con, pid: int, overrides: Mapping, high_float_days: Optional[float]) -> dict:
     """Threshold and limit of each DCMA check: the project's PROJPROP 'schedule_check' when stored (its
     *_constraint limits are hours; a check_* flag 'N' disables the check), else the DCMA defaults (limits
@@ -2904,7 +1891,6 @@ def _dcma(con, pid: int, bid: Optional[int], cfg: dict, baseline_dates: str, bas
     return checks, n_open, n_links, ends, items
 
 
-HcCheck = Literal[tuple(list(get_args(DcmaCheck)) + ["key_dates"])]  # drill-down names: the DCMA 14 + information checks
 HC_NO_ITEMS = {"logic_density", "critical_path_test", "cpli", "bei"}  # project-level values, no item list
 
 
@@ -3095,7 +2081,7 @@ def _hc_snapshots(project: Optional[str] = None, this_db: bool = True) -> list[d
     folder, out = _hc_snap_dir(), []
     if not os.path.isdir(folder):
         return out
-    db = os.path.basename(DB_PATH).lower()
+    db = os.path.basename(_state.DB_PATH).lower()
     for name in os.listdir(folder):
         if not name.endswith(".json"):
             continue
@@ -3227,7 +2213,7 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
     if save_snapshot:
         now = datetime.now()
         snap = {"id": f"{re.sub(r'[^A-Za-z0-9_.-]', '_', project)}_{now:%Y%m%d_%H%M%S}_{now.microsecond // 1000:03d}",
-                "project": project, "proj_id": pid, "db": os.path.basename(DB_PATH), "ts": _log_ts(),
+                "project": project, "proj_id": pid, "db": os.path.basename(_state.DB_PATH), "ts": _log_ts(),
                 "last_schedule_date": state["last_schedule_date"], "data_date": state["data_date"],
                 "stale": state["stale"], "params": {"baseline": res["baseline"] and res["baseline"]["project"],
                                                     "baseline_dates": baseline_dates, "duration_basis": duration_basis,
@@ -3320,9 +2306,6 @@ def p6_health_check_compare(project: ProjectId, before: str = "previous", after:
             "changed": [k for k, v in checks.items() if (v.get("count") or {}).get("delta")],
             "weighted_score": weighted, "engine_version": ev,
             "warnings": warn, "snapshots": [meta(s) for s in snaps[-20:]]}
-
-
-DanglingKind = Literal["start", "finish", "both"]
 
 
 def _dangling_suggest(net: _Net, d: dict, kind: str) -> Optional[dict]:
@@ -3921,7 +2904,6 @@ def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annota
     return res
 
 
-RedundantCategory = Literal["completed_predecessor", "marked_deleted", "transitive", "duplicate"]
 REDUNDANT_CATEGORIES = list(get_args(RedundantCategory))
 TRANSITIVE_DEPTH = 10  # links per FS chain explored for transitive links
 
@@ -5696,34 +4678,6 @@ def p6_cpm_validate(project: ProjectId, offset: Offset = 0, limit: Limit = 50) -
     return out
 
 
-WhatIfOp = Literal["add_link", "delete_link", "update_link", "duration", "constraint"]
-
-
-class WhatIfEdit(TypedDict, total=False):
-    """One what-if edit. op add_link / delete_link / update_link: predecessor_code, successor_code,
-    rel_type, lag_days, current_type (or task_pred_id for delete / update); op duration: task_code and
-    remaining_days, original_days (not started only) or add_remaining_days (days added to the current
-    remaining duration, any status); op constraint: task_code, constraint (as p6_update_activity),
-    constraint_date."""
-    op: WhatIfOp
-    predecessor_code: str
-    successor_code: str
-    task_pred_id: int
-    rel_type: RelType
-    current_type: RelType
-    lag_days: float
-    task_code: str
-    remaining_days: float
-    original_days: float
-    add_remaining_days: float
-    constraint: CstrName
-    constraint_date: str
-
-
-WhatIfEdits = Annotated[list[WhatIfEdit], Field(description="Edits applied in memory, in order.")]
-CompareTo = Literal["current", "engine"]
-
-
 def _whatif_apply(cpm: _Cpm, e: Mapping, trace: Optional[list] = None) -> str:
     """Apply one edit to the in-memory network; returns its description. trace: gets one record of what changed
     (the assumption flags of p6_schedule_whatif read it)."""
@@ -5832,8 +4786,6 @@ def _whatif_apply(cpm: _Cpm, e: Mapping, trace: Optional[list] = None) -> str:
 WHATIF_CAVEAT = ("The engine calculates these dates the way P6 would. It does not check that crews, materials or "
                  "access allow them.")
 WHATIF_CUT_PCT = 30.0  # default max_cut_pct of p6_schedule_whatif
-CutPct = Annotated[float, Field(ge=0, le=100, description="Flag duration cuts above this % of the original or "
-                                                            "remaining duration.")]
 
 
 def _temp_network(con, pid: int, cpm: _Cpm, res: Optional[dict], bid: Optional[int]) -> None:
@@ -6222,27 +5174,6 @@ RISK_CAVEAT = ("An estimate built on assumed duration ranges, not a forecast: ea
                "is drawn on its own (no correlation between activities is modelled), discrete risk events, resource "
                "limits and changes of logic are not modelled, and the network, calendars and constraints are those of "
                "the last F9.")
-
-
-class RiskPcts(TypedDict):
-    """A triangular range in % of the remaining duration: 0 <= min_pct <= mode_pct <= max_pct (100 = unchanged)."""
-    min_pct: float
-    mode_pct: float
-    max_pct: float
-
-
-class RiskRange(RiskPcts, total=False):
-    """A range for some activities, one selector: task_code (an Activity ID), wbs (a WBS code, full or relative
-    to the project node: every activity below it) or code_type with code_value (activities with that activity
-    code value or one of its child codes)."""
-    task_code: str
-    wbs: str
-    code_type: str
-    code_value: str
-
-
-RiskRanges = Annotated[list[RiskRange], Field(description="Ranges by Activity ID, WBS or activity code value.")]
-RiskIterations = Annotated[int, Field(description="Iterations: clamped to 100..5000, then to the network size cap.")]
 
 
 def _risk_pcts(item: Any, where: str) -> tuple[float, float, float]:
@@ -6819,11 +5750,6 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
     return res
 
 
-# ----------------------------------------------------------------- update integrity: an update against the previous one
-
-IntegrityFlag = Literal["open_end_to_finish", "negative_float_cleared_by_constraint", "must_finish_moved",
-                        "actuals_changed", "duration_cut", "links_removed_on_critical", "rel_type_or_lag_changed",
-                        "schedule_options_changed", "calendars_changed", "deleted_in_progress_or_critical", "data_date"]
 INTEGRITY_FLAGS: tuple[str, ...] = get_args(IntegrityFlag)
 INTEGRITY_CAVEAT = ("Each flag is a question to raise with whoever submitted the update, not proof of manipulation: a "
                     "change can be a correct revision (new information, a re-plan, a corrected error). Ask for the "
@@ -7817,9 +6743,6 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
 
 
 MS_VS = ("late", "early", "on_time")  # p6_milestones vs_baseline
-MsOrder = Literal["date", "variance"]
-MsCodes = Annotated[Union[list[str], str], Field(
-    description="Activity IDs to list instead of every milestone: a list, or one text with the IDs separated by commas.")]
 
 
 def _code_list(codes, name: str) -> list[str]:
@@ -8270,11 +7193,6 @@ def _summary(con, pid: int, project: str, baseline: Optional[str]) -> dict:
             "baseline": base, "cost": cost, "counts": counts, "schedule_state": _schedule_state(con, pid), "notes": notes}
 
 
-# ----------------------------------------------------------------- trend across schedule updates (p6_trend)
-
-TrendMs = Literal["matched", "any", "none"]
-TrendProjects = Annotated[list[ProjectId], Field(
-    description="Project IDs of the updates of one job, in any order (the trend orders them by data date).")]
 TREND_MAX = 100  # updates in one series
 TREND_MS_CAP = 20  # milestones followed when codes= is not given
 TREND_HEAD = ("project_flag", "last_recalc_date", "last_schedule_date", "scd_end_date", "plan_end_date", "clndr_id")
@@ -9345,7 +8263,7 @@ def _diag_schema(info: dict) -> dict:
     fingerprint is never a known one and the schema write check does not apply to it (_write_refusal)."""
     out = {k: info[k] for k in ("label", "p6_version", "fingerprint", "known", "trusted", "readable", "writable",
                                 "missing", "tables")}
-    if SETTINGS.eppm:
+    if _state.SETTINGS.eppm:
         out.update(label="P6 EPPM working copy", writable=not info["missing"],
                    note="Built by p6_eppm_pull from the server, not by P6 Professional: no known P6 fingerprint, "
                         "and the P6 Professional schema check does not apply (writes: see writes).")
@@ -9357,12 +8275,12 @@ def p6_diagnose() -> dict:
     """Start here when a tool reports a configuration problem. Shows the server settings in force
     (database, tool profile, writes allowed, restart needed), the P6 schema and version detected,
     whether P6 is running, the backup and edit log folders. Works without a database."""
-    st = SETTINGS
+    st = _state.SETTINGS
     now_listed = {t for t in TOOL_HINTS if _policy.listed(t, st.tool_profile, st.allow_writes, _shop_on(st))}
     out: dict[str, Any] = {
         "server_version": SERVER_VERSION,
         "settings": {"source": st.source, "config_file": st.config_path, "config_error": st.config_error,
-                     "config_migrated": list(st.migrated), "database": st.db_name, "db_path": DB_PATH or None,
+                     "config_migrated": list(st.migrated), "database": st.db_name, "db_path": _state.DB_PATH or None,
                      "tool_profile": st.tool_profile, "allow_writes": st.allow_writes,
                      "backup_before_write": st.backup_before_write, "backup_scope": st.backup_scope,
                      "backup_retention": st.backup_retention, "block_when_p6_running": st.block_when_p6_running},
@@ -9375,13 +8293,13 @@ def p6_diagnose() -> dict:
     if out["restart_required"]:
         out["restart_note"] = ("The tool profile, the write permission or the skill shop setting changed since the "
                                "server started: restart your MCP client to refresh its tool list.")
-    if XER_MANIFEST is not None:
+    if _state.XER_MANIFEST is not None:
         out["xer_mode"] = {"files": [{"file": os.path.basename(f["path"]), "path": f["path"],
                                       "xer_version": f.get("xer_version"), "projects": f["projects"],
-                                      "warnings": f["warnings"][:10]} for f in XER_MANIFEST["files"]],
+                                      "warnings": f["warnings"][:10]} for f in _state.XER_MANIFEST["files"]],
                            "note": "Read only. A Project ID already used by an earlier file gets a ~2 suffix."}
     if st.eppm:
-        m = EPPM_MANIFEST or {}
+        m = _state.EPPM_MANIFEST or {}
         out["eppm_mode"] = {"server": st.eppm, "working_copy": _eppm_store.store_path(st.eppm) if m else None,
                             "pulled_at": m.get("pulled_at"), "route": m.get("route"),
                             "projects": [p["project_id"] for p in m.get("projects", [])],
@@ -9393,7 +8311,7 @@ def p6_diagnose() -> dict:
         if prof:  # how the REST calls go out (no password: the proxy user only); the SQL route is never proxied
             from p6mcp.eppm import proxy as _eppm_proxy
             out["eppm_mode"]["proxy"] = _eppm_proxy.resolve(prof.get("base_url", ""), prof)
-    if not DB_PATH:
+    if not _state.DB_PATH:
         out["database_problem"] = st.db_problem or _config.NO_DB_MESSAGE
         return out
     con = _connect()
@@ -9403,14 +8321,14 @@ def p6_diagnose() -> dict:
             "OR lower(key_name) LIKE '%task_task_id%'")]
         info = _schema_info()
         out.update({
-            "db_path": DB_PATH,
+            "db_path": _state.DB_PATH,
             "schema": _diag_schema(info),
             "writes": _write_refusal() or "allowed",
             "tables": {t: sorted(_cols(con, t))[:60] for t in ("TASK", "TASKPRED", "PROJECT", "CALENDAR")},
             "nextkey_rows": nk,
-            "backup_taken_this_session": _backup_done,
+            "backup_taken_this_session": _state._backup_done,
             "backup_dir": _backup_dir(),
-            "backups_pruned_last": _last_pruned,
+            "backups_pruned_last": _state._last_pruned,
             "edit_log_dir": _log_dir(),
         })
     finally:
@@ -9431,7 +8349,7 @@ def _commit(con: sqlite3.Connection, plan: list[str], confirm: bool, projects: I
         con.rollback(); con.close()
         return {"dry_run": True, "would_do": plan,
                 "next": "Call again with confirm=True to apply"
-                        + (" (the local working copy only)." if SETTINGS.eppm else " (P6 must be closed).")}
+                        + (" (the local working copy only)." if _state.SETTINGS.eppm else " (P6 must be closed).")}
     if mismatch:
         con.rollback(); con.close()
         return {"applied": False, "error": mismatch}
@@ -9458,14 +8376,14 @@ def _commit(con: sqlite3.Connection, plan: list[str], confirm: bool, projects: I
     con.commit(); con.close()
     ts, commit_id = _log_ts(), uuid.uuid4().hex[:12]
     stale = {str(p): v[1] for p, v in snap.items()}
-    entries = [{"ts": ts, "commit": commit_id, "db": os.path.basename(DB_PATH), "tool": tool,
+    entries = [{"ts": ts, "commit": commit_id, "db": os.path.basename(_state.DB_PATH), "tool": tool,
                 "operation": it.get("operation"), "project": it.get("project") or names.get(it.get("proj_id")),
                 "proj_id": it.get("proj_id"), "table": it.get("table"), "keys": it.get("keys"),
                 "before": it.get("before"), "after": it.get("after"), "summary": it.get("summary"),
-                "change": plan[0][:160], "backup": _last_backup, "stale": stale,
+                "change": plan[0][:160], "backup": _state._last_backup, "stale": stale,
                 "stale_projects": [v[0] for v in snap.values()]} for it in items]
     res = {"applied": True, "done": plan,
-           "next": EPPM_NEXT if SETTINGS.eppm else "Open P6 and press F9 to reschedule."}
+           "next": EPPM_NEXT if _state.SETTINGS.eppm else "Open P6 and press F9 to reschedule."}
     if snap:
         res["stale_projects"] = [v[0] for v in snap.values()]
     try:
@@ -9484,7 +8402,7 @@ def _open_for_write(confirm: bool) -> tuple[sqlite3.Connection, Optional[str]]:
         err = _guard_write()
         if err:
             raise RuntimeError(err)
-        if SETTINGS.backup_before_write and (SETTINGS.backup_scope == "every_write" or not _backup_done):
+        if _state.SETTINGS.backup_before_write and (_state.SETTINGS.backup_scope == "every_write" or not _state._backup_done):
             backup = _backup()
     con = _connect(readonly=False)
     try:
@@ -9512,17 +8430,6 @@ def _write_session(confirm: bool):
         yield con, backup
     finally:
         _release(con)
-
-
-def _stamp_cols(con, table: str, now: str, create: bool) -> dict:
-    cols = _cols(con, table)
-    d = {}
-    if "update_date" in cols: d["update_date"] = now
-    if "update_user" in cols: d["update_user"] = P6_USER
-    if create:
-        if "create_date" in cols: d["create_date"] = now
-        if "create_user" in cols: d["create_user"] = P6_USER
-    return d
 
 
 REL_LOG_COLS = ("pred_type", "lag_hr_cnt")  # TASKPRED values recorded in the edit log
@@ -9730,38 +8637,6 @@ def p6_delete_relationship(
                                                "predecessor_project": predecessor_project}, confirm)
 
 
-# ----------------------------------------------------------------- batch relationship tools
-
-class _LinkEnds(TypedDict):
-    predecessor_code: str
-    successor_code: str
-
-
-class LinkRef(_LinkEnds, total=False):
-    """A relationship to delete: type needed when the two activities are linked by several types."""
-    type: RelType
-    predecessor_project: str
-
-
-class LinkNew(_LinkEnds, total=False):
-    """A relationship to add (rel_type default FS, lag_days default 0)."""
-    rel_type: RelType
-    lag_days: float
-    predecessor_project: str
-
-
-class LinkEdit(_LinkEnds, total=False):
-    """A relationship to change: rel_type and/or lag_days; current_type picks it among several types."""
-    rel_type: RelType
-    lag_days: float
-    current_type: RelType
-    predecessor_project: str
-
-
-LinkRefs = Annotated[list[LinkRef], Field(description="Links by Activity IDs.")]
-LinkIds = Annotated[list[int], Field(description="task_pred_id values (p6_get_relationships, p6_redundant_links).")]
-LinkNews = Annotated[list[LinkNew], Field(min_length=1, description="Links to add.")]
-LinkEdits = Annotated[list[LinkEdit], Field(min_length=1, description="Links to change.")]
 _ENDS = {"predecessor_code", "successor_code"}
 LINK_KEYS = {"delete": set(LinkRef.__annotations__) | _ENDS | {"current_type"},
              "add": set(LinkNew.__annotations__) | _ENDS, "update": set(LinkEdit.__annotations__) | _ENDS}
@@ -9948,24 +8823,6 @@ def p6_update_activity(
         return _commit(con, plan, confirm, projects=r["projects"], log=r["log"])
 
 
-class _ActEditKeys(TypedDict):
-    task_code: str
-
-
-class ActEdit(_ActEditKeys, total=False):
-    """An activity (task_code) and the fields to change, as p6_update_activity takes them."""
-    task_name: str
-    original_duration_days: float
-    remaining_duration_days: float
-    constraint: str
-    constraint_date: str
-    actual_start: str
-    actual_finish: str
-    physical_pct: float
-    allow_after_data_date: bool
-
-
-ActEdits = Annotated[list[ActEdit], Field(min_length=1, description="Activities to change.")]
 ACT_KEYS = set(ActEdit.__annotations__) | set(_ActEditKeys.__annotations__)
 
 
@@ -10131,21 +8988,6 @@ ASG_RATE = {"target_qty": ("target_qty_per_hr", "target_drtn_hr_cnt"),
             "remain_qty": ("remain_qty_per_hr", "remain_drtn_hr_cnt")}
 ASG_TASK = {"target_qty": "target", "act_reg_qty": "act", "remain_qty": "remain"}  # TASK.<x>_work_qty / <x>_equip_qty
 ASG_TASK_KIND = {"RT_Labor": "work", "RT_Equip": "equip"}  # material units are not rolled up to the activity
-
-
-class AsgEdit(TypedDict, total=False):
-    """An assignment (taskrsrc_id, or task_code with resource or role) and the units to set."""
-    task_code: str
-    resource: str
-    role: str
-    taskrsrc_id: int
-    budgeted_units: float
-    actual_units: float
-    remaining_units: float
-    at_completion_units: float
-
-
-AsgEdits = Annotated[list[AsgEdit], Field(min_length=1, description="Assignments to change.")]
 ASG_KEYS = set(AsgEdit.__annotations__)
 
 
@@ -10406,20 +9248,6 @@ def p6_update_assignments(project: ProjectId, items: AsgEdits, confirm: bool = F
         return res
 
 
-# ----------------------------------------------------------------- activity UDF values
-
-class _UdfEditKeys(TypedDict):
-    task_code: str
-    udf: str
-
-
-class UdfEdit(_UdfEditKeys, total=False):
-    """An activity UDF value to set (value) or remove (clear=True)."""
-    value: Union[str, float]
-    clear: bool
-
-
-UdfEdits = Annotated[list[UdfEdit], Field(min_length=1, description="Activity UDF values to set or clear.")]
 UDF_KEYS = set(UdfEdit.__required_keys__) | set(UdfEdit.__optional_keys__)
 
 
@@ -10790,19 +9618,6 @@ def _batch_commit(con, b: dict, confirm: bool, head: str, backup: Optional[str],
     return res
 
 
-# ----------------------------------------------------------------- edit log, backups and restore
-
-BACKUP_NAME = re.compile(r"_(\d{8}_\d{6})(?:_([a-z_]+?))?(?:_\d+)?\.db$", re.I)
-
-
-def _backup_taken_at(path: str) -> str:
-    """Time a backup was taken: the stamp of its file name, else its modification time."""
-    m = BACKUP_NAME.search(os.path.basename(path))
-    if m:
-        return datetime.strptime(m[1], "%Y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S")
-    return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M:%S")
-
-
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_edit_log(project: Optional[ProjectId] = None, since: Optional[DateTimeStr] = None,
                 offset: Offset = 0, limit: Limit = 50) -> dict:
@@ -10849,7 +9664,7 @@ def p6_list_backups(offset: Offset = 0, limit: Limit = 200) -> dict:
     file time), size_bytes, size_mb, kind ('backup', 'pre_restore' = safety copy taken by a
     restore), this_database (named after the current database file)."""
     folder = _backup_dir()
-    stem = os.path.splitext(os.path.basename(DB_PATH))[0].lower()
+    stem = os.path.splitext(os.path.basename(_state.DB_PATH))[0].lower()
     rows = []
     if os.path.isdir(folder):
         for name in os.listdir(folder):
@@ -10867,36 +9682,6 @@ def p6_list_backups(offset: Offset = 0, limit: Limit = 200) -> dict:
     return res
 
 
-def _backup_file(name: str) -> str:
-    """Path of a backup named as p6_list_backups shows it (a bare file name in the backup folder)."""
-    if not name or os.path.basename(name) != name or not name.lower().endswith(".db"):
-        raise ValueError("name: a .db file name from p6_list_backups (no folder)")
-    path = os.path.join(_backup_dir(), name)
-    if not os.path.isfile(path):
-        raise ValueError(f"Backup not found in {_backup_dir()}: {name}")
-    if os.path.abspath(path) == os.path.abspath(DB_PATH):
-        raise ValueError("That file is the database itself")
-    return path
-
-
-def _projects_of(path: str) -> dict[str, tuple]:
-    """Project ID -> (data date, last schedule date) of a database file (read only), EPS nodes left out."""
-    con = sqlite3.connect(_ro_uri(path), uri=True, timeout=5)
-    con.row_factory = sqlite3.Row
-    try:
-        tables = {r[0].upper() for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        missing = {"PROJECT", "TASK", "TASKPRED", "PROJWBS"} - tables
-        if missing:
-            raise ValueError(f"{os.path.basename(path)} is not a P6 database (no {sorted(missing)})")
-        cols = {r[1].lower() for r in con.execute("PRAGMA table_info(PROJECT)")}
-        sel = ", ".join(c if c in cols else f"NULL AS {c}" for c in ("last_recalc_date", "last_schedule_date"))
-        alive = " AND delete_session_id IS NULL" if "delete_session_id" in cols else ""
-        return {r[0]: (r[1], r[2]) for r in con.execute(
-            f"SELECT proj_short_name, {sel} FROM PROJECT WHERE COALESCE(project_flag, 'Y') = 'Y'{alive}")}
-    finally:
-        con.close()
-
-
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False})
 def p6_restore_backup(name: str, confirm: bool = False) -> dict:
     """Replace the database with a backup from the backup folder (name as p6_list_backups shows it).
@@ -10905,7 +9690,6 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
     backup (PRAGMA quick_check), takes a safety backup of the current database (kind pre_restore),
     copies the backup in with the SQLite backup API and logs the restore in the edit log (logged
     edits made after the backup was taken become undone). Afterwards open P6 and check the projects."""
-    global _backup_done
     why = _write_refusal()
     if why:
         raise RuntimeError(why)
@@ -10916,7 +9700,7 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
     mt = datetime.fromtimestamp(os.path.getmtime(path))
     copied = (mt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
               if timedelta(0) <= mt - datetime.strptime(taken, "%Y-%m-%d %H:%M:%S") < timedelta(minutes=10) else taken)
-    cur, old = _projects_of(DB_PATH), _projects_of(path)
+    cur, old = _projects_of(_state.DB_PATH), _projects_of(path)
     changed = sorted(p for p in set(cur) & set(old) if cur[p] != old[p])
     diff = {"only_in_backup": sorted(set(old) - set(cur))[:50], "only_in_database": sorted(set(cur) - set(old))[:50],
             "changed": [{"project": p, "database": {"data_date": cur[p][0], "last_schedule_date": cur[p][1]},
@@ -10924,11 +9708,11 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
             "counts": {"backup_projects": len(old), "database_projects": len(cur),
                        "only_in_backup": len(set(old) - set(cur)), "only_in_database": len(set(cur) - set(old)),
                        "changed": len(changed)}}
-    if os.path.splitext(name)[0].lower().startswith(os.path.splitext(os.path.basename(DB_PATH))[0].lower() + "_"):
+    if os.path.splitext(name)[0].lower().startswith(os.path.splitext(os.path.basename(_state.DB_PATH))[0].lower() + "_"):
         warn = []
     else:
-        warn = [f"{name} is not named after {os.path.basename(DB_PATH)}: it may come from another database"]
-    plan = [f"Restore {name} (taken {taken}, {os.path.getsize(path) / 1048576:.1f} MB) over {DB_PATH}",
+        warn = [f"{name} is not named after {os.path.basename(_state.DB_PATH)}: it may come from another database"]
+    plan = [f"Restore {name} (taken {taken}, {os.path.getsize(path) / 1048576:.1f} MB) over {_state.DB_PATH}",
             f"Projects: {diff['counts']['only_in_backup']} only in the backup, {diff['counts']['only_in_database']} only "
             f"in the database (lost), {diff['counts']['changed']} with another data date or last schedule date",
             "A safety backup of the current database is taken first."]
@@ -10940,7 +9724,7 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
     if not confirm:
         return {"dry_run": True, "would_do": plan, **base,
                 "next": "Call again with confirm=True to restore"
-                        + (" (the local working copy only)." if SETTINGS.eppm else " (P6 must be closed).")}
+                        + (" (the local working copy only)." if _state.SETTINGS.eppm else " (P6 must be closed).")}
     err = _guard_write()
     if err:
         raise RuntimeError(err)
@@ -10953,17 +9737,17 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
         err = _guard_write()  # P6 may have been opened during the safety copy
         if err:
             raise RuntimeError(err + f" Nothing restored (safety backup {safety} kept).")
-        dst = sqlite3.connect(DB_PATH, timeout=30)
+        dst = sqlite3.connect(_state.DB_PATH, timeout=30)
         try:
             src.backup(dst)
         finally:
             dst.close()
     finally:
         src.close()
-    _backup_done = False  # the next write backs up the restored state
+    _state._backup_done = False  # the next write backs up the restored state
     _cols_cache.clear()
     _schema_cache.clear()
-    entry = {"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(DB_PATH),
+    entry = {"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(_state.DB_PATH),
              "tool": "p6_restore_backup", "operation": "restore_backup", "project": None, "proj_id": None,
              "table": None, "keys": {"backup": name}, "before": None, "after": None, "backup_taken_at": taken,
              "backup_copied_at": copied,
@@ -11911,19 +10695,6 @@ def _preview_matches(con, table: str, rows: list[dict]) -> dict:
     return found
 
 
-def _insert(con, table: str, row: dict) -> None:
-    row = {k: v for k, v in row.items() if k in _cols(con, table)}
-    con.execute(f"INSERT INTO {table} ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
-                list(row.values()))
-
-
-def _update(con, table: str, where: dict, row: dict) -> None:
-    row = {k: v for k, v in row.items() if k in _cols(con, table) and k not in where}
-    if row:
-        con.execute(f"UPDATE {table} SET {', '.join(k + '=?' for k in row)} WHERE "
-                    + " AND ".join(k + "=?" for k in where), [*row.values(), *where.values()])
-
-
 class _XerImport:
     """One import run. idmap[table][xer id] = database id."""
 
@@ -12672,10 +11443,6 @@ def _upsert(imp: _XerImport, table: str, row: dict, key: tuple, known: Optional[
             known[1].add(k)
 
 
-def _ids_sql(ids) -> str:
-    return "(" + ",".join(str(int(i)) for i in ids) + ")" if ids else "(NULL)"
-
-
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_export_xer(project: ProjectId, path: str, tables: Optional[list[XerTable]] = None,
                   xer_version: Optional[str] = None, overwrite: bool = False) -> dict:
@@ -12824,7 +11591,7 @@ def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[s
     base_curr = con.execute("SELECT curr_short_name FROM CURRTYPE WHERE base_exch_rate = 1"
                             + al("CURRTYPE")).fetchone()
     lines = ["\t".join(["ERMHDR", xer_version, datetime.now().strftime("%Y-%m-%d"), "Project",
-                        P6_USER, P6_USER, "dbxDatabaseNoName", "Project Management",
+                        _state.P6_USER, _state.P6_USER, "dbxDatabaseNoName", "Project Management",
                         base_curr[0] if base_curr else "USD"])]
     counts, lossy, warn = {}, {}, []
     for t in tables:
@@ -12968,16 +11735,6 @@ def _ink_on(color: str) -> str:
         return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
     fill = lum(color)
     return "FFFFFF" if 1.05 / (fill + 0.05) >= (fill + 0.05) / (lum(DASH_INK) + 0.05) else DASH_INK
-
-
-def _all_rows(fn: Callable[..., dict], cap: int, **kw) -> tuple[dict, list[dict], bool]:
-    """Rows of every page of a list tool, up to cap: (first page, rows, cut at cap)."""
-    first = res = fn(offset=0, limit=MAX_ROWS, **kw)
-    rows = list(res["rows"])
-    while res["next_offset"] is not None and len(rows) < cap:
-        res = fn(offset=res["next_offset"], limit=MAX_ROWS, **kw)
-        rows += res["rows"]
-    return first, rows[:cap], len(rows) > cap or res["next_offset"] is not None
 
 
 def _bl_planned_by_wbs(con, bid: int, dd: datetime, wbs_of: Mapping[str, int]) -> dict[int, dict]:
@@ -14105,8 +12862,8 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
                      "that F9." for u in tr["rows"] if u["stale"]]
     if len(seen) > 1:
         raise ValueError(f"The schedule of {project} changed during the export (data date or last F9): run it again.")
-    source = (", ".join(os.path.basename(f) for f in SETTINGS.xer_files) if SETTINGS.xer_files  # XER-only mode
-              else os.path.basename(DB_PATH))
+    source = (", ".join(os.path.basename(f) for f in _state.SETTINGS.xer_files) if _state.SETTINGS.xer_files  # XER-only mode
+              else os.path.basename(_state.DB_PATH))
     data = {"project": project, "name": name and name[0], "db": source, "now": datetime.now(),
             "rd": rd, "summary": summary, "curve": curve, "curve_error": curve_error, "crit": crit, "hc": hc,
             "state": state, "near": near, "baseline_dates": baseline_dates, "baseline_arg": baseline,
@@ -14387,8 +13144,8 @@ def p6_export_lookahead(project: ProjectId, path: str, weeks: WindowWeeks = 3, f
               else "(not in the WBS tree)", items)
              for w, items in sorted(groups.items(), key=lambda kv: order.get(kv[0], len(order)))]
     name = next((n["wbs_name"] for n in tree if n["depth"] == 0), None)
-    source = (", ".join(os.path.basename(f) for f in SETTINGS.xer_files) if SETTINGS.xer_files  # XER-only mode
-              else os.path.basename(DB_PATH))
+    source = (", ".join(os.path.basename(f) for f in _state.SETTINGS.xer_files) if _state.SETTINGS.xer_files  # XER-only mode
+              else os.path.basename(_state.DB_PATH))
     data = {"project": project, "name": name, "db": source, "frm": la["frm"], "to": la["to"], "days": days,
             "weeks": la["weeks"], "grid": use, "cal": cal, "data_date": la["data_date"],
             "last_schedule_date": prj["last_schedule_date"], "groups": bands}
@@ -14417,7 +13174,7 @@ def p6_export_lookahead(project: ProjectId, path: str, weeks: WindowWeeks = 3, f
 
 def _eppm_profile() -> dict:
     """The confirmed active P6 EPPM server profile; ValueError outside P6 EPPM mode."""
-    st = SETTINGS
+    st = _state.SETTINGS
     p = _config.eppm_profile(st.raw, st.eppm) if st.eppm else None
     if p is None:
         raise ValueError("Not in P6 EPPM mode: in MCP for Primavera P6 Settings (Database), choose 'A P6 EPPM "
@@ -14440,8 +13197,8 @@ def _eppm_secret(key: str, what: str) -> str:
 def _eppm_pending() -> list[dict]:
     """Net pending changes of the working copy (edits since the pull, not undone, not pushed)."""
     from p6mcp.eppm import pending
-    m = EPPM_MANIFEST
-    if not m or not DB_PATH:
+    m = _state.EPPM_MANIFEST
+    if not m or not _state.DB_PATH:
         return []
     es = _log_entries()
     return pending.net(pending.entries_since(es, m.get("pulled_ts") or m["pulled_at"], _undone_fn(es),
@@ -14465,7 +13222,7 @@ def p6_eppm_projects(search: str = "", offset: int = 0, limit: int = 100) -> dic
     search: part of the Project ID or name (case ignored)."""
     offset, limit = _check_page(offset, limit)
     p = _eppm_profile()
-    pulled = {x["project_id"].lower() for x in (EPPM_MANIFEST or {}).get("projects", [])}
+    pulled = {x["project_id"].lower() for x in (_state.EPPM_MANIFEST or {}).get("projects", [])}
     from p6mcp.eppm import rest
     try:
         with _eppm_session(p) as s:
@@ -14582,7 +13339,7 @@ def p6_eppm_status(check_server: bool = True) -> dict:
     check_server, how many activities of each pulled project someone changed on the server since the pull
     (one read per project: pull again to bring them in); the user's own pushes are counted apart."""
     p = _eppm_profile()
-    m = EPPM_MANIFEST
+    m = _state.EPPM_MANIFEST
     out: dict[str, Any] = {"server": p["name"], "address": p["base_url"], "pulled": m is not None}
     if m is None:
         out["next"] = "Nothing pulled yet: list the projects with p6_eppm_projects, then p6_eppm_pull."
@@ -14663,7 +13420,7 @@ def _eppm_scheduled(p: dict, targets: list[dict], job: dict, dd: Optional[str], 
            "job": {k: job[k] for k in ("job_id", "status", "seconds")}, "log_facts": jobs.log_facts(job["log"]),
            "log": job["log"], "log_truncated": job["log_truncated"]}
     try:
-        _log_write([{"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(DB_PATH or "eppm"),
+        _log_write([{"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(_state.DB_PATH or "eppm"),
                      "tool": tool, "operation": "schedule_eppm", "project": ", ".join(out["projects"]),
                      "proj_id": None, "table": None, "keys": {"server": p["name"]}, "before": None,
                      "after": {"job": out["job"], "new_data_date": dd}, "summary": "; ".join(plan)}])
@@ -14682,7 +13439,7 @@ def _eppm_scheduled(p: dict, targets: list[dict], job: dict, dd: Optional[str], 
                                   "pulled again."}
         out["next"] = "Scheduled on the server. Push the pending changes, then pull again to read the new dates."
         return out
-    m = EPPM_MANIFEST or {}
+    m = _state.EPPM_MANIFEST or {}
     try:
         pulled = _eppm_pull_now(p, sorted({x["project_id"] for x in m.get("projects", [])} | set(out["projects"])),
                                 route=m.get("route") if m.get("route") in ("sql", "rest") else "auto")
@@ -14713,7 +13470,7 @@ def p6_eppm_push(schedule: bool = False, new_data_date: Optional[DateTimeStr] = 
     from p6mcp.eppm import push as _push
     from p6mcp.eppm import rest
     p = _eppm_profile()
-    m = EPPM_MANIFEST
+    m = _state.EPPM_MANIFEST
     if not m:
         raise ValueError("Nothing pulled yet: there is nothing to push.")
     if new_data_date and not schedule:
@@ -14777,7 +13534,7 @@ def p6_eppm_push(schedule: bool = False, new_data_date: Optional[DateTimeStr] = 
               "journal": journal}
     _eppm_store.update_manifest(p["name"], pushed_entries=done, push=record, pushed_activities=mine)
     try:
-        _log_write([{"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(DB_PATH),
+        _log_write([{"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(_state.DB_PATH),
                      "tool": "p6_eppm_push", "operation": "push_eppm", "project": None, "proj_id": None,
                      "table": None, "keys": {"server": p["name"]}, "before": None, "after": record,
                      "summary": f"pushed {len(res['sent'])} change(s) to {p['name']}"}])
@@ -14927,7 +13684,7 @@ def p6_eppm_discard(changes: list[str], confirm: bool = False) -> dict:
     The server is not touched. Use it after a push conflict on one change, instead of a new pull that drops
     every change. Dry run unless confirm=True."""
     _eppm_profile()
-    if not EPPM_MANIFEST:
+    if not _state.EPPM_MANIFEST:
         raise ValueError("Nothing pulled yet: there is nothing to discard.")
     want = list(dict.fromkeys(str(x).strip() for x in (changes or []) if str(x).strip()))
     if not want:
@@ -14973,7 +13730,7 @@ def p6_eppm_schedule(projects: Optional[list[str]] = None, new_data_date: Option
     user first. With pull_after, it is refused while local changes are pending (push them first)."""
     from p6mcp.eppm import jobs, rest
     p = _eppm_profile()
-    m = EPPM_MANIFEST or {}
+    m = _state.EPPM_MANIFEST or {}
     names = [str(x).strip() for x in (projects or [x["project_id"] for x in m.get("projects", [])]) if str(x).strip()]
     if not names:
         raise ValueError("Name the projects to schedule (Project IDs, see p6_eppm_projects).")
@@ -15014,7 +13771,7 @@ SHOP_ROW = ("name", "title", "description", "author", "version", "tools", "write
 
 def _shop_settings() -> tuple[str, dict]:
     """(config file, its content) the shop install edits; an unreadable file is refused."""
-    path = SETTINGS.config_path or _config.config_path()
+    path = _state.SETTINGS.config_path or _config.config_path()
     try:
         data = _config.read_file(path)[0]
     except _config.ConfigError as e:
@@ -15078,7 +13835,7 @@ def p6_shop_get(name: str) -> dict:
     mine = _shop.installed_as(data, name)
     return {**_skills.shared_item(item), "author": item.get("author"), "version": item.get("version"),
             "license": item.get("license"), "tools": skill.tools(), "writes": item.get("writes"),
-            "missing_tools": _skills.missing_tools(skill, SETTINGS.tool_profile, SETTINGS.allow_writes),
+            "missing_tools": _skills.missing_tools(skill, _state.SETTINGS.tool_profile, _state.SETTINGS.allow_writes),
             "issue_url": f"{_shop.REPO_URL}/issues/{item['issue']}" if item.get("issue") else None,
             "status": _shop.status(data, entry), "installed_as": mine["name"] if mine else None}
 
@@ -15134,4 +13891,4 @@ _register_prompts()
 
 
 if __name__ == "__main__":
-    mcp.run()
+    _registry.mcp.run()

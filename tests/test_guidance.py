@@ -106,13 +106,15 @@ def test_offered_with_turned_off_and_custom_commands():
 
 
 def test_eppm_mode_hides_the_skills_whose_write_tools_the_working_copy_refuses(server, monkeypatch):
+    from p6mcp import registry  # the prompts and the MCP server object live there, STARTUP in core.state
+    from p6mcp.core import state
     core = [s.name for s in core_skills.bundled_skills()]
     raw = config.validate(dict(config.DEFAULTS, tool_profile="full", allow_writes=True))
     for eppm, expected in ((None, core), ("srv", [n for n in core if n != "update-import-safely"])):
-        monkeypatch.setattr(server, "STARTUP", dataclasses.replace(server.STARTUP, raw=raw, tool_profile="full",
+        monkeypatch.setattr(state, "STARTUP", dataclasses.replace(server.STARTUP, raw=raw, tool_profile="full",
                                                                    allow_writes=True, eppm=eppm))
-        monkeypatch.setattr(server, "PROMPTS", {})
-        monkeypatch.setattr(server, "mcp", server.FastMCP("primavera-p6", instructions=instructions.build(raw)))
+        monkeypatch.setattr(registry, "PROMPTS", {})
+        monkeypatch.setattr(registry, "mcp", server.FastMCP("primavera-p6", instructions=instructions.build(raw)))
         server._register_prompts()
         assert sorted(server.PROMPTS) == sorted(expected)
 
@@ -122,9 +124,11 @@ def test_server_registers_custom_prompts_and_instructions(server, monkeypatch):
     raw = config.validate(settings_logic.put_instruction(settings_logic.put_skill(
         dict(config.DEFAULTS, tool_profile="full", allow_writes=True, skills_disabled=core[:1]), MINE),
         ACT))
-    monkeypatch.setattr(server, "STARTUP", dataclasses.replace(server.STARTUP, raw=raw))
-    monkeypatch.setattr(server, "PROMPTS", {})
-    monkeypatch.setattr(server, "mcp", server.FastMCP("primavera-p6", instructions=instructions.build(raw)))
+    from p6mcp import registry  # the prompts and the MCP server object live there, STARTUP in core.state
+    from p6mcp.core import state
+    monkeypatch.setattr(state, "STARTUP", dataclasses.replace(server.STARTUP, raw=raw))
+    monkeypatch.setattr(registry, "PROMPTS", {})
+    monkeypatch.setattr(registry, "mcp", server.FastMCP("primavera-p6", instructions=instructions.build(raw)))
     server._register_prompts()
     assert sorted(server.PROMPTS) == sorted(core[1:] + ["float-report"])  # the 1.8 skills_disabled still apply
     assert server.mcp.instructions.endswith(ACT)
