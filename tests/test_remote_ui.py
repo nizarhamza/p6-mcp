@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+pytestmark = pytest.mark.qt
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 

@@ -187,6 +187,15 @@ def test_listener_refuses(listener):
     assert listener["got"] == []
 
 
+def test_listener_reads_a_refused_body_before_answering(listener):
+    """A refusal used to close the socket with the body unread: the reset then often beat the 403 or 400 to the
+    client (ConnectionAbortedError on Windows, about one request in seven)."""
+    port = listener["port"]
+    for _ in range(20):
+        assert _call(port, {"id": "a", "code": "b", "key": "c"}, host=f"rebind.example:{port}")[0] == 403
+        assert _call(port, {"id": "x" * 2000, "code": "c", "key": "k"})[0] == 400
+
+
 def test_listener_preflight(listener):
     status, headers, _ = _call(listener["port"], None, method="OPTIONS")
     assert status == 204 and headers["Access-Control-Allow-Origin"] == ORIGIN

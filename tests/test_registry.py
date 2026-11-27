@@ -3,7 +3,6 @@
 import importlib.util
 import json
 import os
-import subprocess
 import sys
 
 import pytest
@@ -62,7 +61,10 @@ def test_published_server_json_carries_the_bundle_hash(tmp_path):
         sj.build(server_json(), str(tmp_path / "other.zip"))
 
 
-def test_generated_tool_tables_are_current():
-    r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "gen_docs.py"), "--check"],
-                       capture_output=True, text=True, cwd=ROOT)
-    assert r.returncode == 0, r.stdout + r.stderr
+def test_generated_tool_tables_are_current(server, monkeypatch, capsys):
+    """`tools/gen_docs.py --check` in this process (a subprocess took 3 s to import the server again). The server
+    fixture comes first: gen_docs must find the module the conftest imported, never import it with its own config."""
+    monkeypatch.setattr(sys, "path", sys.path[:])  # gen_docs prepends the repository root
+    gen = load(os.path.join("tools", "gen_docs.py"), "gen_docs")
+    assert gen.server is server
+    assert gen.main(check=True) == 0, capsys.readouterr().out

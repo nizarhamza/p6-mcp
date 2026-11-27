@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from p6mcp import config
+from p6mcp import config, supervisor
 from p6mcp.remote import cloudflare as cf
 from p6mcp.remote import manage, supervise
 from p6mcp.supervisor import DISABLED, ERROR, RUNNING
@@ -340,7 +340,7 @@ def test_tunnel_waits_for_our_server(child_env):
         host.stop()
 
 
-def test_remote_host_runs_both_and_keeps_awake(child_env):
+def test_remote_host_runs_both_and_keeps_awake(child_env, monkeypatch):
     tmp = child_env
     settings = _settings(tmp)
     srv_cmd = running_server(tmp)
@@ -362,7 +362,8 @@ def test_remote_host_runs_both_and_keeps_awake(child_env):
             time.sleep(0.1)
         assert tun_env.read_text() == "tunnel-token-123"  # through the environment
         assert "tunnel-token-123" not in " ".join(map(str, host.tunnel.proc.args))  # never on the command line
-        time.sleep(3.2)  # READY_AFTER (3 s) of a child without status file
+        monkeypatch.setattr(supervisor, "READY_AFTER", 0.2)  # 3 s in the product: not waited for here
+        time.sleep(0.25)
         assert host.tick().tunnel.state == RUNNING  # no status file: alive for READY_AFTER seconds
     finally:
         host.stop()
@@ -424,6 +425,7 @@ def test_cloudflared_path(monkeypatch, tmp_path):
 
 # ----------------------------------------------------------------- relay Worker and the bundled connector
 
+@pytest.mark.slow
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js not installed")
 def test_worker_with_node(tmp_path):
     src = os.path.join(ROOT, "p6mcp", "remote", "worker.js")

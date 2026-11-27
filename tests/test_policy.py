@@ -115,10 +115,12 @@ def _listed_by_a_fresh_server(tmp_path, cfg: dict) -> set:
     return set(json.loads(out.stdout.strip().splitlines()[-1]))
 
 
+@pytest.mark.slow
 def test_clients_see_only_the_basic_tools(tmp_path):
     assert _listed_by_a_fresh_server(tmp_path, {"tool_profile": "basic"}) == policy.BASIC_TOOLS
 
 
+@pytest.mark.slow
 def test_clients_see_no_write_tool_when_writes_are_off(tmp_path):
     names = _listed_by_a_fresh_server(tmp_path, {"tool_profile": "full", "allow_writes": False})
     assert names and not any(policy.is_write(n) for n in names)

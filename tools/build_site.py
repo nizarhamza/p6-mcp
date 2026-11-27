@@ -8,7 +8,9 @@ footer, search and image dialogs) around the content of each page.
 A page source is HTML: a JSON front matter in an HTML comment, optional head extras (Open Graph, JSON-LD), then
 the content. Icons are written [[i:name]] (or [[i:name|class]]), the brand mark [[mark]] or [[mark-s]], the check
 mark [[tick]]. The home page also takes [[toolmap]] (the README tool tables), [[skills]] (the bundled core skills)
-and [[gallery]] (the Settings captures). The images in site/assets/img are captures of the app and of its output on
+and [[gallery]] (the Settings captures). Every page, head extras included, takes [[version]] (p6mcp.__version__) and
+[[n:all]], [[n:read]], [[n:basic]], [[n:file]], [[n:write]], [[n:settings]] (tool counts of the README tables), so
+no version or count is typed by hand. The images in site/assets/img are captures of the app and of its output on
 the synthetic demo project; this script does not make them. site.css, site.js, theme.js and search.json are loaded
 with ?v=<content hash>, so a new version reaches visitors at once.
 """
@@ -200,6 +202,23 @@ def read_skills():
                 chain.append(st["tool"])
         out.append({"name": name, "title": sk["title"], "text": SKILL_TEXT[name], "chain": chain, "writes": bool(sk["writes"])})
     return out
+
+
+def tool_counts(tools):
+    """{all, read, basic, file, write, settings}: the counts of the README tool tables (generated from the code)."""
+    c = {"all": 0, "read": 0, "write": 0, "file": 0, "settings": 0, "basic": 0}
+    for g in tools:
+        for t in g["tools"]:
+            c["all"] += 1
+            c[t["acc"]] += 1
+            c["basic"] += t["basic"]
+    return c
+
+
+def facts(s, counts):
+    """[[version]] and [[n:<count>]] filled in (an unknown count name raises)."""
+    s = s.replace("[[version]]", VERSION)
+    return re.sub(r"\[\[n:([a-z]+)\]\]", lambda m: str(counts[m.group(1)]), s)
 
 
 def toolmap_html(tools):
@@ -477,6 +496,7 @@ def first(pattern, text, what):
 def build():
     """Every generated file of site/ as {relative path: text}."""
     tools = read_tools()
+    counts = tool_counts(tools)
     skills = read_skills()
     sources = []
     for dirpath, _dirs, files in os.walk(PAGES):
@@ -486,12 +506,13 @@ def build():
     out, info, home_secs = {}, {}, []
     for rel in sorted(sources):
         meta, extra, content = read_page(rel)
+        extra, content = facts(extra, counts), facts(content, counts)
         url = meta["url"]
         if url == "/":
             content = content.replace("[[toolmap]]", toolmap_html(tools)).replace("[[skills]]", skills_html(skills))
             content = content.replace("[[gallery]]", gallery_html())
         content = macros(content)
-        left = re.findall(r"\[\[[^\]]+\]\]", content)
+        left = re.findall(r"\[\[[^\]]+\]\]", extra + content)
         if left:
             raise ValueError(f"{rel}: unknown placeholders {left}")
         if url == "/":

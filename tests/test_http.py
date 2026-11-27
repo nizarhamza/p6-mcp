@@ -28,6 +28,7 @@ def live(p6):
         assert time.monotonic() < deadline, "server did not start"
         time.sleep(0.05)
     yield {"port": port, "url": f"http://127.0.0.1:{port}/mcp", "p6": p6, "srv": srv}
+    srv.config.timeout_graceful_shutdown = 0.2  # 3 s in the product: open streams are not waited for here
     srv.should_exit = True
     th.join(10)
 
@@ -60,7 +61,8 @@ def test_foreign_origin_is_refused(live, origin):
 def test_local_origin_and_localhost_are_accepted(live):
     p = live["port"]
     assert post(live["url"], {"authorization": f"Bearer {TOKEN}", "origin": f"http://localhost:{p}"}).status_code == 200
-    r = post(f"http://localhost:{p}/mcp", {"authorization": f"Bearer {TOKEN}"})
+    # what a localhost URL sends (dialing localhost tries ::1 first: 2 s before 127.0.0.1 on Windows)
+    r = post(live["url"], {"authorization": f"Bearer {TOKEN}", "host": f"localhost:{p}"})
     assert r.status_code == 200
 
 

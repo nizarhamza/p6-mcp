@@ -2,8 +2,12 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]  # other branches run through their pull request (once per commit, not twice)
   pull_request:
+
+concurrency:  # a new commit cancels the run of the previous one on the same branch or pull request
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -20,14 +24,36 @@ jobs:
       PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # tests/test_guidance.py reads the instructions of commit fba4211 (skipped without history)
       - uses: actions/setup-python@v7
+        id: py
         with:
           python-version: ${{ matrix.python }}
           cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Cache month
+        id: month
+        shell: bash
+        run: echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Cache the virtual environment
+        id: venv
+        uses: actions/cache@v6
+        with:
+          path: .venv
+          # exact Python version (a venv is bound to its interpreter), the dependencies, refreshed every month
+          key: venv-${{ runner.os }}-${{ steps.py.outputs.python-version }}-${{ hashFiles('pyproject.toml') }}-${{ steps.month.outputs.month }}
       - name: Install
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          $PSNativeCommandUseErrorActionPreference = $true  # a failing pip stops the step
+          if ("${{ steps.venv.outputs.cache-hit }}" -ne "true") {
+            python -m venv .venv
+            .venv\Scripts\python -m pip install --upgrade pip
+            .venv\Scripts\python -m pip install -e ".[dev]"
+          } else {
+            .venv\Scripts\python -m pip install --no-deps -e .  # this checkout's version in the metadata
+          }
+          "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - name: Lint
         run: ruff check .
       - name: Tests

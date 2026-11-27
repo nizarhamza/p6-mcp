@@ -198,6 +198,7 @@ def live(p6):
     st = p6.config.load()
     srv, th, port = _start(remote.build_app(st, StubVerifier(), SECRET))
     yield {"url": f"http://127.0.0.1:{port}/mcp", "port": port, "p6": p6, "st": st}
+    srv.config.timeout_graceful_shutdown = 0.2  # 3 s in the product: open streams are not waited for here
     srv.should_exit = True
     th.join(10)
 
@@ -303,6 +304,7 @@ def test_writes_off_hides_write_tools(p6):
     assert "p6_list_projects" in names and not {t for t in names if policy.remote_kind(t) == "write"}
 
 
+@pytest.mark.slow
 def test_domain_mode_checks_the_host(p6):
     p6.set(remote_public_host="p6.example.com", remote_mode="domain")
     srv, th, port = _start(remote.build_app(p6.config.load(), StubVerifier("p6.example.com")))
@@ -311,6 +313,7 @@ def test_domain_mode_checks_the_host(p6):
         assert post(u, {"authorization": "Bearer tok-read"}).status_code == 421
         assert post(u, {"authorization": "Bearer tok-read", "host": "p6.example.com"}).status_code == 200
     finally:
+        srv.config.timeout_graceful_shutdown = 0.2  # 3 s in the product: open streams are not waited for here
         srv.should_exit = True
         th.join(10)
 
