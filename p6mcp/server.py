@@ -470,7 +470,7 @@ def _confirm_text(tool: str, params: dict) -> str:
     if tool == "p6_restore_backup":
         return f"RESTORE {params.get('name')}"
     if tool == "p6_eppm_push":
-        return f"PUSH TO {SETTINGS.eppm}"
+        return f"PUSH TO {SETTINGS.eppm}" + (" AND SCHEDULE" if params.get("schedule") else "")
     raise KeyError(tool)
 
 
@@ -4670,14 +4670,23 @@ class _Cpm:
         return out, by_s, by_p
 
     # ------------------------------------------------------------------ passes
-    def run(self, drivers: Optional[dict] = None) -> dict[int, dict]:
+    def run(self, drivers: Optional[dict] = None, fields: bool = True) -> dict[int, dict]:
         """{task_id: {es, ef, ls, lf, tf_h, ff_h, rs, rf, rls, rlf, ps, pf, longest, critical, float_path,
         float_path_order[, rem_h]}} of every activity of the project (rem_h: the remaining duration F9
-        rewrites, only where it does). drivers: filled by the forward pass (ties() reads it)."""
+        rewrites, only where it does). drivers: filled by the forward pass (ties() reads it). fields=False:
+        the same forward and backward passes, but only the dates and total float (es, ef, ls, lf, tf_h) are
+        returned (no free float, paths or flags: the DCMA critical path test reads no more). The plan is kept
+        for _plan_cache (ties(), _cpm_classify) while self.links is the same list."""
         plan = self.plan()
+        self._plan = (self.links, plan)
         res = self.forward(plan, drivers=drivers)
         self.backward(plan, res)
-        self._fields(plan, res)
+        if fields:
+            self._fields(plan, res)
+        else:
+            for r in res.values():
+                if r.get("ss") is not None:  # as _fields: the first assignment's dates are the stored ones
+                    r["es"], r["ef"] = r["ss"], r["sf"]
         return res
 
     def plan(self) -> dict:
@@ -6151,15 +6160,47 @@ def _temp_network(con, pid: int, cpm: _Cpm, res: Optional[dict], bid: Optional[i
         con.execute("UPDATE PROJECT SET scd_end_date = ? WHERE proj_id = ?", (_fmt_dt(cpm.finish(res)[1]), pid))
 
 
-def _dcma_memory(pid: int, cpm: Optional[_Cpm] = None, res: Optional[dict] = None) -> tuple[dict, str]:
+def _cpm_reloaded(con, cpm: _Cpm, res: dict) -> _Cpm:
+    """The network _Cpm(con, pid) reads back from _temp_network(con, pid, cpm, res), built in memory: open
+    activities with the remaining duration F9 rewrites (rem_h) and the engine's dates, float and paths as their
+    stored values, constraint dates at whole seconds, links in task_pred_id order (new links -1, -2...)."""
+    tcols = _cols(con, "TASK")
+    net = cpm.copy()
+    dated = [(c, k) for c, k in (("early_start_date", "es"), ("early_end_date", "ef"), ("late_start_date", "ls"),
+                                 ("late_end_date", "lf"), ("total_float_hr_cnt", "tf_h"), ("free_float_hr_cnt", "ff_h"),
+                                 ("driving_path_flag", "longest"), ("float_path", "float_path"),
+                                 ("float_path_order", "float_path_order")) if c in tcols]
+    sec = lambda v: _db_dt(_fmt_dt(v)) if isinstance(v, datetime) else v  # noqa: E731
+    for n, d in net.t.items():
+        d["cstr_date"] = sec(d["cstr_date"])
+        if d["status_code"] == "TK_Complete":
+            continue
+        r = res[n]
+        if "rem_h" in r:
+            d["rem"] = d["remain_drtn_hr_cnt"] = r["rem_h"]
+        for c, k in dated:
+            v = r.get(k)
+            d[c] = sec(v) if isinstance(v, datetime) else ("Y" if v else "N") if k == "longest" else v
+    for k, lk in enumerate((lk for lk in net.links if lk["id"] is None), 1):
+        lk["id"] = -k
+    net.links.sort(key=lambda lk: lk["id"])
+    return net
+
+
+def _dcma_memory(pid: int, cpm: Optional[_Cpm] = None, res: Optional[dict] = None,
+                 stored: Optional[tuple] = None) -> tuple[dict, str]:
     """(checks, threshold source) of the DCMA assessment as p6_health_check runs it (project settings, the project
     baseline, current dates, remaining durations; key_dates left out; no snapshot): on the stored database, or
-    with cpm and res on that network with the engine's dates in temp tables (read-only connection)."""
+    with cpm and res on that network with the engine's dates in temp tables (read-only connection). The critical
+    path test reuses what the caller computed instead of loading and running the engine again: stored =
+    (cpm, res, match_rate) of the stored database; with cpm and res, the network as the temp tables hold it
+    (_cpm_reloaded) and res, its own F9."""
     con = _connect()
     con.execute("BEGIN")
     try:
         cfg = _dcma_settings(con, pid, {}, None)
         bid = _baseline_pid(con, pid, None)
+        net = stored
         if cpm is not None:
             qo = con.execute("PRAGMA query_only").fetchone()[0]
             con.execute("PRAGMA query_only = OFF")  # temp tables only: mode=ro keeps the database file read only
@@ -6167,9 +6208,12 @@ def _dcma_memory(pid: int, cpm: Optional[_Cpm] = None, res: Optional[dict] = Non
                 _temp_network(con, pid, cpm, res, bid)
             finally:
                 con.execute(f"PRAGMA query_only = {'ON' if qo else 'OFF'}")
+            if res is not None:
+                back = _cpm_reloaded(con, cpm, res)
+                net = (back, res, _cpm_compare(back, res, False)["match_rate"])
         checks = _dcma(con, pid, bid, cfg, "current", "remaining")[0]
         if "critical_path_test" not in cfg["disabled"]:
-            checks["critical_path_test"] = _cpt(con, pid)
+            checks["critical_path_test"] = _cpt(con, pid, net)
     finally:
         con.rollback()  # drops the temp tables too
     return checks, cfg["source"]
@@ -6407,7 +6451,8 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     assumptions = _whatif_assumptions(base, trial, before, r1, trace, crit_b, crit_a, opn, cut, near, lim,
                                       _finish_ties(base, r0, d0), _finish_ties(trial, r1, d1))
     if dcma:
-        cb, src = _dcma_memory(pid, base, r0) if compare_to == "engine" else _dcma_memory(pid)
+        cb, src = _dcma_memory(pid, base, r0) if compare_to == "engine" else \
+            _dcma_memory(pid, stored=(base, r0, chk["match_rate"]))
         ca = _dcma_memory(pid, trial, r1)[0]
         fb, fa = ([k for k, v in c.items() if v["pass"] is False and k not in HC_UNSCORED] for c in (cb, ca))
         assumptions["dcma"] = {
@@ -6762,20 +6807,25 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
     return out
 
 
-def _cpt(con, pid: int) -> dict:
+def _cpt(con, pid: int, net: Optional[tuple] = None) -> dict:
     """DCMA critical path test with the engine: delay the earliest most critical open activity by 100
-    working days and check that the project finish moves as much (90 % or more of its own shift)."""
+    working days and check that the project finish moves as much (90 % or more of its own shift).
+    net: (cpm, res, match_rate) of the project's network as con holds it, already loaded and run by the
+    caller (res = cpm.run(), match_rate of res against cpm's stored dates); else loaded and run here."""
     out = {"count": None, "denominator": None, "pct": None, "threshold": None, "pass": None, "activity": None,
            "activity_name": None, "sample": []}  # activity keys always present (null when not run)
-    try:
-        base = _Cpm(con, pid)
-        r0 = base.run()
-    except ValueError as e:
-        return {**out, "note": f"not run: {e}"}
-    chk = _cpm_compare(base, r0, False)
-    if chk["match_rate"] is None or chk["match_rate"] < CPM_TRUST:
-        return {**out, "engine_match_rate": chk["match_rate"],
-                "note": f"not run: the CPM engine matches the last F9 on {chk['match_rate']} of open activities "
+    if net is None:
+        try:
+            base = _Cpm(con, pid)
+            r0 = base.run()
+        except ValueError as e:
+            return {**out, "note": f"not run: {e}"}
+        rate = _cpm_compare(base, r0, False)["match_rate"]
+    else:
+        base, r0, rate = net
+    if rate is None or rate < CPM_TRUST:
+        return {**out, "engine_match_rate": rate,
+                "note": f"not run: the CPM engine matches the last F9 on {rate} of open activities "
                         f"(needs {CPM_TRUST}); see p6_cpm_validate"}
     cand = [d for d in base.t.values() if d["task_type"] in ("TT_Task", "TT_Rsrc") and base.duration_fixed(d) is None
             and r0[d["task_id"]]["tf_h"] is not None]
@@ -6787,17 +6837,17 @@ def _cpt(con, pid: int) -> dict:
     delay = 100 * (d["hpd"] or 8.0)
     trial = base.copy()
     trial.t[d["task_id"]]["rem"] = trial.t[d["task_id"]]["rem"] + delay
-    r1 = trial.run()
+    r1 = trial.run(fields=False)
     f0, f1 = base.finish(r0)[1], trial.finish(r1)[1]
     act_shift = (r1[d["task_id"]]["ef"] - r0[d["task_id"]]["ef"]).total_seconds() / 86400
     fin_shift = (f1 - f0).total_seconds() / 86400
     if act_shift <= 0:
-        return {**out, "activity": d["task_code"], "activity_name": d["task_name"], "engine_match_rate": chk["match_rate"],
+        return {**out, "activity": d["task_code"], "activity_name": d["task_name"], "engine_match_rate": rate,
                 "note": f"not evaluated: delaying {d['task_code']} did not move its own finish"}
     ok = fin_shift >= 0.9 * act_shift
     return {**out, "pass": ok, "activity": d["task_code"], "activity_name": d["task_name"], "delay_d": 100,
             "activity_finish_shift_cd": round(act_shift, 2), "project_finish_shift_cd": round(fin_shift, 2),
-            "engine_match_rate": chk["match_rate"]}
+            "engine_match_rate": rate}
 
 
 def _cmp_acts(con, dates: str, crit: tuple[str, str] = ("0", "0")) -> str:
@@ -7535,7 +7585,8 @@ def _value_at(items: Sequence[tuple], t: datetime) -> float:
 def _measure_rows(con, pid: int, measure: str, resource: Optional[str] = None) -> list[sqlite3.Row]:
     """Assignments of a project: target, actual and remain quantity (measure 'units': labor and
     nonlabor resources; 'cost': every resource), planned, actual and remaining dates and what
-    _perf_pct needs of the activity. resource= one resource (any type)."""
+    _perf_pct and _ev_pct need of the activity (WBS node; has_curve = a resource curve on one of its
+    assignments). resource= one resource (any type)."""
     cols, tc, k = _cols(con, "TASKRSRC"), _cols(con, "TASK"), "qty" if measure == "units" else "cost"
     act = " + ".join(f"COALESCE(tr.{c}, 0)" for c in (f"act_reg_{k}", f"act_ot_{k}") if c in cols) or "0"
     rtype = "COALESCE(tr.rsrc_type, r.rsrc_type)" if "rsrc_type" in cols else "r.rsrc_type"
@@ -7545,7 +7596,10 @@ def _measure_rows(con, pid: int, measure: str, resource: Optional[str] = None) -
            "tr.target_start_date, tr.target_end_date, tr.act_start_date, tr.act_end_date, tr.restart_date, "
            "tr.reend_date, t.phys_complete_pct, t.status_code, t.target_drtn_hr_cnt, t.remain_drtn_hr_cnt, "
            + ("t.complete_pct_type" if "complete_pct_type" in tc else "NULL") + f" AS pct_type, {tu('act')} AS task_act, "
-           f"{tu('remain')} AS task_remain FROM TASKRSRC tr JOIN TASK t ON t.task_id = tr.task_id "
+           f"{tu('remain')} AS task_remain, t.wbs_id, "
+           + ("EXISTS (SELECT 1 FROM TASKRSRC c WHERE c.task_id = t.task_id AND c.curv_id IS NOT NULL"
+              + _alive(con, "TASKRSRC", "c") + ")" if "curv_id" in cols else "0") + " AS has_curve "
+           "FROM TASKRSRC tr JOIN TASK t ON t.task_id = tr.task_id "
            "LEFT JOIN RSRC r ON r.rsrc_id = tr.rsrc_id" + _alive(con, "RSRC", "r") + " WHERE t.proj_id = ?"
            + _alive(con, "TASKRSRC", "tr") + _alive(con, "TASK", "t"))
     if resource:
@@ -7573,12 +7627,86 @@ def _perf_pct(r: Mapping) -> float:
     return min(100.0, max(0.0, v))
 
 
-def _curve_items(rows: Sequence, dd: datetime) -> dict:
+# P6 earned value techniques (PROJWBS / PREFER ev_compute_type) -> technique name. EC_Cmp_pct is in P6's
+# own exports; the other tokens come from a third-party reader of P6 XER files. The token of 'activity
+# percent complete using resource curves' is not known: a token naming a curve is read as that technique.
+EV_TECHNIQUES = {"EC_Cmp_pct": "activity_pct", "EC_0_pct": "0_100", "EC_50_pct": "50_50",
+                 "EC_User_pct": "custom_pct", "EC_MS": "wbs_milestones"}
+EV_CURVE_TOKEN = re.compile(r"curv", re.I)
+
+
+def _ev_map(con, pid: int) -> dict:
+    """Earned value technique of every WBS node of a project: {by_wbs: {wbs_id: (technique, custom %,
+    WBS milestones %)}, nodes: {technique: node count}, unknown: [tokens]}. A node's own
+    ev_compute_type / ev_user_pct, else the project node's, else PREFER's (the admin default), else
+    activity percent complete. WBS milestones % = weight of the node's completed WBSSTEP rows / weight
+    of all of them x 100 (None without weights). An unknown token counts as activity percent complete
+    and is listed."""
+    wc = _cols(con, "PROJWBS")
+    col = lambda c: c if c in wc else "NULL"  # noqa: E731
+    rows = con.execute(f"SELECT wbs_id, proj_node_flag, {col('ev_compute_type')}, {col('ev_user_pct')} FROM PROJWBS "
+                       "WHERE proj_id = ?" + _alive(con, "PROJWBS"), (pid,)).fetchall()
+    pc = _cols(con, "PREFER")
+    pref = (con.execute("SELECT " + ", ".join(c if c in pc else "NULL" for c in ("ev_compute_type", "ev_user_pct"))
+                        + " FROM PREFER").fetchone() if pc else None) or (None, None)
+    node = next((r for r in rows if r[1] == "Y"), None)
+    dflt = (node[2] if node and node[2] else pref[0] or "EC_Cmp_pct",
+            node[3] if node and node[3] is not None else pref[1])
+    ms: dict[int, list[float]] = {}
+    if {"wbs_id", "proj_id", "step_wt", "complete_flag"} <= set(_cols(con, "WBSSTEP")):
+        for w, wt, done in con.execute("SELECT wbs_id, step_wt, complete_flag FROM WBSSTEP WHERE proj_id = ?"
+                                       + _alive(con, "WBSSTEP"), (pid,)):
+            m = ms.setdefault(w, [0.0, 0.0])
+            m[0] += float(wt or 0) * (done == "Y")
+            m[1] += float(wt or 0)
+    out: dict[str, Any] = {"by_wbs": {}, "nodes": {}, "unknown": []}
+    for w, _, tok, up in rows:
+        tok = tok or dflt[0]
+        tech = EV_TECHNIQUES.get(tok) or ("resource_curves" if EV_CURVE_TOKEN.search(tok) else None)
+        if tech is None:
+            tech = "activity_pct"
+            if tok not in out["unknown"]:
+                out["unknown"].append(tok)
+        up = dflt[1] if up is None else up
+        m = ms.get(w)
+        out["by_wbs"][w] = (tech, None if up is None else min(100.0, max(0.0, float(up))),
+                            100 * m[0] / m[1] if m and m[1] > 0 else None)
+        out["nodes"][tech] = out["nodes"].get(tech, 0) + 1
+    return out
+
+
+def _ev_pct(r: Mapping, ev: Optional[Mapping]) -> float:
+    """Performance % complete (0 to 100) of a _measure_rows row under the earned value technique of its
+    WBS node (ev = _ev_map; None or a node it lacks = activity percent complete), as the P6
+    documentation defines them: activity_pct = _perf_pct; resource_curves = units % complete of the
+    activity (actual / at completion, labor plus nonlabor) when one of its assignments has a resource
+    curve, else _perf_pct; 0_100 = 100 once completed, else 0; 50_50 = 50 once started, 100 once
+    completed; custom_pct = the node's custom % once started, 100 once completed; wbs_milestones = the
+    node's completed milestone weight share (0 without weights)."""
+    tech, user, ms = (ev or {}).get("by_wbs", {}).get(r["wbs_id"], ("activity_pct", None, None))
+    st = r["status_code"]
+    if tech == "0_100":
+        return 100.0 * (st == "TK_Complete")
+    if tech in ("50_50", "custom_pct"):
+        if st in ("TK_Complete", "TK_NotStart"):
+            return 100.0 * (st == "TK_Complete")
+        return 50.0 if tech == "50_50" else user or 0.0
+    if tech == "wbs_milestones":
+        return ms or 0.0
+    if tech == "resource_curves" and r["has_curve"]:
+        a = float(r["task_act"] or 0)
+        at = a + float(r["task_remain"] or 0)
+        return min(100.0, max(0.0, 100 * a / at)) if at else 100.0 * (st == "TK_Complete")
+    return _perf_pct(r)
+
+
+def _curve_items(rows: Sequence, dd: datetime, ev: Optional[Mapping] = None) -> dict:
     """Curves of _measure_rows at data date dd, as (qty, start, end): planned (target over the planned
     dates), actual (actual from the actual start to the actual finish, clipped at dd; dates missing =
     at dd), remaining (remain from the remaining start, not before dd, to the remaining finish). Plus
-    budget, actual_qty, remain_qty and earned (target x _perf_pct) totals, clipped (actual dates after
-    dd), clamped (remaining start before dd) and unspread (target without planned dates)."""
+    budget, actual_qty, remain_qty and earned (target x _ev_pct under the WBS techniques of ev =
+    _ev_map) totals, clipped (actual dates after dd), clamped (remaining start before dd) and unspread
+    (target without planned dates)."""
     out: dict[str, Any] = {"planned": [], "actual": [], "remaining": [], "budget": 0.0, "actual_qty": 0.0,
                            "remain_qty": 0.0, "earned": 0.0, "clipped": 0, "clamped": 0, "unspread": 0.0}
     for r in rows:
@@ -7586,7 +7714,7 @@ def _curve_items(rows: Sequence, dd: datetime) -> dict:
         out["budget"] += q
         out["actual_qty"] += a
         out["remain_qty"] += rem
-        out["earned"] += _perf_pct(r) / 100 * q
+        out["earned"] += _ev_pct(r, ev) / 100 * q
         s, e = _db_dt(r["target_start_date"]), _db_dt(r["target_end_date"])
         if q and s and e:
             out["planned"].append((q, s, max(s, e)))
@@ -7633,14 +7761,15 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
     dates), actual (actual quantities, up to the data date) and forecast (actuals, then remaining
     from the data date); period_count = the number of periods. to_date: exact values at the data date:
     baseline planned (planned value),
-    planned, actual and actual %, earned and earned % (earned value: budget x activity % complete
-    by its percent complete type, P6 earned value with 'activity percent complete'), variance
+    planned, actual and actual %, earned and earned % (earned value: budget x performance % complete
+    by the earned value technique of the activity's WBS node: activity % complete by its percent
+    complete type, 0/100, 50/50, custom %, WBS milestones or resource curves), variance
     (earned - baseline planned), spi (earned / baseline planned) and spi_actual (actual / baseline
     planned, the units-based index). updates= earlier updates of
     the same schedule (Project IDs): their earned and actual totals at their own data date
     (earned_points). from_date / to_date (YYYY-MM-DD) trim the periods; cumulatives stay exact.
     checks: totals reached by the last period, actuals clipped at the data date, remaining starts
-    moved to it, quantities without dates, WBS nodes with another earned value technique. Spread is
+    moved to it, quantities without dates, WBS nodes per earned value technique. Spread is
     linear over calendar time: an approximation, see note."""
     if period not in get_args(Period):
         raise ValueError(f"period must be one of {list(get_args(Period))}")
@@ -7668,16 +7797,18 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
         dd = dd_of(pid)
         if dd is None:
             raise ValueError(f"{project} has no data date (PROJECT.last_recalc_date)")
-        cur = _curve_items(_measure_rows(con, pid, measure, resource), dd)
+        evm = _ev_map(con, pid)
+        cur = _curve_items(_measure_rows(con, pid, measure, resource), dd, evm)
         base = bdd = bname = None
         if bid is not None:
             bdd, bname = dd_of(bid), con.execute("SELECT proj_short_name FROM PROJECT WHERE proj_id = ?", (bid,)).fetchone()[0]
-            base = _curve_items(_measure_rows(con, bid, measure, resource), bdd or dd)
-        pts = [(u, dd_of(p), _curve_items(_measure_rows(con, p, measure, resource), dd_of(p) or dd)) for u, p in upd]
+            base = _curve_items(_measure_rows(con, bid, measure, resource), bdd or dd, _ev_map(con, bid))
+        pts = [(u, dd_of(p), _curve_items(_measure_rows(con, p, measure, resource), dd_of(p) or dd, _ev_map(con, p)))
+               for u, p in upd]
         week_day = _prefer(con, "week_start_day_num") or 1
         fin = {t: con.execute(f"SELECT COUNT(*) FROM {t} WHERE proj_id = ?" + _alive(con, t), (pid,)).fetchone()[0]
                if "proj_id" in _cols(con, t) else 0 for t in ("TRSRCFIN", "TASKFIN")}
-        ev_other = 0  # earned value technique of the WBS nodes: only EC_Cmp_pct (activity percent complete) is applied
+        ev_other = 0  # WBS nodes whose stored technique is not EC_Cmp_pct (activity percent complete)
         if "ev_compute_type" in _cols(con, "PROJWBS"):
             ev_other = con.execute("SELECT COUNT(*) FROM PROJWBS WHERE proj_id = ? AND ev_compute_type <> 'EC_Cmp_pct'"
                                    + _alive(con, "PROJWBS"), (pid,)).fetchone()[0]
@@ -7722,7 +7853,10 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
             "project planned dates, which move with the schedule for unstarted work; use a baseline for a true plan."
             + ("" if base else " No baseline: pass baseline= or set a project baseline in P6.")
             + (f" {ev_other} WBS nodes use another earned value technique than activity percent complete: earned "
-               "ignores it." if ev_other else ""))
+               "applies each node's technique (rules of the P6 documentation, not checked against P6's own numbers)."
+               if ev_other else "")
+            + (f" Unknown earned value technique(s) {evm['unknown']}: counted as activity percent complete."
+               if evm["unknown"] else ""))
     return {"project": project, "data_date": _fmt_dt(dd), "period": period,
             "measure": {"kind": measure, "resources": what, "budget": r2(cur["budget"]), "actual": r2(act),
                         "remaining": r2(cur["remain_qty"]), "at_completion": r2(act + cur["remain_qty"])},
@@ -7737,7 +7871,8 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
                                     key=lambda p: p["data_date"] or ""),
             "checks": {"totals_reached": reached, "clipped_actuals": cur["clipped"], "clamped_remaining": cur["clamped"],
                        "unspread_planned": r2(cur["unspread"]), "trsrcfin_rows": fin["TRSRCFIN"], "taskfin_rows": fin["TASKFIN"],
-                       "wbs_other_ev_technique": ev_other},
+                       "wbs_other_ev_technique": ev_other, "ev_techniques": evm["nodes"],
+                       "ev_unknown_techniques": evm["unknown"]},
             "schedule_state": _schedule_state(con, pid), "note": note}
 
 
@@ -7951,8 +8086,9 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
             braw = {c: (one(f"SELECT {c} FROM PROJECT WHERE proj_id = ?", (bid,)) if c in pc else None)
                     for c in ("scd_end_date", "last_recalc_date")}
             bfin = _db_dt(braw["scd_end_date"])
-            bl = {"finish": bfin, "raw": braw, "items": _curve_items(_measure_rows(con, bid, "units"), dd) if dd else None,
-                  "cur": _curve_items(_measure_rows(con, pid, "units"), dd) if dd else None}
+            bl = {"finish": bfin, "raw": braw,
+                  "items": _curve_items(_measure_rows(con, bid, "units"), dd, _ev_map(con, bid)) if dd else None,
+                  "cur": _curve_items(_measure_rows(con, pid, "units"), dd, _ev_map(con, pid)) if dd else None}
         names = (name_of(pbid), name_of(bid))
     finally:
         con.rollback()
@@ -8410,6 +8546,10 @@ def p6_diagnose() -> dict:
                             "note": "Tools read the working copy (p6_eppm_pull). Edits change only that copy: "
                                     "p6_eppm_push sends them, p6_eppm_schedule schedules on the server; "
                                     "p6_eppm_status lists the pending changes."}
+        prof = _config.eppm_profile(st.raw, st.eppm)
+        if prof:  # how the REST calls go out (no password: the proxy user only); the SQL route is never proxied
+            from p6mcp.eppm import proxy as _eppm_proxy
+            out["eppm_mode"]["proxy"] = _eppm_proxy.resolve(prof.get("base_url", ""), prof)
     if not DB_PATH:
         out["database_problem"] = st.db_problem or _config.NO_DB_MESSAGE
         return out
@@ -9209,6 +9349,42 @@ def _asg_find(con, project: str, it: Mapping) -> tuple[sqlite3.Row, sqlite3.Row,
     return hits[0], t, label(hits[0])
 
 
+SUM_TABLES = ("SUMTASK", "SUMTASKSPREAD", "SUMTRSRC")  # P6 summary tables (Tools > Summarize)
+SUMMARIZE_ADVICE = ("In P6 choose Tools > Summarize > Open Projects (or All Projects: only that one refreshes "
+                    "the global resource summaries) to refresh them.")
+
+
+def _summaries_stale(con, keys: Iterable[tuple]) -> dict:
+    """Summary rows that assignment unit changes leave out of date, keys = (proj_id, rsrc_id, role_id) of
+    the changed assignments: SUMTASK and SUMTASKSPREAD rows of the projects, SUMTRSRC rows of the
+    projects or of the resources and roles (enterprise rows have no project). They are never written:
+    no recompute matched P6's stored rows (time-phased spreads; the test database's SUMTRSRC rows match
+    no current assignment). {stale, tables {table: rows}, refreshed [], advice}."""
+    keys = list(keys)
+    ids = {k: sorted({x[i] for x in keys if x[i] is not None}) for i, k in enumerate(("proj_id", "rsrc_id", "role_id"))}
+    tables: dict[str, int] = {}
+    for t in SUM_TABLES:
+        cols = _cols(con, t)
+        conds, args = [], []
+        for c in ("proj_id",) + (("rsrc_id", "role_id") if t == "SUMTRSRC" else ()):
+            if c in cols and ids[c]:
+                conds.append(f"{c} IN ({', '.join('?' * len(ids[c]))})")
+                args += ids[c]
+        if conds:
+            n = con.execute(f"SELECT COUNT(*) FROM {t} WHERE ({' OR '.join(conds)})" + _alive(con, t), args).fetchone()[0]
+            if n:
+                tables[t] = n
+    return {"stale": bool(tables), "tables": tables, "refreshed": [], "advice": SUMMARIZE_ADVICE if tables else None}
+
+
+def _sum_plan(s: dict) -> list[str]:
+    """Plan line of _summaries_stale (none when no summary row is affected)."""
+    if not s["stale"]:
+        return []
+    rows = ", ".join(f"{t} {n} row(s)" for t, n in s["tables"].items())
+    return [f"Summaries not refreshed ({rows}): {s['advice']}"]
+
+
 def _asg_update(con, project: str, it: Mapping) -> dict:
     """Set the budgeted, actual and/or remaining (or at completion) units of one assignment, with P6's
     recalculation: linked costs, units/time (fixed duration), remaining = budget for a not started
@@ -9318,6 +9494,7 @@ def _asg_update(con, project: str, it: Mapping) -> dict:
             "before": {**{k: a[k] for k in sets}, **{f"TASK.{k}": t[k] for k in tsets}},
             "after": {**sets, **{f"TASK.{k}": v for k, v in tsets.items()}}, "summary": plan}]
     return {"plan": plan, "projects": [], "log": log,
+            "_sum": (t["proj_id"], a["rsrc_id"] if "rsrc_id" in acols else None, a["role_id"] if "role_id" in acols else None),
             "assignment": {"taskrsrc_id": a["taskrsrc_id"], "task_code": code, "resource": a["rsrc_short_name"],
                            "role": a["role_short_name"], "before": view(old), "after": view(new)}}
 
@@ -9336,11 +9513,26 @@ def p6_update_assignment(
     activity, a completed one keeps 0 remaining; a not started activity whose project links budget and
     at completion keeps them equal (one value moves both); costs = units x price/unit when the cost is
     linked to units; units/time follow (Fixed Duration types only: durations never change); the
-    activity's labor / nonlabor unit totals follow. Dates are not affected. Dry run unless confirm=True."""
-    return _single_link(_asg_update, project, {k: v for k, v in (
+    activity's labor / nonlabor unit totals follow. Dates are not affected. P6's summary tables
+    (SUMTASK, SUMTASKSPREAD, SUMTRSRC) are never written: summaries_stale {stale, tables {table:
+    rows the change leaves out of date}, refreshed (always empty), advice (run Summarize in P6)}.
+    Dry run unless confirm=True."""
+    it = {k: v for k, v in (
         ("task_code", task_code), ("resource", resource), ("role", role), ("taskrsrc_id", taskrsrc_id),
         ("budgeted_units", budgeted_units), ("actual_units", actual_units), ("remaining_units", remaining_units),
-        ("at_completion_units", at_completion_units)) if v is not None}, confirm)
+        ("at_completion_units", at_completion_units)) if v is not None}
+    with _write_session(confirm) as (con, backup):
+        try:
+            x = _asg_update(con, project, it)
+        except _Refused as e:
+            return {"applied": False, "error": str(e)}
+        sums = _summaries_stale(con, [x["_sum"]])
+        plan = [x["plan"], *_sum_plan(sums)]
+        if backup:
+            plan.append(f"Backup: {backup}")
+        res = _commit(con, plan, confirm, projects=x["projects"], log=x["log"])
+        res["summaries_stale"] = sums
+        return res
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
@@ -9348,20 +9540,27 @@ def p6_update_assignments(project: ProjectId, items: AsgEdits, confirm: bool = F
     """Set the units of many assignments in one transaction (all or nothing; dry run unless
     confirm=True). Item: {task_code, resource, role, taskrsrc_id, budgeted_units, actual_units,
     remaining_units, at_completion_units}, as p6_update_assignment. items: one report per item
-    (assignment before / after, or the error). One edit log entry per assignment."""
+    (assignment before / after, or the error). One edit log entry per assignment. summaries_stale
+    as p6_update_assignment, for every applied item."""
     items = _items_arg(items)
     with _write_session(confirm) as (con, backup):
         _project_id(con, project)
+        keys: list[tuple] = []
 
         def apply_one(i: int, it) -> dict:
             if not isinstance(it, Mapping):
                 raise ValueError("an item must be an object")
-            return _asg_update(con, project, it)
+            x = _asg_update(con, project, it)
+            keys.append(x["_sum"])
+            return x
 
         b = _batch(con, items, apply_one)
         for rep, it in zip(b["items"], items):
             rep["item"] = it
-        return _batch_commit(con, b, confirm, f"Update units of {len(items)} assignment(s)", backup)
+        sums = _summaries_stale(con, keys)
+        res = _batch_commit(con, b, confirm, f"Update units of {len(items)} assignment(s)", backup, tail=_sum_plan(sums))
+        res["summaries_stale"] = sums
+        return res
 
 
 # ----------------------------------------------------------------- activity UDF values
@@ -10893,6 +11092,8 @@ class _XerImport:
         self.stats: dict[str, dict[str, int]] = {}
         self.warnings: list[str] = []
         self.now = _now_str(con)
+        self._upd: list[list] = []  # buffered UPDATEs: [sql, [params, ...]] runs in statement order (flush)
+        self._upd_sql: dict[tuple, Optional[tuple]] = {}  # (table, row keys, where keys) -> (sql, row columns)
 
     def count(self, table: str, what: str, n: int = 1) -> None:
         self.stats.setdefault(table, {}).setdefault(what, 0)
@@ -10975,8 +11176,52 @@ class _XerImport:
         row = self.prep(table, xrow)
         row.update(extra or {})
         row.update(_stamp_cols(self.con, table, self.now, create=False))
-        _update(self.con, table, {XER_PK[table]: db_id}, row)
+        self.update(table, {XER_PK[table]: db_id}, row)
         self.count(table, "updated")
+
+    def update(self, table: str, where: dict, row: dict) -> None:
+        """_update, buffered: the same statement, sent by flush() with executemany (consecutive UPDATEs with
+        the same SQL in one call, statement order kept). Call flush() before reading what they change."""
+        k = (table, tuple(row), tuple(where))
+        plan = self._upd_sql.get(k, False)
+        if plan is False:
+            cols = [c for c in row if c in _cols(self.con, table) and c not in where]
+            plan = self._upd_sql[k] = (f"UPDATE {table} SET {', '.join(c + '=?' for c in cols)} WHERE "
+                                       + " AND ".join(c + "=?" for c in where), cols) if cols else None
+        if plan is None:
+            return
+        params = [*(row[c] for c in plan[1]), *where.values()]
+        if self._upd and self._upd[-1][0] == plan[0]:
+            self._upd[-1][1].append(params)
+        else:
+            self._upd.append([plan[0], [params]])
+
+    def flush(self) -> None:
+        """Send the buffered UPDATEs (update())."""
+        for sql, rows in self._upd:
+            self.con.executemany(sql, rows)
+        self._upd = []
+
+    def index(self, sql: str, args=()) -> dict:
+        """{key: [ids in query order]} of the rows (id, *key) of sql, read once for the match lookups (find)."""
+        out: dict = {}
+        for r in self.con.execute(sql, args):
+            out.setdefault(tuple(r[1:]), []).append(r[0])
+        return out
+
+    def find(self, index: dict, key: tuple, sql: str, args, covered: bool = True) -> Optional[int]:
+        """The id sql (the match query, its first row) gives for key, from index: one candidate is the answer,
+        several run sql itself (after flush) so the database picks as before, and so does a key index does not
+        cover (covered=False). index must hold every live row sql can match for a covered key, rows inserted
+        since it was read included; a NULL compared with = matches nothing."""
+        if None in key:
+            return None
+        ids = index.get(key, ())
+        if covered and len(ids) < 2:
+            return ids[0] if ids else None
+        self.flush()
+        hit = self.con.execute(sql, args).fetchone()
+        return hit[0] if hit else None
 
     def match_or_create(self, table: str, rows: list[dict], key, find_sql: Optional[str],
                         parent_col: Optional[str] = None) -> None:
@@ -11262,6 +11507,7 @@ def p6_import_xer(
                                              "orig_proj_id": target.get("orig_proj_id"),
                                              "sum_base_proj_id": target.get("sum_base_proj_id"),
                                              "project_flag": "Y"})
+            imp.flush()
         else:
             extra = {"proj_short_name": short, "project_flag": "Y", "proj_id": pid,
                      "guid": _guid(), "sum_base_proj_id": None, "orig_proj_id": None}
@@ -11322,33 +11568,53 @@ def p6_import_xer(
             p = by_id.get(w.get("parent_wbs_id"))
             return n if p is None or n > 100 else depth(p, n + 1)
 
+        imp.flush()
+        # update mode: the match queries' keys read once (_XerImport.index / find), inserted rows added
+        wbs_sql = "SELECT wbs_id FROM PROJWBS WHERE proj_id = ? AND parent_wbs_id = ? AND wbs_short_name = ?" \
+            + _alive(con, "PROJWBS")
+        wbs_ix = imp.index("SELECT wbs_id, parent_wbs_id, wbs_short_name FROM PROJWBS WHERE proj_id = ?"
+                           + _alive(con, "PROJWBS"), (pid,)) if mode == "update" else {}
         for w in sorted((w for w in wbs if w is not node), key=depth):
             parent = imp.idmap["PROJWBS"].get(w.get("parent_wbs_id"), imp.idmap["PROJWBS"][node["wbs_id"]])
             hit = None
             if mode == "update":
-                hit = con.execute("SELECT wbs_id FROM PROJWBS WHERE proj_id = ? AND parent_wbs_id = ? "
-                                  "AND wbs_short_name = ?" + _alive(con, "PROJWBS"),
-                                  (pid, parent, w["wbs_short_name"])).fetchone()
+                hit = imp.find(wbs_ix, (parent, w["wbs_short_name"]), wbs_sql, (pid, parent, w["wbs_short_name"]))
             if hit:
-                imp.idmap["PROJWBS"][w["wbs_id"]] = hit[0]
-                imp.upd_row("PROJWBS", hit[0], w, {"parent_wbs_id": parent, "proj_id": pid})
+                imp.idmap["PROJWBS"][w["wbs_id"]] = hit
+                imp.upd_row("PROJWBS", hit, w, {"parent_wbs_id": parent, "proj_id": pid})
             else:
-                imp.idmap["PROJWBS"][w["wbs_id"]] = imp.new_row("PROJWBS", w, {"parent_wbs_id": parent})
+                new = imp.idmap["PROJWBS"][w["wbs_id"]] = imp.new_row("PROJWBS", w, {"parent_wbs_id": parent})
+                if imp.idmap["PROJECT"].get(w.get("proj_id")) == pid:
+                    wbs_ix.setdefault((parent, w["wbs_short_name"]), []).append(new)
+        imp.flush()
 
         # ---- activities
+        task_sql = "SELECT task_id FROM TASK WHERE proj_id = ? AND task_code = ?" + _alive(con, "TASK")
+        task_ix = imp.index("SELECT task_id, task_code FROM TASK WHERE proj_id = ?" + _alive(con, "TASK"),
+                            (pid,)) if mode == "update" else {}
         for t in x.get("TASK", []):
             hit = None
             if mode == "update":
-                hit = con.execute("SELECT task_id FROM TASK WHERE proj_id = ? AND task_code = ?"
-                                  + _alive(con, "TASK"), (pid, t["task_code"])).fetchone()
+                hit = imp.find(task_ix, (t["task_code"],), task_sql, (pid, t["task_code"]))
             if hit:
-                imp.idmap["TASK"][t["task_id"]] = hit[0]
-                imp.upd_row("TASK", hit[0], t)
+                imp.idmap["TASK"][t["task_id"]] = hit
+                imp.upd_row("TASK", hit, t)
             else:
-                imp.idmap["TASK"][t["task_id"]] = imp.new_row("TASK", t)
+                new = imp.idmap["TASK"][t["task_id"]] = imp.new_row("TASK", t)
+                if imp.idmap["PROJECT"].get(t.get("proj_id")) == pid:
+                    task_ix.setdefault((t["task_code"],), []).append(new)
+        imp.flush()
+        # links, assignments and codes are read once for the project's activities (tids, soft-deleted ones too);
+        # a row of another activity (a new one outside the project) is matched with its query as before
+        own = "IN (SELECT task_id FROM TASK WHERE proj_id = ?)"
+        tids = {r[0] for r in con.execute("SELECT task_id FROM TASK WHERE proj_id = ?", (pid,))}
 
         # ---- relationships (one link per pair and type: a repeated XER row is skipped)
         seen_links = set()
+        pred_sql = "SELECT task_pred_id FROM TASKPRED WHERE task_id = ? AND pred_task_id = ? AND pred_type = ?" \
+            + _alive(con, "TASKPRED")
+        pred_ix = imp.index("SELECT task_pred_id, task_id, pred_task_id, pred_type FROM TASKPRED WHERE task_id "
+                            + own + _alive(con, "TASKPRED"), (pid,)) if mode == "update" else {}
         for r in x.get("TASKPRED", []):
             succ, pred = imp.idmap["TASK"].get(r["task_id"]), imp.idmap["TASK"].get(r["pred_task_id"])
             if succ is None or pred is None:
@@ -11360,17 +11626,22 @@ def p6_import_xer(
             seen_links.add((succ, pred, r.get("pred_type")))
             hit = None
             if mode == "update":
-                hit = con.execute("SELECT task_pred_id FROM TASKPRED WHERE task_id = ? AND pred_task_id = ? "
-                                  "AND pred_type = ?" + _alive(con, "TASKPRED"),
-                                  (succ, pred, r["pred_type"])).fetchone()
+                hit = imp.find(pred_ix, (succ, pred, r["pred_type"]), pred_sql, (succ, pred, r["pred_type"]),
+                               succ in tids)
             if hit:
-                imp.upd_row("TASKPRED", hit[0], r)
-                imp.touched["TASKPRED"].add(hit[0])
+                imp.upd_row("TASKPRED", hit, r)
+                imp.touched["TASKPRED"].add(hit)
             else:
-                imp.touched["TASKPRED"].add(imp.new_row("TASKPRED", r))
+                new = imp.new_row("TASKPRED", r)
+                imp.touched["TASKPRED"].add(new)
+                pred_ix.setdefault((succ, pred, r["pred_type"]), []).append(new)
+        imp.flush()
 
         # ---- assignments (a database row is matched once: touched holds matched and new ids)
         used = imp.touched["TASKRSRC"]
+        asg_sql = "SELECT taskrsrc_id FROM TASKRSRC WHERE task_id = ? AND rsrc_id IS ?" + _alive(con, "TASKRSRC")
+        asg_ix = imp.index("SELECT taskrsrc_id, task_id, rsrc_id FROM TASKRSRC WHERE task_id " + own
+                           + _alive(con, "TASKRSRC"), (pid,)) if mode == "update" else {}
         for r in x.get("TASKRSRC", []):
             task, rsrc = imp.idmap["TASK"].get(r["task_id"]), imp.idmap["RSRC"].get(r.get("rsrc_id"))
             if task is None:
@@ -11378,15 +11649,19 @@ def p6_import_xer(
                 continue
             hit = None
             if mode == "update":
-                hit = next((h[0] for h in con.execute(
-                    "SELECT taskrsrc_id FROM TASKRSRC WHERE task_id = ? AND rsrc_id IS ?"
-                    + _alive(con, "TASKRSRC"), (task, rsrc)) if h[0] not in used), None)
+                free = [i for i in asg_ix.get((task, rsrc), ()) if i not in used]
+                if len(free) > 1 or task not in tids:  # the database's row order decides, as before
+                    imp.flush()
+                    free = [h[0] for h in con.execute(asg_sql, (task, rsrc)) if h[0] not in used]
+                hit = free[0] if free else None
             if hit:
                 imp.idmap["TASKRSRC"][r["taskrsrc_id"]] = hit
                 imp.upd_row("TASKRSRC", hit, r)
             else:
                 hit = imp.idmap["TASKRSRC"][r["taskrsrc_id"]] = imp.new_row("TASKRSRC", r)
+                asg_ix.setdefault((task, rsrc), []).append(hit)
             used.add(hit)
+        imp.flush()
 
         # ---- risks, notebooks, steps and expenses (before the UDF values that may point to them)
         for t in ("PROJRISK", "TASKMEMO", "TASKPROC", "PROJCOST"):
@@ -11400,13 +11675,20 @@ def p6_import_xer(
                 _upsert(imp, "TASKRISK", row, ("task_id", "risk_id"))
 
         # ---- activity code assignments and UDF values (upsert on their composite keys)
+        # keys present (soft-deleted rows too: an upsert revives them); rows of other activities checked one by one
+        actv = (lambda k: k[0] in tids, {tuple(r) for r in con.execute(
+            "SELECT task_id, actv_code_type_id FROM TASKACTV WHERE task_id " + own, (pid,))})
         for r in x.get("TASKACTV", []):
             row = imp.prep("TASKACTV", r)
             if None in (row.get("task_id"), row.get("actv_code_type_id"), row.get("actv_code_id")):
                 imp.count("TASKACTV", "skipped_unmapped")
                 continue
-            _upsert(imp, "TASKACTV", row, ("task_id", "actv_code_type_id"))
+            _upsert(imp, "TASKACTV", row, ("task_id", "actv_code_type_id"), actv)
+        imp.flush()
         udf_tables = {u["udf_type_id"]: u["table_name"] for u in x.get("UDFTYPE", [])}
+        types = {v for v in imp.idmap["UDFTYPE"].values() if v is not None}
+        udfv = (lambda k: k[0] in types, {tuple(r) for r in con.execute(
+            f"SELECT udf_type_id, fk_id FROM UDFVALUE WHERE udf_type_id IN {_ids_sql(sorted(types))}")})
         for r in x.get("UDFVALUE", []):
             tbl = udf_tables.get(r["udf_type_id"])
             row = imp.prep("UDFVALUE", r)
@@ -11414,7 +11696,8 @@ def p6_import_xer(
             if row.get("udf_type_id") is None or row["fk_id"] is None:
                 imp.count("UDFVALUE", "skipped_unmapped")
                 continue
-            _upsert(imp, "UDFVALUE", row, ("udf_type_id", "fk_id"))
+            _upsert(imp, "UDFVALUE", row, ("udf_type_id", "fk_id"), udfv)
+        imp.flush()
 
         # ---- update: rows of the project missing from the XER, deleted only when asked (never activities)
         missing, gone_txt = None, []
@@ -11524,16 +11807,26 @@ def p6_inspect_xer(path: str, xer_project: Optional[str] = None, db_preview: boo
     return res
 
 
-def _upsert(imp: _XerImport, table: str, row: dict, key: tuple) -> None:
+def _upsert(imp: _XerImport, table: str, row: dict, key: tuple, known: Optional[tuple] = None) -> None:
+    """Update the row with these key values (a soft-deleted one comes back), else insert it. known = (covers,
+    keys): the key tuples present in the table for every key covers(k) accepts, read once (inserts added);
+    another key is looked up in the table. The UPDATE is buffered (imp.update: flush afterwards)."""
     where = {k: row[k] for k in key}
-    if imp.con.execute(f"SELECT 1 FROM {table} WHERE " + " AND ".join(k + "=?" for k in key),
-                       list(where.values())).fetchone():
+    k = tuple(where.values())
+    if known is not None and known[0](k):
+        hit = k in known[1]
+    else:
+        hit = imp.con.execute(f"SELECT 1 FROM {table} WHERE " + " AND ".join(c + "=?" for c in key), k).fetchone()
+    if hit:
         revive = {c: None for c in ("delete_session_id", "delete_date") if c in _cols(imp.con, table)}  # a soft-deleted row comes back
-        _update(imp.con, table, where, {**row, **revive, **_stamp_cols(imp.con, table, imp.now, create=False)})
+        imp.update(table, where, {**row, **revive, **_stamp_cols(imp.con, table, imp.now, create=False)})
         imp.count(table, "updated")
     else:
+        imp.flush()
         _insert(imp.con, table, {**row, **_stamp_cols(imp.con, table, imp.now, create=True)})
         imp.count(table, "inserted")
+        if known is not None and known[0](k):
+            known[1].add(k)
 
 
 def _ids_sql(ids) -> str:
@@ -12896,9 +13189,11 @@ def _eppm_pending() -> list[dict]:
 def _eppm_session(p: dict):
     from p6mcp import credentials, eppm
     from p6mcp.eppm import rest
-    return rest.Session(p["base_url"], p.get("user", ""), _eppm_secret(credentials.eppm_key(p["name"]), "P6 password"),
-                        p.get("database") or "", p.get("auth", "auto"), p.get("context") or rest.DEFAULT_CONTEXT,
-                        p.get("ca_bundle") or None, int(p.get("timeout_s", 120)), lock_check=eppm.lock_check(p))
+    try:
+        return rest.from_profile(p, _eppm_secret(credentials.eppm_key(p["name"]), "P6 password"),
+                                 lock_check=eppm.lock_check(p))
+    except rest.EppmError as e:
+        raise ValueError(str(e)) from None
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
@@ -13065,29 +13360,117 @@ def p6_eppm_status(check_server: bool = True) -> dict:
     return out
 
 
+def _eppm_pushed_projects(changes: list[dict], m: dict) -> list[str]:
+    """Project IDs of the pulled projects the pending changes touch (a relationship: both ends' projects), in the
+    working copy's order."""
+    by_oid = {int(x["object_id"]): x["project_id"] for x in m.get("projects", [])}
+    by_name = {str(x["project_id"]).lower(): x["project_id"] for x in m.get("projects", [])}
+    hit: set[str] = set()
+    for c in changes:
+        for oid in (c.get("proj_id"), (c.get("refs") or {}).get("pred_proj_id")):
+            if oid is not None and str(oid).lstrip("-").isdigit() and int(oid) in by_oid:
+                hit.add(by_oid[int(oid)])
+        if c.get("project") and str(c["project"]).lower() in by_name:
+            hit.add(by_name[str(c["project"]).lower()])
+    return [x["project_id"] for x in m.get("projects", []) if x["project_id"] in hit]
+
+
+def _eppm_targets(sess, names: list[str]) -> list[dict]:
+    """The server's project rows (ObjectId, Id, DataDate) of these Project IDs; ValueError for one this user cannot
+    read."""
+    listed = {str(r.get("Id", "")).lower(): r for r in sess.read("project", ["ObjectId", "Id", "DataDate"])}
+    missing = [n for n in names if n.lower() not in listed]
+    if missing:
+        raise ValueError(f"Not found among the projects this P6 user can read: {', '.join(missing)}")
+    return [listed[n.lower()] for n in names]
+
+
+def _eppm_schedule_lines(p: dict, targets: list[dict], dd: Optional[str], lead: str = "Schedule") -> list[str]:
+    return [f"{lead} {t['Id']} on {p['name']} (data date "
+            + (f"{(t.get('DataDate') or '')[:16].replace('T', ' ')} -> {dd[:16].replace('T', ' ')}" if dd
+               else f"{(t.get('DataDate') or '?')[:16].replace('T', ' ')}, unchanged") + ")" for t in targets]
+
+
+def _eppm_scheduled(p: dict, targets: list[dict], job: dict, dd: Optional[str], plan: list[str], pull_after: bool,
+                    tool: str) -> dict:
+    """The result of a finished schedule job: its log in the edit log, then the pull when asked (its failure is
+    reported, not raised: the server was scheduled). Shared by p6_eppm_schedule and p6_eppm_push(schedule=True)."""
+    from p6mcp.eppm import jobs
+    out = {"applied": job["finished"], "server": p["name"], "projects": [t["Id"] for t in targets],
+           "job": {k: job[k] for k in ("job_id", "status", "seconds")}, "log_facts": jobs.log_facts(job["log"]),
+           "log": job["log"], "log_truncated": job["log_truncated"]}
+    try:
+        _log_write([{"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(DB_PATH or "eppm"),
+                     "tool": tool, "operation": "schedule_eppm", "project": ", ".join(out["projects"]),
+                     "proj_id": None, "table": None, "keys": {"server": p["name"]}, "before": None,
+                     "after": {"job": out["job"], "new_data_date": dd}, "summary": "; ".join(plan)}])
+    except OSError:
+        pass
+    if not job["finished"]:
+        out["next"] = (f"The schedule job ended as {job['status']!r}: read the log, fix the cause in P6 EPPM, then "
+                       "schedule again (p6_eppm_schedule).")
+        return out
+    if not pull_after:
+        out["next"] = "Scheduled on the server. Pull again (p6_eppm_pull) to read the new dates."
+        return out
+    waiting = _eppm_pending()
+    if waiting:  # a pull would drop them
+        out["pull"] = {"skipped": f"{len(waiting)} local change(s) are still pending: the working copy was not "
+                                  "pulled again."}
+        out["next"] = "Scheduled on the server. Push the pending changes, then pull again to read the new dates."
+        return out
+    m = EPPM_MANIFEST or {}
+    try:
+        pulled = _eppm_pull_now(p, sorted({x["project_id"] for x in m.get("projects", [])} | set(out["projects"])),
+                                route=m.get("route") if m.get("route") in ("sql", "rest") else "auto")
+    except ValueError as e:
+        out["pull"] = {"error": str(e)}
+        out["next"] = "Scheduled on the server, but the pull failed: pull again (p6_eppm_pull) to read the new dates."
+        return out
+    out["pull"] = {k: pulled[k] for k in ("pulled_at", "seconds", "route", "rows", "warnings")}
+    out["next"] = "Scheduled on the server and pulled again: the tools read P6's new dates."
+    return out
+
+
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True})
-def p6_eppm_push(confirm: bool = False) -> dict:
+def p6_eppm_push(schedule: bool = False, new_data_date: Optional[DateTimeStr] = None, pull_after: bool = True,
+                 confirm: bool = False) -> dict:
     """P6 EPPM mode: send the pending changes of the working copy to the server (see p6_eppm_status).
     The dry run reads every changed object on the server and lists the calls; a change made on the
     server since the pull is a conflict and refuses the push (pull again, or drop the local change).
     Calls go one object at a time (relationship deletes, activity updates, new relationships,
     relationship updates, assignments) and the first failure stops the push: the result and the journal
-    say what reached the server, and a new push sends the rest. The server is not rescheduled: dates move
-    when the project is scheduled in P6 EPPM."""
+    say what reached the server, and a new push sends the rest.
+    schedule: once every call has succeeded, also schedule the pushed projects on the server with P6's
+    own scheduler (as p6_eppm_schedule: new_data_date moves the data date, YYYY-MM-DD [HH:MM]; pull_after
+    pulls them again so the tools read the new dates); the same confirmation covers both steps, and a push
+    that fails or has a conflict schedules nothing. Without schedule the server is not rescheduled: dates
+    move when the project is scheduled in P6 EPPM (or with p6_eppm_schedule)."""
+    from p6mcp.eppm import jobs
     from p6mcp.eppm import push as _push
     from p6mcp.eppm import rest
     p = _eppm_profile()
     m = EPPM_MANIFEST
     if not m:
         raise ValueError("Nothing pulled yet: there is nothing to push.")
+    if new_data_date and not schedule:
+        raise ValueError("new_data_date moves the data date of a schedule: pass schedule=True with it.")
+    dd = _parse_dt(new_data_date, "new_data_date")[0].strftime("%Y-%m-%dT%H:%M:%S") if new_data_date else None
     changes = _eppm_pending()
     if not changes:
         return {"dry_run": not confirm, "would_refuse": True, "refuse_reasons": ["No pending change to push."],
                 "would_do": ["Nothing to send."]} if not confirm else {"applied": False,
                                                                     "error": "No pending change to push."}
+    names = _eppm_pushed_projects(changes, m) if schedule else []
+    if schedule and not names:
+        raise ValueError("The pending changes name no pulled project to schedule: push without schedule, then use "
+                         "p6_eppm_schedule.")
     try:
         with _eppm_session(p) as sess:
             pl = _push.plan(sess, changes, _eppm_store.LOCAL_ID_BASE)
+            targets = _eppm_targets(sess, names) if schedule else []
+            sched_plan = _eppm_schedule_lines(p, targets, dd, "After the push, schedule") + (
+                ["Then pull them again into the working copy"] if pull_after else []) if schedule else []
             view = {"calls": len(pl["calls"]),
                     "already_done": [{"what": x["label"], "why": x["reason"]} for x in pl["already_done"]],
                     "conflicts": [{"what": x["label"], "why": x["reason"], "id": x["change"].get("id")}
@@ -13096,9 +13479,15 @@ def p6_eppm_push(confirm: bool = False) -> dict:
                     "not_sent_fields": {x["label"]: x["not_sent"] for x in pl["calls"] if x.get("not_sent")}}
             reasons = ([f"conflict: {x['what']}: {x['why']}" for x in view["conflicts"]]
                        + [f"not supported by the push: {u}" for u in view["unsupported"]])
-            mismatch = _plan_gate(pl["plan"], confirm)
+            mismatch = _plan_gate(pl["plan"] + sched_plan, confirm)
             if not confirm:
-                out = {"dry_run": True, "server": p["name"], "would_do": pl["plan"], **view}
+                out = {"dry_run": True, "server": p["name"], "would_do": pl["plan"] + sched_plan, **view}
+                if schedule:
+                    out["schedule"] = {"projects": [t["Id"] for t in targets], "new_data_date": dd,
+                                       "pull_after": pull_after,
+                                       "note": "Runs only when every call of the push succeeds. P6 rewrites the "
+                                               "early and late dates and the float of every activity of these "
+                                               "projects on the server."}
                 if reasons:
                     out.update(would_refuse=True, refuse_reasons=reasons)
                 return out
@@ -13135,12 +13524,27 @@ def p6_eppm_push(confirm: bool = False) -> dict:
     out = {"applied": res["failed"] is None, "server": p["name"], "sent": [x["label"] for x in res["sent"]],
            "already_done": [x["label"] for x in pl["already_done"]], "journal": journal,
            "new_ids": {str(k): v for k, v in created.items()},
-           "next": "The server is not rescheduled: schedule the project in P6 EPPM, then pull it again to read the "
-                   "new dates."}
+           "next": "The server is not rescheduled: schedule the project in P6 EPPM (or with p6_eppm_schedule), then "
+                   "pull it again to read the new dates."}
     if res["failed"]:
         out["failed"] = {"what": res["failed"]["label"], "error": res["failed"].get("error")}
         out["next"] = ("The push stopped at the first failure; the changes listed in sent reached the server. Fix "
                        "the cause, then push again: only the rest is sent.")
+        if schedule:
+            out["schedule"] = {"applied": False, "projects": [t["Id"] for t in targets],
+                               "skipped": "The push did not complete: nothing was scheduled."}
+        return out
+    if schedule:
+        try:
+            with _eppm_session(p) as sess:
+                job = jobs.schedule(sess, [int(t["ObjectId"]) for t in targets], dd)
+        except (ValueError, jobs.JobError) as e:  # the push is done: report, never raise
+            out["schedule"] = {"applied": False, "projects": [t["Id"] for t in targets], "error": str(e)}
+            out["next"] = ("Pushed, but the schedule could not run on the server: read schedule.error, then schedule "
+                           "with p6_eppm_schedule.")
+            return out
+        out["schedule"] = _eppm_scheduled(p, targets, job, dd, sched_plan, pull_after, "p6_eppm_push")
+        out["next"] = "Pushed. " + out["schedule"].pop("next")
     return out
 
 
@@ -13316,14 +13720,8 @@ def p6_eppm_schedule(projects: Optional[list[str]] = None, new_data_date: Option
     waiting = _eppm_pending() if pull_after else []
     try:
         with _eppm_session(p) as sess:
-            listed = {str(r.get("Id", "")).lower(): r for r in sess.read("project", ["ObjectId", "Id", "DataDate"])}
-            missing = [n for n in names if n.lower() not in listed]
-            if missing:
-                raise ValueError(f"Not found among the projects this P6 user can read: {', '.join(missing)}")
-            targets = [listed[n.lower()] for n in names]
-            plan = [f"Schedule {t['Id']} on {p['name']} (data date "
-                    + (f"{(t.get('DataDate') or '')[:16].replace('T', ' ')} -> {dd[:16].replace('T', ' ')}" if dd
-                       else f"{(t.get('DataDate') or '?')[:16].replace('T', ' ')}, unchanged") + ")" for t in targets]
+            targets = _eppm_targets(sess, names)
+            plan = _eppm_schedule_lines(p, targets, dd)
             if pull_after:
                 plan.append("Then pull them again into the working copy")
             mismatch = _plan_gate(plan, confirm)
@@ -13343,28 +13741,7 @@ def p6_eppm_schedule(projects: Optional[list[str]] = None, new_data_date: Option
             job = jobs.schedule(sess, [int(t["ObjectId"]) for t in targets], dd)
     except (rest.EppmError, jobs.JobError) as e:
         raise ValueError(str(e)) from None
-    out = {"applied": job["finished"], "server": p["name"], "projects": [t["Id"] for t in targets],
-           "job": {k: job[k] for k in ("job_id", "status", "seconds")}, "log_facts": jobs.log_facts(job["log"]),
-           "log": job["log"], "log_truncated": job["log_truncated"]}
-    try:
-        _log_write([{"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(DB_PATH or "eppm"),
-                     "tool": "p6_eppm_schedule", "operation": "schedule_eppm", "project": ", ".join(out["projects"]),
-                     "proj_id": None, "table": None, "keys": {"server": p["name"]}, "before": None,
-                     "after": {"job": out["job"], "new_data_date": dd}, "summary": "; ".join(plan)}])
-    except OSError:
-        pass
-    if not job["finished"]:
-        out["next"] = (f"The schedule job ended as {job['status']!r}: read the log, fix the cause in P6 EPPM, then "
-                       "schedule again.")
-        return out
-    if pull_after:
-        pulled = _eppm_pull_now(p, sorted({x["project_id"] for x in m.get("projects", [])} | set(out["projects"])),
-                                route=m.get("route") if m.get("route") in ("sql", "rest") else "auto")
-        out["pull"] = {k: pulled[k] for k in ("pulled_at", "seconds", "route", "rows", "warnings")}
-        out["next"] = "Scheduled on the server and pulled again: the tools read P6's new dates."
-    else:
-        out["next"] = "Scheduled on the server. Pull again (p6_eppm_pull) to read the new dates."
-    return out
+    return _eppm_scheduled(p, targets, job, dd, plan, pull_after, "p6_eppm_schedule")
 
 
 # ----------------------------------------------------------------- skill shop (p6mcp.shop)

@@ -485,6 +485,80 @@ def test_eppm_mode_in_settings(qtbot, win, monkeypatch):
         srv.server_close()
 
 
+def test_eppm_proxy_in_settings(qtbot, win, monkeypatch):
+    import base64
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from test_eppm_connection import DB, PW, USER, Fake, Proxy  # the fake P6 EPPM server and a local proxy
+
+    from p6mcp.eppm import proxy as eppm_proxy
+    from p6mcp.settings_app import eppm_panel
+    vault = {}
+    monkeypatch.setattr(eppm_panel.credentials, "get", lambda k: vault.get(k))
+    monkeypatch.setattr(eppm_panel.credentials, "set", lambda k, v: vault.__setitem__(k, v))
+    monkeypatch.setattr(eppm_panel.credentials, "delete", lambda k: vault.pop(k, None) is not None)
+    monkeypatch.setattr(eppm_proxy, "_registry", lambda: ({}, lambda _h: False))
+    monkeypatch.setattr(eppm_proxy, "_pac", lambda: None)
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY"):
+        monkeypatch.delenv(k, raising=False)
+    Fake.sessions, Fake.seen = set(), []
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+    threading.Thread(target=srv.serve_forever, args=(0.05,), daemon=True).start()
+    port = srv.server_address[1]
+    px = Proxy({"eppm.test": port}, need_auth="Basic " + base64.b64encode(b"puser:proxy-pw").decode())
+    try:
+        page = win.page(DatabasePage)
+        page.src_eppm.click()
+        panel = page.eppm
+        name = panel.add_server(f"http://eppm.test:{port}")  # a name only the proxy resolves
+        for edit, value in ((panel.db_edit, DB), (panel.user_edit, USER)):
+            edit.setText(value)
+            edit.editingFinished.emit()
+        prof = lambda: settings_logic_find(win, name)  # noqa: E731
+        assert panel.proxy_mode.currentData() == "system" and not panel.proxy_url.isEnabled()
+        # This proxy without an address: nothing stored until one is entered
+        panel.proxy_mode.setCurrentIndex(panel.proxy_mode.findData("custom"))
+        assert panel.proxy_url.isEnabled() and prof()["proxy"] == "system" and "proxy address" in panel.state.text()
+        panel.proxy_url.setText("http://me:secret@127.0.0.1:8080")  # a password never goes in config.json
+        panel.proxy_url.editingFinished.emit()
+        assert panel.proxy_url.text() == "" and prof()["proxy_url"] is None and "user name" in panel.state.text()
+        panel.proxy_url.setText(px.url)
+        panel.proxy_url.editingFinished.emit()
+        assert (prof()["proxy"], prof()["proxy_url"]) == ("custom", px.url)
+        # the proxy asks for a sign-in: refused without its user, then the test goes through it
+        panel.pw_edit.setText(PW)  # (a settings change refills the form: typed passwords are cleared)
+        panel.run_test()
+        qtbot.waitUntil(lambda: panel.job is None, timeout=15000)
+        assert "407" in panel.result.text() and not vault and not panel.use_btn.isEnabled()
+        panel.proxy_user.setText("puser")
+        panel.proxy_user.editingFinished.emit()
+        panel.pw_edit.setText(PW)
+        panel.proxy_pw.setText("proxy-pw")
+        panel.run_test()
+        qtbot.waitUntil(lambda: panel.job is None, timeout=15000)
+        assert "2 project(s)" in panel.result.text() and f"Proxy: {px.url} (this server's setting)" in \
+            panel.result.text()
+        assert vault == {f"eppm:{name}": PW, f"eppm-proxy:{name}": "proxy-pw"} and panel.use_btn.isEnabled()
+        assert px.seen and px.seen[-1][0] == "POST"
+        panel.use_btn.click()
+        assert prof()["confirmed"] and win.save()
+        assert "proxy-pw" not in open(config.config_path(), encoding="utf-8").read()
+        assert panel.proxy_pw.placeholderText() == eppm_panel.tr("eppm.password.stored")
+        # a proxy change clears the confirmation; the proxy password follows a rename and goes with the server
+        panel.proxy_mode.setCurrentIndex(panel.proxy_mode.findData("system"))
+        assert prof()["proxy"] == "system" and not prof()["confirmed"] and not panel.proxy_url.isEnabled()
+        panel.name_edit.setText("Main")
+        panel.name_edit.editingFinished.emit()
+        assert vault == {"eppm:Main": PW, "eppm-proxy:Main": "proxy-pw"}
+        panel._remove()
+        assert not vault
+    finally:
+        px.close()
+        srv.shutdown()
+        srv.server_close()
+
+
 def settings_logic_find(w, name):
     from p6mcp import settings_logic
     return settings_logic.find_eppm(w.data, name)

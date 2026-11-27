@@ -10,12 +10,16 @@ import json
 from datetime import datetime
 from typing import Any, Callable, Optional
 
-CONNECTION_KEYS = ("base_url", "context", "database", "user", "auth", "ca_bundle", "sql")
+PROXY_KEYS = ("proxy", "proxy_url", "proxy_user")  # eppm/proxy.py
+CONNECTION_KEYS = ("base_url", "context", "database", "user", "auth", "ca_bundle", "sql") + PROXY_KEYS
 
 
 def digest(profile: dict) -> str:
-    """Fingerprint of the connection settings: a test result confirms only the settings it was run with."""
-    keys = {k: profile.get(k) for k in CONNECTION_KEYS}
+    """Fingerprint of the connection settings: a test result confirms only the settings it was run with. The proxy
+    settings count when they differ from the default (the Windows proxy), so a profile saved before they existed
+    keeps its fingerprint."""
+    keys = {k: profile.get(k) for k in CONNECTION_KEYS if k not in PROXY_KEYS}
+    keys.update({k: profile[k] for k in PROXY_KEYS if profile.get(k) not in (None, "", "system")})
     return hashlib.sha256(json.dumps(keys, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
@@ -46,16 +50,18 @@ def lock_check(profile: dict, sql_password: Optional[str] = None,
 
 
 def test_profile(profile: dict, password: Optional[str], sql_password: Optional[str] = None,
-                 rest_opener: Optional[Callable] = None, sql_module: Optional[Callable[[str], Any]] = None) -> dict:
-    """Test connection of a server profile: REST sign-in and project count, then the SQL account when the profile
-    has one. ok follows REST (the SQL route is optional: its result is reported beside). Never raises."""
+                 rest_opener: Optional[Callable] = None, sql_module: Optional[Callable[[str], Any]] = None,
+                 proxy_password: Optional[str] = None) -> dict:
+    """Test connection of a server profile: REST sign-in and project count (through the profile's proxy setting,
+    rest.proxy says which), then the SQL account when the profile has one (never proxied). ok follows REST (the
+    SQL route is optional: its result is reported beside). proxy_password None = the stored one. Never raises."""
     from p6mcp.eppm import rest, sql
     res: dict = {"ok": False, "digest": digest(profile), "tested_at": datetime.now().isoformat(timespec="seconds")}
     if not password:
         res["rest"] = {"ok": False, "error": "No password: enter the P6 password of this server."}
     else:
         res["rest"] = rest.test_connection(profile, password, rest_opener,
-                                           lock_check(profile, sql_password or "", sql_module))
+                                           lock_check(profile, sql_password or "", sql_module), proxy_password)
     res["ok"] = bool(res["rest"].get("ok"))
     if profile.get("sql"):
         if not sql_password:
