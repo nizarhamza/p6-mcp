@@ -364,3 +364,235 @@ def test_failed_sign_ins_query_and_finding():
     assert rest.lock_finding(None, "x") == ""
     assert "is locked" in rest.lock_finding(rest.LOCK_AFTER, "x")
     assert eppm.lock_check(profile()) is None  # no SQL account: no check
+
+
+# ----------------------------------------------------------------- proxy (3.5.0)
+
+class Proxy:
+    """A tiny forward proxy on 127.0.0.1: absolute-URI requests (plain http) and CONNECT tunnels. It resolves the host
+    names of `hosts` itself (name -> port on 127.0.0.1), so the client never looks them up, and records each request
+    (method, target, Proxy-Authorization). need_auth: the Proxy-Authorization value it requires (407 otherwise)."""
+
+    def __init__(self, hosts: dict, need_auth=None):
+        import socket
+        self.hosts, self.need, self.seen = hosts, need_auth, []
+        self.sock = socket.create_server(("127.0.0.1", 0))
+        self.port = self.sock.getsockname()[1]
+        self.url = f"http://127.0.0.1:{self.port}"
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def close(self):
+        self.sock.close()
+
+    def _accept(self):
+        while True:
+            try:
+                c, _a = self.sock.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._serve, args=(c,), daemon=True).start()
+
+    @staticmethod
+    def _pipe(a, b):
+        import socket
+
+        def copy(src, dst):
+            try:
+                while True:
+                    d = src.recv(65536)
+                    if not d:
+                        break
+                    dst.sendall(d)
+            except OSError:
+                pass
+            finally:
+                try:
+                    dst.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+        t = threading.Thread(target=copy, args=(b, a), daemon=True)
+        t.start()
+        copy(a, b)
+        t.join(5)
+        a.close()
+        b.close()
+
+    def _serve(self, c):
+        import socket
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            d = c.recv(65536)
+            if not d:
+                c.close()
+                return
+            buf += d
+        head, rest = buf.split(b"\r\n\r\n", 1)
+        line, *hdrs = head.decode("latin-1").split("\r\n")
+        method, target, ver = line.split(" ")
+        headers = {k.strip().lower(): v.strip() for k, v in (h.split(":", 1) for h in hdrs if ":" in h)}
+        self.seen.append((method, target, headers.get("proxy-authorization")))
+        if self.need and headers.get("proxy-authorization") != self.need:
+            c.sendall(b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"t\"\r\n"
+                      b"Content-Length: 0\r\nConnection: close\r\n\r\n")
+            c.close()
+            return
+        host = target.rsplit(":", 1)[0] if method == "CONNECT" else urlsplit(target).hostname
+        if host not in self.hosts:
+            c.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            c.close()
+            return
+        up = socket.create_connection(("127.0.0.1", self.hosts[host]))
+        if method == "CONNECT":
+            c.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+        else:
+            u = urlsplit(target)
+            keep = [h for h in hdrs if not h.lower().startswith("proxy-")]
+            up.sendall("\r\n".join([f"{method} {u.path}{'?' + u.query if u.query else ''} {ver}"] + keep)
+                       .encode("latin-1") + b"\r\n\r\n")
+        if rest:
+            up.sendall(rest)
+        self._pipe(c, up)
+
+
+@pytest.fixture
+def no_proxy_env(monkeypatch):
+    """No proxy from the environment or from Windows unless a test sets one."""
+    from p6mcp.eppm import proxy
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "REQUEST_METHOD"):
+        monkeypatch.delenv(k, raising=False)
+        monkeypatch.delenv(k.lower(), raising=False)
+    monkeypatch.setattr(proxy, "_registry", lambda: ({}, lambda _h: False))
+    monkeypatch.setattr(proxy, "_pac", lambda: None)
+    return proxy
+
+
+def test_proxy_resolution_follows_windows_the_environment_and_the_profile(no_proxy_env, monkeypatch):
+    proxy = no_proxy_env
+    r = proxy.resolve("https://p6.example.com")
+    assert r["url"] is None and r["mode"] == "system" and "no proxy" in r["note"]
+    monkeypatch.setattr(proxy, "_pac", lambda: "http://wpad.example.com/proxy.pac")
+    r = proxy.resolve("https://p6.example.com")
+    assert r["url"] is None and r["pac"] == "http://wpad.example.com/proxy.pac" and "setup script" in r["note"]
+    # Windows Internet Settings, with its bypass list (ProxyOverride)
+    monkeypatch.setattr(proxy, "_registry", lambda: ({"https": "corp:8080", "http": "http://corp:8081"},
+                                                     lambda h: h == "eppm.local"))
+    r = proxy.resolve("https://p6.example.com")
+    assert (r["url"], r["source"], r["bypassed"]) == ("http://corp:8080", "windows", False)
+    assert proxy.resolve("http://p6.example.com")["url"] == "http://corp:8081"
+    r = proxy.resolve("https://eppm.local")
+    assert r["url"] is None and r["bypassed"] and "bypass list" in r["note"]
+    for local in ("http://127.0.0.1:9", "http://localhost:9", "http://[::1]:9", "http://p6.localhost"):
+        r = proxy.resolve(local)
+        assert r["url"] is None and r["bypassed"], local
+    # HTTP(S)_PROXY and NO_PROXY win over Windows when set
+    monkeypatch.setenv("HTTPS_PROXY", "http://envproxy:3128")
+    monkeypatch.setenv("NO_PROXY", ".corp.example")
+    r = proxy.resolve("https://p6.example.com")
+    assert (r["url"], r["source"]) == ("http://envproxy:3128", "environment")
+    assert proxy.resolve("https://p6.corp.example")["bypassed"]
+    # the profile: no proxy at all, or its own proxy whatever the bypass lists say (loopback stays direct)
+    assert proxy.resolve("https://p6.example.com", {"proxy": "none"})["url"] is None
+    mine = {"proxy": "custom", "proxy_url": "http://mine:8080", "proxy_user": "me"}
+    r = proxy.resolve("https://p6.corp.example", mine)
+    assert (r["url"], r["source"], r["user"]) == ("http://mine:8080", "profile", "me")
+    assert "password" not in json.dumps(r)
+    assert proxy.resolve("http://127.0.0.1:9", mine)["url"] is None
+    # urllib's own system proxy handler is never added: the session's decision is the only one
+    import urllib.request
+    s = rest.Session("http://127.0.0.1:9", USER, PW, proxy={"proxy": "custom", "proxy_url": "http://mine:8080"})
+    assert not [h for h in s.opener.handlers if isinstance(h, urllib.request.ProxyHandler)]
+    s = rest.Session("http://p6.example.com", USER, PW, proxy={"proxy": "custom", "proxy_url": "http://mine:8080"})
+    assert [type(h) for h in s.opener.handlers if isinstance(h, urllib.request.ProxyHandler)] == [proxy.Via]
+
+
+def test_proxy_settings_in_config_and_profile_edits():
+    from p6mcp.eppm import proxy
+    assert proxy.check_url("http://proxy.example.com:8080") is None
+    assert "Credential Manager" in proxy.check_url("http://me:secret@proxy.example.com:8080")
+    for bad in ("https://proxy:8080", "http://proxy", "proxy:8080", "http://proxy:8080/x", "", None):
+        assert proxy.check_url(bad), bad
+    ok = profile(proxy="custom", proxy_url="http://proxy.example.com:8080", proxy_user="me")
+    assert config.validate({"eppm_profiles": [ok]})["eppm_profiles"][0]["proxy_url"].endswith(":8080")
+    config.validate({"eppm_profiles": [profile(proxy="none", proxy_url=None)]})
+    for bad in (profile(proxy="pac"), profile(proxy="custom"), profile(proxy="custom", proxy_url="http://u:p@x:1"),
+                profile(proxy_url="ftp://x:1"), profile(proxy_user=5)):
+        with pytest.raises(config.ConfigError):
+            config.validate({"eppm_profiles": [bad]})
+    # the digest: the default proxy setting keeps a profile's old fingerprint, a proxy change is a new one
+    old = profile()
+    data, name = settings_logic.add_eppm_profile({}, "https://p6.example.com", "planner", "PMDB")
+    new = settings_logic.find_eppm(data, name)
+    assert new["proxy"] == "system" and new["proxy_url"] is None and new["proxy_user"] is None
+    assert eppm.digest(old) == eppm.digest(dict(old, proxy="system", proxy_url=None, proxy_user=None))
+    assert eppm.digest(old) != eppm.digest(dict(old, proxy="none"))
+    assert eppm.digest(ok) != eppm.digest(dict(ok, proxy_user="other"))
+    res = {"ok": True, "digest": eppm.digest(new), "tested_at": "t", "rest": {"ok": True, "projects": 1}, "sql": None}
+    data = settings_logic.confirm_eppm(data, name, res)
+    changed = settings_logic.update_eppm_profile(data, name, proxy="custom", proxy_url="http://proxy:3128")
+    assert not settings_logic.find_eppm(changed, name)["confirmed"] and changed["eppm_active"] is None
+    config.validate(changed)
+
+
+def test_forgetting_a_server_deletes_its_proxy_password(monkeypatch):
+    gone = []
+    monkeypatch.setattr("p6mcp.credentials.delete", lambda k: gone.append(k) or True)
+    settings_logic.forget_eppm_passwords("srv")
+    assert gone == ["eppm:srv", "eppm-sql:srv", "eppm-proxy:srv"]
+
+
+def test_rest_calls_go_through_the_proxy_when_set_and_not_when_bypassed(server, no_proxy_env, monkeypatch):
+    port = int(server.rsplit(":", 1)[1])
+    px = Proxy({"eppm.test": port})
+    try:
+        far = f"http://eppm.test:{port}"  # a name only the proxy resolves: a direct call could not reach it
+        res = rest.test_connection(profile(base_url=far, proxy="custom", proxy_url=px.url), PW)
+        assert res["ok"] and res["projects"] == 2, res
+        assert res["proxy"]["url"] == px.url and res["proxy"]["source"] == "profile"
+        assert [(m, t) for m, t, _a in px.seen] == [("POST", f"{far}/p6ws/restapi/login?DatabaseName={DB}"),
+                                                     ("GET", f"{far}/p6ws/restapi/project?Fields=ObjectId,Id"),
+                                                     ("POST", f"{far}/p6ws/restapi/logout")]
+        # the Windows / environment proxy, used without any profile setting
+        px.seen.clear()
+        monkeypatch.setenv("HTTP_PROXY", px.url)
+        res = rest.test_connection(profile(base_url=far), PW)
+        assert res["ok"] and res["proxy"]["source"] == "environment" and len(px.seen) == 3
+        # a server on this PC is never proxied, whatever the setting
+        px.seen.clear()
+        res = rest.test_connection(profile(base_url=server, proxy="custom", proxy_url=px.url), PW)
+        assert res["ok"] and res["proxy"]["bypassed"] and px.seen == []
+        # a proxy that does not answer: the message names it
+        res = rest.test_connection(profile(base_url=far, proxy="custom", proxy_url="http://127.0.0.1:1"), PW)
+        assert not res["ok"] and "through the proxy http://127.0.0.1:1 (profile)" in res["error"]
+    finally:
+        px.close()
+
+
+def test_proxy_sign_in_uses_the_stored_password_and_never_shows_it(server, no_proxy_env, monkeypatch):
+    port = int(server.rsplit(":", 1)[1])
+    ppw = "p@ss:w0rd"  # characters a proxy URL could not carry
+    px = Proxy({"eppm.test": port}, need_auth="Basic " + base64.b64encode(f"puser:{ppw}".encode()).decode())
+    far = f"http://eppm.test:{port}"
+    vault = {}
+    monkeypatch.setattr("p6mcp.credentials.get", lambda k: vault.get(k))
+    try:
+        p = profile(base_url=far, proxy="custom", proxy_url=px.url)
+        res = rest.test_connection(p, PW)
+        assert not res["ok"] and "407" in res["error"] and "enter the proxy user and password" in res["error"]
+        p = dict(p, proxy_user="puser")
+        res = eppm.test_profile(p, PW, proxy_password="wrong-proxy-pw")
+        assert not res["ok"] and "check the proxy user and password" in res["rest"]["error"]
+        assert "wrong-proxy-pw" not in json.dumps(res)
+        vault["eppm-proxy:test"] = ppw  # stored by the panel after a test that worked
+        res = eppm.test_profile(p, PW)
+        assert res["ok"] and res["rest"]["proxy"]["user"] == "puser" and ppw not in json.dumps(res)
+        assert px.seen[-1][2] == "Basic " + base64.b64encode(f"puser:{ppw}".encode()).decode()
+        assert not any("authorization" in k.lower() and "proxy" in k.lower() for _m, _p, h in Fake.seen for k in h)
+        # https goes through a CONNECT tunnel, which carries the proxy credentials
+        px.seen.clear()
+        res = eppm.test_profile(dict(p, base_url="https://eppm.test:443"), PW)
+        assert not res["ok"]  # the fake server speaks plain http in the tunnel
+        assert px.seen[0][:2] == ("CONNECT", "eppm.test:443") and px.seen[0][2].startswith("Basic ")
+        res = eppm.test_profile(dict(p, base_url="https://eppm.test:443"), PW, proxy_password="nope")
+        assert not res["ok"] and "407" in res["rest"]["error"] and "nope" not in res["rest"]["error"]
+    finally:
+        px.close()

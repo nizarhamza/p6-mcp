@@ -141,7 +141,8 @@ def add_eppm_profile(data: dict, base_url: str, user: str = "", database: str = 
     name = unique_eppm_name(data, name or eppm_name_from_url(base_url))
     data.setdefault("eppm_profiles", []).append(
         {"name": name, "base_url": base_url.strip(), "context": "p6ws", "database": database.strip(),
-         "user": user.strip(), "auth": "auto", "ca_bundle": None, "timeout_s": 120, "sql": None, "confirmed": False})
+         "user": user.strip(), "auth": "auto", "ca_bundle": None, "proxy": "system", "proxy_url": None,
+         "proxy_user": None, "timeout_s": 120, "sql": None, "confirmed": False})
     return data, name
 
 
@@ -216,9 +217,9 @@ def confirm_eppm(data: dict, name: str, result: dict) -> dict:
 
 
 def forget_eppm_passwords(name: str) -> None:
-    """Delete both passwords of a server profile from the Credential Manager."""
+    """Delete the passwords of a server profile (P6, SQL account, proxy user) from the Credential Manager."""
     from p6mcp import credentials
-    for key in (credentials.eppm_key(name), credentials.eppm_sql_key(name)):
+    for key in (credentials.eppm_key(name), credentials.eppm_sql_key(name), credentials.eppm_proxy_key(name)):
         credentials.delete(key)
 
 

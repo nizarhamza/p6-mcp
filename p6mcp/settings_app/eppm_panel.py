@@ -1,8 +1,9 @@
 """P6 EPPM mode in the Database page: the server profiles, their passwords and the connection test.
 
 Profiles live in win.data (saved with Save). Passwords go to the Windows Credential Manager only after a test
-shows they work (REST password after a successful sign-in, SQL password after a successful SQL test); an empty
-password field means "use the stored one".
+shows they work (REST and proxy passwords after a successful sign-in, SQL password after a successful SQL test); an
+empty password field means "use the stored one". Proxy: Windows proxy (default), no proxy, or this proxy (an
+http://host:port address for this server only, never with a user or a password in it: p6mcp/eppm/proxy.py).
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, Q
                                QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 from p6mcp import config, credentials, eppm, settings_logic
+from p6mcp.eppm import proxy
 from p6mcp.i18n import tr
 from p6mcp.settings_app.common import Job, ask, group, note, pill, start
 
@@ -82,7 +84,25 @@ class EppmPanel(QWidget):
         crow.addWidget(self.ca_edit, 1)
         crow.addWidget(ca_btn)
         form.addRow(tr("eppm.ca"), crow)
+        self.proxy_mode = QComboBox()
+        for key in proxy.MODES:
+            self.proxy_mode.addItem(tr(f"eppm.proxy.{key}"), key)
+        self.proxy_mode.currentIndexChanged.connect(self._proxy_mode_changed)
+        form.addRow(tr("eppm.proxy"), self.proxy_mode)
+        self.proxy_url = QLineEdit()
+        self.proxy_url.setPlaceholderText(tr("eppm.proxy.url.placeholder"))
+        self.proxy_url.editingFinished.connect(self._proxy_url_done)
+        form.addRow(tr("eppm.proxy.url"), self.proxy_url)
+        self.proxy_user = QLineEdit()
+        self.proxy_user.setPlaceholderText(tr("eppm.proxy.user.placeholder"))
+        self.proxy_user.editingFinished.connect(
+            lambda: self._set(proxy_user=self.proxy_user.text().strip() or None))
+        form.addRow(tr("eppm.proxy.user"), self.proxy_user)
+        self.proxy_pw = QLineEdit()
+        self.proxy_pw.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow(tr("eppm.proxy.password"), self.proxy_pw)
         dl.addLayout(form)
+        dl.addWidget(note(tr("eppm.proxy.help")))
 
         self.sql_check = QCheckBox(tr("eppm.sql"))
         self.sql_check.clicked.connect(self._sql_toggled)
@@ -240,7 +260,7 @@ class EppmPanel(QWidget):
             self.name_edit.setText(p["name"])
             return
         try:  # the passwords follow the name
-            for key in (credentials.eppm_key, credentials.eppm_sql_key):
+            for key in (credentials.eppm_key, credentials.eppm_sql_key, credentials.eppm_proxy_key):
                 old = _stored(key(p["name"]))
                 if old:
                     credentials.set(key(new), old)
@@ -256,6 +276,36 @@ class EppmPanel(QWidget):
         if path:
             self.ca_edit.setText(os.path.normpath(path))
             self._set(ca_bundle=os.path.normpath(path))
+
+    # -- proxy
+    def _proxy_mode_changed(self, _i: int) -> None:
+        p = self.current()
+        if self._filling or p is None:
+            return
+        mode = self.proxy_mode.currentData()
+        self.proxy_url.setEnabled(mode == "custom")
+        if mode == "custom" and not p.get("proxy_url"):  # stored once an address is entered
+            pill(self.state, "info", tr("eppm.proxy.url.needed"))
+            self.proxy_url.setFocus()
+            return
+        self._set(proxy=mode)
+
+    def _proxy_url_done(self) -> None:
+        p = self.current()
+        if self._filling or p is None:
+            return
+        url = self.proxy_url.text().strip()
+        if not url:
+            if p.get("proxy", "system") != "custom":
+                self._set(proxy_url=None)
+            else:
+                self.proxy_url.setText(p.get("proxy_url") or "")
+            return
+        if proxy.check_url(url):
+            pill(self.state, "error", tr("eppm.proxy.url.bad"))
+            self.proxy_url.setText(p.get("proxy_url") or "")
+            return
+        self._set(proxy=self.proxy_mode.currentData() or "custom", proxy_url=url)
 
     # -- SQL block
     def _sql_toggled(self) -> None:
@@ -298,6 +348,15 @@ class EppmPanel(QWidget):
             self.user_edit.setText(p.get("user") or "")
             self.auth.setCurrentIndex(max(0, self.auth.findData(p.get("auth", "auto"))))
             self.ca_edit.setText(p.get("ca_bundle") or "")
+            mode = p.get("proxy") or "system"
+            self.proxy_mode.setCurrentIndex(max(0, self.proxy_mode.findData(mode)))
+            self.proxy_url.setText(p.get("proxy_url") or "")
+            self.proxy_url.setEnabled(mode == "custom")
+            self.proxy_user.setText(p.get("proxy_user") or "")
+            self.proxy_pw.clear()
+            self.proxy_pw.setPlaceholderText(
+                tr("eppm.password.stored") if p.get("proxy_user") and _stored(credentials.eppm_proxy_key(p["name"]))
+                else "")
             self.pw_edit.clear()
             self.pw_edit.setPlaceholderText(tr("eppm.password.stored") if _stored(credentials.eppm_key(p["name"]))
                                             else "")
@@ -340,6 +399,8 @@ class EppmPanel(QWidget):
         r, s = res.get("rest") or {}, res.get("sql")
         lines = [tr("eppm.result.rest_ok", n=r.get("projects", 0), auth=tr(f"eppm.auth.{r.get('auth', 'login')}"),
                     s=r.get("seconds", 0)) if r.get("ok") else tr("eppm.result.rest_failed", err=r.get("error", ""))]
+        if r.get("proxy"):
+            lines.append(self._proxy_line(r["proxy"]))
         if s is not None:
             if s.get("ok"):
                 lines.append(tr("eppm.result.sql_ok", n=s.get("project_rows", 0), cols=s.get("task_columns", 0)))
@@ -357,6 +418,17 @@ class EppmPanel(QWidget):
         else:
             pill(self.state, "ok", tr("eppm.state.ok"))
 
+    @staticmethod
+    def _proxy_line(px: dict) -> str:
+        """How the test's calls went, from eppm/proxy.py resolve (no password in it)."""
+        if px.get("url"):
+            return tr("eppm.result.proxy.via", url=px["url"], source=tr(f"eppm.proxy.source.{px.get('source')}"))
+        if px.get("bypassed"):
+            return tr("eppm.result.proxy.bypass")
+        if px.get("pac"):
+            return tr("eppm.result.proxy.pac", pac=px["pac"])
+        return tr("eppm.result.proxy.direct")
+
     # -- test and confirm
     def run_test(self) -> None:
         p = self.current()
@@ -364,15 +436,17 @@ class EppmPanel(QWidget):
             return
         name = p["name"]
         typed, styped = self.pw_edit.text(), self.spw_edit.text()
+        ptyped = self.proxy_pw.text() if p.get("proxy_user") else ""
         pw = typed or _stored(credentials.eppm_key(name))
         spw = styped or (_stored(credentials.eppm_sql_key(name)) if p.get("sql") else None)
+        ppw = (ptyped or _stored(credentials.eppm_proxy_key(name)) or "") if p.get("proxy_user") else ""
         self.test_btn.setEnabled(False)
         pill(self.state, "info", tr("eppm.testing"))
         snapshot = dict(p)
-        self.job = start(Job(lambda: eppm.test_profile(snapshot, pw, spw),
-                             lambda r: self._tested(name, r, typed, styped)))
+        self.job = start(Job(lambda: eppm.test_profile(snapshot, pw, spw, proxy_password=ppw),
+                             lambda r: self._tested(name, r, typed, styped, ptyped)))
 
-    def _tested(self, name: str, res, typed: str, styped: str) -> None:
+    def _tested(self, name: str, res, typed: str, styped: str, ptyped: str = "") -> None:
         self.job = None
         if isinstance(res, Exception):
             res = {"ok": False, "rest": {"ok": False, "error": str(res)}, "sql": None}
@@ -380,6 +454,8 @@ class EppmPanel(QWidget):
         try:  # a password is kept only once it has worked
             if typed and (res.get("rest") or {}).get("ok"):
                 credentials.set(credentials.eppm_key(name), typed)
+            if ptyped and (res.get("rest") or {}).get("ok"):  # the sign-in went through the proxy with it
+                credentials.set(credentials.eppm_proxy_key(name), ptyped)
             if styped and (res.get("sql") or {}).get("ok"):
                 credentials.set(credentials.eppm_sql_key(name), styped)
         except credentials.SecretStoreError as e:

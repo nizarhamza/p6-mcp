@@ -217,6 +217,21 @@ stay outside this repository.
   new_data_date, pull_after, confirm)` WRITE kind, refused while changes are pending when it pulls after, then
   `_eppm_pull_now` (shared with `p6_eppm_pull`). The pull stamps PROJPROP 'scheduling' with the project's
   `last_schedule_date` (a copy, not an edit, for `_stale_f9`).
+  3.5.0: `p6_eppm_push(schedule, new_data_date, pull_after)`: after a push with no failed call, `jobs.schedule` on
+  the pushed projects (`_eppm_pushed_projects`: change proj_id, pred_proj_id, project), shared with
+  `p6_eppm_schedule` through `_eppm_targets`, `_eppm_schedule_lines` and `_eppm_scheduled` (schedule_eppm log
+  entry with the calling tool, then the pull; a pull failure or changes still pending are reported, not raised).
+  The plan lines include the schedule (token bound to them), `_confirm_text` = `PUSH TO <server> AND SCHEDULE`; a
+  schedule error after a push is reported in `schedule.error`, never raised. Proxy: `eppm/proxy.py` `resolve(base_url,
+  profile)` (profile `proxy` system / none / custom, `proxy_url` http://host:port checked by `check_url`, no
+  userinfo; `proxy_user`, password `credentials.eppm_proxy_key`), system = `getproxies_environment` when set, else
+  `_registry` (Windows Internet Settings and ProxyOverride; tests replace it and `_pac`), loopback never proxied;
+  `Via` (a ProxyHandler subclass, so urllib adds no system proxy of its own) sets the proxy and a Basic
+  Proxy-Authorization header (moved by urllib to the CONNECT of an https tunnel). Every session comes from
+  `rest.from_profile` (stored proxy password read when the profile has a proxy user); `eppm.digest` counts the
+  proxy keys only when they differ from the default. Tests: `test_eppm_connection.py` (`Proxy`, a local forward
+  and CONNECT proxy that resolves `eppm.test` itself), `test_settings_app.py::test_eppm_proxy_in_settings`,
+  `test_eppm_push.py` (push and schedule, diagnose).
 
 - Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (copies the brand icon, version
   resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`
