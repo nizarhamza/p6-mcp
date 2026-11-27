@@ -152,7 +152,7 @@ def test_compare_float_before_and_after(p6):
     open_ = [r for r in rows if r["change"] == "matched" and r["status"] != "TK_Complete"]
     assert s["float_eroded"] == sum(r["tf_delta_d"] < 0 for r in open_) == 5
     assert s["became_critical"] == sum(r["critical_after"] and not r["critical_before"] for r in open_) == 5
-    assert s["no_longer_critical"] == 0 and "float_eroded" in s["float_definition"]
+    assert s["no_longer_critical"] == 0 and "float_definition" not in s  # explain=True: tests/test_result_detail.py
 
 
 def test_cpm_differences_text_and_engine_version(p6):

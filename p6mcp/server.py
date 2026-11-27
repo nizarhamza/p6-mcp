@@ -282,6 +282,9 @@ ActField = Literal["task_code", "task_name", "status_code", "task_type", "wbs_na
                    "cstr_type", "cstr_label", "cstr_date", "phys_complete_pct", "driving_path_flag",
                    "orig_dur_d", "rem_dur_d", "total_float_d", "free_float_d", "float_path", "float_path_order"]
 ActFields = Annotated[list[ActField], Field(description="Fields to return (task_code always first); default all.")]
+Detail = Literal["full", "brief"]  # rows with every key (fixed shape), or without the null values
+DetailArg = Annotated[Detail, Field(description="brief: rows without their null values; full (default): every key.")]
+Explain = Annotated[bool, Field(description="True: also return the fixed texts in words (see the description).")]
 ACT_FIELDS: tuple[str, ...] = get_args(ActField)
 ACT_HOURS = {"orig_dur_d": "target_drtn_hr_cnt", "rem_dur_d": "remain_drtn_hr_cnt",
              "total_float_d": "total_float_hr_cnt", "free_float_d": "free_float_hr_cnt"}  # day fields, from hours
@@ -981,11 +984,24 @@ def _act_view(r: sqlite3.Row) -> dict:
     return {k: _days(d.get(ACT_HOURS[k]), hpd) if k in ACT_HOURS else d.get(k) for k in ACT_FIELDS}
 
 
-def _act_row(fields: Optional[Sequence[str]] = None) -> Callable[[sqlite3.Row], dict]:
+def _brief_on(detail: str) -> bool:
+    """detail= of the activity tools: 'full' (every key, the fixed shape) or 'brief' (no null values)."""
+    if detail not in get_args(Detail):
+        raise ValueError(f"detail must be one of {list(get_args(Detail))}")
+    return detail == "brief"
+
+
+def _brief(d: Mapping) -> dict:
+    """A row without its null values (detail='brief')."""
+    return {k: v for k, v in d.items() if v is not None}
+
+
+def _act_row(fields: Optional[Sequence[str]] = None, detail: str = "full") -> Callable[[sqlite3.Row], dict]:
     """Row builder for activity lists: _act_view, or task_code plus the fields asked for (checked
-    before any SQL runs)."""
+    before any SQL runs); detail='brief' leaves the null values out."""
+    brief = _brief_on(detail)
     if fields is None:
-        return _act_view
+        return (lambda r: _brief(_act_view(r))) if brief else _act_view
     fields = [fields] if isinstance(fields, str) else list(fields)
     bad = [f for f in fields if f not in ACT_FIELDS]
     if bad:
@@ -994,7 +1010,7 @@ def _act_row(fields: Optional[Sequence[str]] = None) -> Callable[[sqlite3.Row], 
 
     def row_fn(r: sqlite3.Row) -> dict:
         v = _act_view(r)
-        return {k: v[k] for k in keep}
+        return {k: v[k] for k in keep if not (brief and v[k] is None)}
     return row_fn
 
 
@@ -1168,10 +1184,12 @@ def _baseline_pid(con, pid: int, baseline: Optional[str]) -> Optional[int]:
     return r[0] if r else None
 
 
-def _schedule_state(con, pid: int) -> dict:
+def _schedule_state(con, pid: int, explain: bool = False) -> dict:
     """Data date, last F9 time and whether this server changed the project since that F9, from the
     persistent edit log (entries recorded under the current PROJECT.last_schedule_date: a P6
-    reschedule changes it and clears the flag); update_date is never used."""
+    reschedule changes it and clears the flag); update_date is never used. note: None when the state
+    needs nothing (current F9 recorded, no edit since: its text would only repeat the server
+    instructions), the text when it does or with explain=True."""
     cols = _cols(con, "PROJECT")
     sel = ", ".join(c if c in cols else f"NULL AS {c}" for c in ("last_recalc_date", "last_schedule_date"))
     row = con.execute(f"SELECT {sel} FROM PROJECT WHERE proj_id = ? AND COALESCE(project_flag, 'Y') = 'Y'"
@@ -1187,7 +1205,8 @@ def _schedule_state(con, pid: int) -> dict:
                  " or imported from an XER without it).")
     note += " Edits are tracked in the edit log next to the database (p6_edit_log)."
     return {"data_date": row["last_recalc_date"], "last_schedule_date": row["last_schedule_date"],
-            "stale": bool(e), "edited_since_last_schedule": e, "note": note}
+            "stale": bool(e), "edited_since_last_schedule": e,
+            "note": note if explain or e or not row["last_schedule_date"] else None}
 
 
 # ----------------------------------------------------------------- paging
@@ -2294,6 +2313,7 @@ def p6_query_activities(
     fields: Optional[ActFields] = None,
     offset: Offset = 0,
     limit: Limit = 50,
+    detail: DetailArg = "full",
 ) -> dict:
     """Search activities, one page: {total, offset, returned, next_offset, rows}, ordered by start
     (actual, else early) then Activity ID. status: TK_NotStart, TK_Active or TK_Complete. Dates as
@@ -2308,10 +2328,11 @@ def p6_query_activities(
     smaller pages. UDFs (user defined columns, p6_list_udfs): udf_filter = [{udf: label, op, value}],
     all to hold; op eq (default), ne, lt, le, gt, ge, contains (text), empty, not_empty; a date alone
     covers the whole day; udf_filter (info) tells what was used. udfs = labels added to each row as
-    udfs {label: value} (None when empty)."""
+    udfs {label: value} (None when empty). detail='brief' leaves the null values out of the rows (fields=
+    still applies; udfs kept whole)."""
     if status is not None and status not in get_args(Status):
         raise ValueError(f"status must be one of {list(get_args(Status))}")
-    row_fn = _act_row(fields)
+    row_fn = _act_row(fields, detail)
     if isinstance(udfs, str):
         udfs = [udfs]
     con = _connect()
@@ -2615,13 +2636,16 @@ def _act_details(con, task_id: int) -> tuple[dict, list[str]]:
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
-def p6_get_activity(project: ProjectId, task_code: ActivityId) -> dict:
+def p6_get_activity(project: ProjectId, task_code: ActivityId, detail: DetailArg = "full") -> dict:
     """Full detail of one activity: the list fields (see p6_query_activities), secondary
     constraint, remaining, expected, suspend and resume dates, calendar (hours_per_day converts
     hours to days), WBS (wbs_code as in p6_list_wbs, wbs_path names), predecessors and successors
     (first 50 of each, with predecessor_count / successor_count; page further with
     p6_get_relationships), assignments (resource and role, quantities and costs as stored),
-    activity codes, UDFs and notebooks (first 50 of each), lag_rule and schedule_state."""
+    activity codes, UDFs and notebooks (first 50 of each), lag_rule and schedule_state.
+    detail='brief' leaves the null values out of the activity and of its list rows, and drops from the
+    links direction (the list says it), lag_h (lag_d stays) and other_project when it is this project."""
+    brief = _brief_on(detail)
     con = _connect()
     t = _task(con, project, task_code)
     d = _dict(t)
@@ -2641,6 +2665,12 @@ def p6_get_activity(project: ProjectId, task_code: ActivityId) -> dict:
         out["details_note"] = f"Only the first {ACT_LINKS_CAP} rows of: {', '.join(cut)}."
     out["lag_rule"] = _lag_info(con, t["proj_id"])
     out["schedule_state"] = _schedule_state(con, t["proj_id"])
+    if brief:
+        for key in ("predecessors", "successors"):
+            out[key] = [{k: v for k, v in r.items() if k not in ("direction", "lag_h")
+                         and not (k == "other_project" and v == project)} for r in out[key]]
+        out = {k: [_brief(r) if isinstance(r, dict) else r for r in v] if isinstance(v, list) else v
+               for k, v in _brief(out).items()}
     return out
 
 
@@ -2763,7 +2793,8 @@ def _critical_clause(con, pid: int, mode: str, threshold_days: Optional[float]
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_critical_path(project: ProjectId, mode: CpMode = "project", float_threshold_days: Optional[float] = None,
                      include_completed: bool = False, fields: Optional[ActFields] = None,
-                     min_float_days: Optional[float] = None, offset: Offset = 0, limit: Limit = 50) -> dict:
+                     min_float_days: Optional[float] = None, offset: Offset = 0, limit: Limit = 50,
+                     detail: DetailArg = "full") -> dict:
     """Critical activities of the last P6 schedule run (F9), one page: {total, offset, returned,
     next_offset, rows, definition, mode_used, threshold_h, counts, schedule_state, note}.
     mode: project (default) follows the project setting (total float <= its hours threshold, or
@@ -2775,8 +2806,8 @@ def p6_critical_path(project: ProjectId, mode: CpMode = "project", float_thresho
     include_completed=True. Order: total float then start, or float path order for the longest
     path. counts (open activities except LOE and WBS summary, any page): open, total_float,
     longest_path, negative_float; excluded_summary = LOE and WBS summary activities that meet the
-    definition and the status filter but are not listed. fields= as in p6_query_activities."""
-    row_fn = _act_row(fields)
+    definition and the status filter but are not listed. fields= and detail= as in p6_query_activities."""
+    row_fn = _act_row(fields, detail)
     con = _connect()
     pid = _project_id(con, project)
     cond, args, definition, thr_h, used = _critical_clause(con, pid, mode, float_threshold_days)
@@ -2822,15 +2853,17 @@ def p6_critical_path(project: ProjectId, mode: CpMode = "project", float_thresho
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_float_paths(project: ProjectId, path: Optional[PathNo] = None, include_completed: bool = False,
-                   fields: Optional[ActFields] = None, offset: Offset = 0, limit: Limit = 50) -> dict:
+                   fields: Optional[ActFields] = None, offset: Offset = 0, limit: Limit = 50,
+                   detail: DetailArg = "full") -> dict:
     """Float paths of the last P6 schedule run (Schedule Options, multiple float paths), one page
     in P6 order (path, then order on the path): {total, offset, returned, next_offset, rows, paths,
     source, schedule_state}. Path 1 is the most critical. paths summarises each path whatever the
     page: activities, first_order, last_order, min_tf_d, max_tf_d, finish. path= keeps one path.
     Completed activities only with include_completed=True. When P6 stored no float path, rows are
     the longest path activities (driving_path_flag, LOE and WBS summary left out as in
-    p6_critical_path) by start and source is 'driving_path_flag'."""
-    row_fn = _act_row(fields)
+    p6_critical_path) by start and source is 'driving_path_flag'. fields= and detail= as in
+    p6_query_activities."""
+    row_fn = _act_row(fields, detail)
     con = _connect()
     pid = _project_id(con, project)
     tcols = _cols(con, "TASK")
@@ -6938,7 +6971,7 @@ def _tf_change(before_d: Optional[float], after_d: Optional[float], crit_before,
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, section: CompareSection = "activities",
                         dates: BaselineDates = "current", min_variance_days: NonNegDays = 0,
-                        offset: Offset = 0, limit: Limit = 50) -> dict:
+                        offset: Offset = 0, limit: Limit = 50, explain: Explain = False) -> dict:
     """Compare a project with another project or baseline (other=; default: the project baseline),
     activities matched by Activity ID, links by (predecessor, successor, type, predecessor project).
     summary (whole projects): activities matched, added (only in project), removed (only in other),
@@ -6957,8 +6990,10 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
     definition, None where the activity is missing) or 'relationships' (added, removed, lag_changed;
     pred_name and succ_name of the project, of the other one for a removed link; lag days under each
     project's lag rule). summary.activities also counts, over the matched activities open in the project
-    (LOE and WBS summary left out), float_eroded (total float lower than in other), became_critical and
-    no_longer_critical; float_definition says it in words."""
+    (LOE and WBS summary left out), float_eroded (total float lower than in other by more than 3 minutes),
+    became_critical and no_longer_critical (critical = open and critical under each project's own
+    definition, as p6_critical_path); explain=True adds float_definition, the same in words with both
+    definitions, and the schedule_state note."""
     if section not in get_args(CompareSection):
         raise ValueError(f"section must be one of {list(get_args(CompareSection))}")
     if dates not in get_args(BaselineDates):
@@ -7072,16 +7107,17 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
                                       "slip_causes": {k: causes.get(k, 0) for k in SLIP_CAUSES},
                                       "slip_cause_unknown": causes.get(None, 0), "float_eroded": fl[0] or 0,
                                       "became_critical": fl[1] or 0, "no_longer_critical": fl[2] or 0,
-                                      "float_definition": (
+                                      **({"float_definition": (
                                           "over the matched activities open in the project (LOE and WBS summary left "
                                           "out): float_eroded = total float lower than in the other one by more than "
                                           f"{CPM_TF_TOL_H * 60:g} minutes; critical = open and critical under each "
-                                          f"project's own definition (project: {cdef_a}; other: {cdef_b})")},
+                                          f"project's own definition (project: {cdef_a}; other: {cdef_b})")}
+                                         if explain else {})},
                        "relationships": {"matched": lsum[0], "added": lsum[1], "removed": lsum[2], "lag_changed": lsum[3]}},
            "projects": {k: {"project": pa[k], "other": pb[k]} for k in pf},
            "basis": ("finish = actual, else early finish; other: " + ("same" if dates == "current" else "planned finish")
                      + "; variance = finish - other finish (positive = later)"),
-           "schedule_state": _schedule_state(con, pid)}
+           "schedule_state": _schedule_state(con, pid, explain)}
     return res
 
 
@@ -7329,20 +7365,21 @@ def _integrity(con, pid: int, oid: int, near_days: float) -> tuple[dict[str, lis
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_update_integrity(project: ProjectId, other: ProjectId, flag: Optional[IntegrityFlag] = None,
                         near_critical_days: NonNegDays = 10, sample_size: SampleSize = 10,
-                        offset: Offset = 0, limit: Limit = 100) -> dict:
+                        offset: Offset = 0, limit: Limit = 100, explain: Explain = False) -> dict:
     """Integrity review of a schedule update against the previous update (other = its Project ID): the changes
     reviewers question. The flags are questions to raise with whoever submitted the update, not proof of
     manipulation (caveat says so). Activities are matched by Activity ID and links by (predecessor,
     successor, type, predecessor project), as p6_compare_projects; before = other, after = project; open = not
     completed, LOE and WBS summary left out; critical = each project's own definition. flags (each {count,
-    definition, sample: first sample_size rows with before / after values}): open_end_to_finish,
+    sample: first sample_size rows with before / after values}; explain=True adds definition, the flag in
+    words, here and in result, and the schedule_state note): open_end_to_finish,
     negative_float_cleared_by_constraint, must_finish_moved, actuals_changed, duration_cut (with critical:
     those critical before), links_removed_on_critical (successor critical or within near_critical_days of total
     float before), rel_type_or_lag_changed, schedule_options_changed, calendars_changed,
     deleted_in_progress_or_critical, data_date (raised when it did not advance). summary: count per flag;
     raised: the flags with a count; data_date {before, after, delta_cd, advanced}; must_finish {before,
     after, delta_cd, delta_wd (working days of the project calendar)}. flag= returns that flag's rows as a page {total, offset, returned, next_offset, rows} with result
-    {count, definition}. DCMA counts before and after: p6_health_check on both projects, then
+    {count}. DCMA counts before and after: p6_health_check on both projects, then
     p6_health_check_compare(project, before=<snapshot id of other>, after=<snapshot id of project>). Values of
     each project's last F9; read only."""
     if flag is not None and flag not in INTEGRITY_FLAGS:
@@ -7363,12 +7400,13 @@ def p6_update_integrity(project: ProjectId, other: ProjectId, flag: Optional[Int
         rows, facts = _integrity(con, pid, oid, near)
     finally:
         con.rollback()
-    state = _schedule_state(con, pid)
+    state = _schedule_state(con, pid, explain)
     head = {"project": project, "other": other}
+    words = (lambda k: {"definition": INTEGRITY_DEFS[k]}) if explain else (lambda k: {})  # noqa: E731
     if flag:
-        return {**head, "flag": flag, "result": {"count": len(rows[flag]), "definition": INTEGRITY_DEFS[flag]},
+        return {**head, "flag": flag, "result": {"count": len(rows[flag]), **words(flag)},
                 **_slice(rows[flag], offset, limit), "caveat": INTEGRITY_CAVEAT, "schedule_state": state}
-    flags = {k: {"count": len(v), "definition": INTEGRITY_DEFS[k], "sample": v[:size]} for k, v in rows.items()}
+    flags = {k: {"count": len(v), **words(k), "sample": v[:size]} for k, v in rows.items()}
     flags["duration_cut"]["critical"] = sum(r["critical_before"] for r in rows["duration_cut"])
     summary = {k: f["count"] for k, f in flags.items()}
     raised = [k for k, n in summary.items() if n]
@@ -7479,7 +7517,7 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
                  include_completed: bool = False, wbs_name_contains: Optional[str] = None,
                  code_type: Optional[str] = None, code_value: Optional[str] = None, include_child_codes: bool = True,
                  critical_only: bool = False, fields: Optional[ActFields] = None, offset: Offset = 0,
-                 limit: Limit = 50) -> dict:
+                 limit: Limit = 50, detail: DetailArg = "full") -> dict:
     """Look-ahead of a project, one page: {total, offset, returned, next_offset, rows, window, weeks,
     data_date, counts, critical_definition, schedule_state, note}. The window starts at the data date (or from_date; a
     date alone starts at 00:00), lasts days= (default 14) or weeks= calendar days and is half-open
@@ -7493,15 +7531,15 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
     start), fcst_finish (actual finish when completed, else remaining finish) and start_week /
     finish_week: the week of the window holding that date (1 = the first 7 days from the window start,
     None outside the window; weeks lists each one's from and to). critical_only=True lists the critical
-    ones only. counts gives the categories and critical over all pages. wbs_name_contains, code_type / code_value / include_child_codes and fields=
-    as in p6_query_activities. Order: start, finish, Activity ID."""
+    ones only. counts gives the categories and critical over all pages. wbs_name_contains, code_type / code_value / include_child_codes, fields=
+    and detail= as in p6_query_activities. Order: start, finish, Activity ID."""
     if days is not None and weeks is not None:
         raise ValueError("give days or weeks, not both")
     n = int(days) if days is not None else 7 * int(weeks) if weeks is not None else LOOKAHEAD_DAYS
     if not 1 <= n <= 366:
         raise ValueError("the window must be 1 to 366 days (days=, or weeks= up to 52)")
     frm = _parse_dt(from_date, "from_date")[0] if from_date else None
-    row_fn = _act_row(fields)
+    row_fn, brief = _act_row(fields), _brief_on(detail)
     con = _connect()
     pid = _project_id(con, project)
     con.execute("BEGIN")  # data date, code filter, page and counts from one snapshot
@@ -7536,9 +7574,10 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
         return int((d - frm).total_seconds() // (7 * 86400)) + 1 if d is not None and frm <= d < to else None
 
     def row(r: sqlite3.Row) -> dict:
-        return {**row_fn(r), "window": [k for k in cat if r[f"w_{k}"]], "critical": bool(r["w_crit"]),
-                "fcst_start": r["f_st"], "fcst_finish": r["f_fin"], "start_week": week(r["f_st"]),
-                "finish_week": week(r["f_fin"])}
+        out = {**row_fn(r), "window": [k for k in cat if r[f"w_{k}"]], "critical": bool(r["w_crit"]),
+               "fcst_start": r["f_st"], "fcst_finish": r["f_fin"], "start_week": week(r["f_st"]),
+               "finish_week": week(r["f_fin"])}
+        return _brief(out) if brief else out
     try:
         res = _page(con, q, [*crit_args, *args], offset, limit, row)
         c = con.execute("SELECT " + ", ".join(f"SUM({x})" for x in [*cat.values(), is_crit]) + f" FROM ({inner}) t",
@@ -7896,7 +7935,7 @@ def _code_list(codes, name: str) -> list[str]:
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, baseline_dates: BaselineDates = "current",
                   open_only: bool = False, order: MsOrder = "date", codes: Optional[MsCodes] = None,
-                  offset: Offset = 0, limit: Limit = 50) -> dict:
+                  offset: Offset = 0, limit: Limit = 50, detail: DetailArg = "full") -> dict:
     """Milestones of a project (TT_Mile start milestones, TT_FinMile finish milestones), one page by date
     then Activity ID (order='variance': the largest variance in working days first, calendar days when the
     calendar is unreadable, milestones without a baseline date last, then date): {total, offset, returned, next_offset, rows, counts, baseline, must_finish,
@@ -7916,7 +7955,9 @@ def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, base
     hard_constraint (its primary or secondary constraint is hard: start or finish on, on or before,
     mandatory), predecessor_count (links into it), vs_constraint_wd (its date minus its constraint date in
     working days of its calendar, positive = later; None without a constraint date), float_origin_type and
-    float_origin_explanation (where its total float comes from, as p6_float_origin; None when completed)."""
+    float_origin_explanation (where its total float comes from, as p6_float_origin; None when completed).
+    detail='brief' leaves the null values out of the rows."""
+    brief = _brief_on(detail)
     if baseline_dates not in get_args(BaselineDates):
         raise ValueError(f"baseline_dates must be one of {list(get_args(BaselineDates))}")
     if order not in get_args(MsOrder):
@@ -7994,6 +8035,8 @@ def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, base
               "no_baseline": sum(r["vs_baseline"] is None for r in rows),
               "open_late": sum(r["vs_baseline"] == "late" and r["status_code"] != "TK_Complete" for r in rows)}
     res = _slice(rows, offset, limit)
+    if brief:
+        res["rows"] = [_brief(r) for r in res["rows"]]
     found = {m["task_code"] for m in ms}
     if wanted is not None:  # an open_only call leaves a completed ID out of not_found too
         found |= {c for c in wanted if c in net.code}
