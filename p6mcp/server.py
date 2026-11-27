@@ -7639,16 +7639,59 @@ def _la_query(con, pid: int, project: str, n: int, from_date: Optional[str], inc
             "weeks": weeks, "data_date": dd, "critical_definition": crit_def + "; open activities", "code_filter": cinfo}
 
 
+CURVE_POINTS = 21  # P6 resource curve: PctUsage points 0 to 20, one per 5 % of the duration
+
+
+def _curve_shape(data) -> tuple[float, ...]:
+    """RSRCCURV.curv_data -> cumulative share of the units (0 to 1) at 0, 5, ..., 100 % of the duration.
+    The text is a P6 tree '(0||CurveData()((0||0(PctUsage|0)()) ... (0||20(PctUsage|5)())))' (the root
+    name may be empty, BLOB or TEXT): point 0 is the share placed at the start, point k (1 to 20) the share
+    used from (k - 1) x 5 % to k x 5 % of the duration (P6's built-in curves are symmetric that way: Bell
+    Shaped mirrors point k on point 21 - k). Values are percentages; they are scaled by their sum, so a curve
+    that does not add up to exactly 100 keeps its shape. Raises ValueError when a point is missing, negative
+    or the sum is 0."""
+    try:
+        kids = _p6_tree(_blob_text(data))["kids"]
+        pts = {int(k["name"]): float(k["attrs"]["PctUsage"]) for k in kids}
+    except (KeyError, TypeError, ValueError, IndexError) as e:
+        raise ValueError(f"unreadable curve data: {e}") from None
+    if sorted(pts) != list(range(CURVE_POINTS)) or min(pts.values()) < 0 or not math.isfinite(sum(pts.values())):
+        raise ValueError(f"a curve needs the {CURVE_POINTS} points 0 to 20 with values of 0 or more")
+    total, acc, out = sum(pts.values()), 0.0, []
+    if total <= 0:
+        raise ValueError("the curve points add up to 0")
+    for k in range(CURVE_POINTS):
+        acc += pts[k]
+        out.append(acc / total)
+    out[-1] = 1.0
+    return tuple(out)
+
+
+def _shape_at(shape: Sequence[float], w: float) -> float:
+    """Cumulative share of a _curve_shape at the duration fraction w (0 < w < 1), linear inside each 5 %."""
+    x = w * (CURVE_POINTS - 1)
+    k = min(int(x), CURVE_POINTS - 2)
+    return shape[k] + (shape[k + 1] - shape[k]) * (x - k)
+
+
 def _cum(items: Sequence[tuple], edges: Sequence[datetime]) -> list[float]:
-    """Cumulative quantity at each edge (increasing) of items (qty, start, end) spread linearly from
-    start to end; a zero-length item counts after its start."""
+    """Cumulative quantity at each edge (increasing) of items (qty, start, end[, calendar[, shape]]); a
+    zero-length item counts after its start. Without a calendar the quantity runs linearly over calendar time
+    from start to end; with one (_Cal) linearly over its working time (the share at t = working hours from
+    start to t / working hours from start to end; a calendar with an error or no working time in the span
+    falls back to calendar time); a shape (_curve_shape) then maps that duration share to the units share."""
     out, step = [0.0] * len(edges), [0.0] * (len(edges) + 1)
-    for q, s, e in items:
+    for it in items:
+        q, s, e = it[0], it[1], it[2]
+        cal, shape = (it[3] if len(it) > 3 else None), (it[4] if len(it) > 4 else None)
         i = bisect.bisect_right(edges, s)  # first edge after the start
         j = bisect.bisect_left(edges, e, i) if e > s else i  # first edge at or after the end
-        span = (e - s).total_seconds()
-        for k in range(i, j):
-            out[k] += q * (edges[k] - s).total_seconds() / span
+        if j > i:
+            wh = cal.work_hours(s, e) if cal is not None and not cal.error else 0.0
+            span = (e - s).total_seconds()
+            for k in range(i, j):
+                w = cal.work_hours(s, edges[k]) / wh if wh > 0 else (edges[k] - s).total_seconds() / span
+                out[k] += q * (_shape_at(shape, w) if shape else w)
         step[j] += q
     acc = 0.0
     for k in range(len(edges)):
@@ -7658,15 +7701,102 @@ def _cum(items: Sequence[tuple], edges: Sequence[datetime]) -> list[float]:
 
 
 def _value_at(items: Sequence[tuple], t: datetime) -> float:
-    """Cumulative quantity of items at t (exact for the linear spread of _cum)."""
-    return _cum(items, [t])[0]
+    """Cumulative quantity of items at t, linear over calendar time between their dates whatever calendar or
+    curve they carry: the planned value definition of to_date (p6_progress_curve), p6_project_summary and the
+    dashboard, kept as it was before the working time spread of the periods (3.6.0)."""
+    return _cum([it[:3] for it in items], [t])[0]
 
 
-def _measure_rows(con, pid: int, measure: str, resource: Optional[str] = None) -> list[sqlite3.Row]:
+def _spread_cal(r: Mapping, cals: Mapping[int, _Cal]) -> Optional[_Cal]:
+    """Calendar an assignment's units are spread on (P6): the resource's calendar for a resource dependent
+    activity (TT_Rsrc) that has one, else the activity's calendar; None when neither is loaded."""
+    if r["task_type"] == "TT_Rsrc" and r["rsrc_clndr_id"] in cals:
+        return cals[r["rsrc_clndr_id"]]
+    return cals.get(r["task_clndr_id"])
+
+
+class _Spread:
+    """What the working time spread of _curve_items needs, read once per call inside the caller's snapshot:
+    every calendar (_calendars), the resource curves (RSRCCURV curv_id -> _curve_shape; unreadable ones in
+    bad_curves) and the stored period actuals of the assignments (TRSRCFIN rows of the projects pids with the
+    FINDATES period: act_qty for units, act_cost for cost; a period ends at the end of its end_date day when
+    that is a date at 00:00). counts: calendar_time (items spread over calendar time: no readable calendar
+    or no working time in the span), curves (assignments spread on a resource curve), unknown_curve (curv_id not found or unreadable: spread linearly), period_actuals (assignments
+    whose actual curve comes from TRSRCFIN)."""
+
+    def __init__(self, con, pids: Sequence[int], measure: str = "units"):
+        self.cals = _calendars(con)
+        self.curves: dict[int, tuple] = {}
+        self.bad_curves: dict[int, str] = {}
+        if {"curv_id", "curv_data"} <= set(_cols(con, "RSRCCURV")):
+            for cid, data in con.execute("SELECT curv_id, curv_data FROM RSRCCURV WHERE 1=1" + _alive(con, "RSRCCURV")):
+                try:
+                    self.curves[cid] = _curve_shape(data)
+                except ValueError as e:
+                    self.bad_curves[cid] = str(e)
+        self.fin: dict[int, list[tuple[float, datetime, datetime]]] = {}
+        fc, dc = _cols(con, "TRSRCFIN"), _cols(con, "FINDATES")
+        col = "act_qty" if measure == "units" else "act_cost"
+        if {"fin_dates_id", "taskrsrc_id", "proj_id", col} <= set(fc) and {"fin_dates_id", "start_date", "end_date"} <= set(dc):
+            for p in pids:
+                for tr, q, s, e in con.execute(
+                        f"SELECT f.taskrsrc_id, f.{col}, d.start_date, d.end_date FROM TRSRCFIN f JOIN FINDATES d "
+                        "ON d.fin_dates_id = f.fin_dates_id WHERE f.proj_id = ?" + _alive(con, "TRSRCFIN", "f")
+                        + _alive(con, "FINDATES", "d") + " ORDER BY f.taskrsrc_id, d.start_date, f.fin_dates_id", (p,)):
+                    s, e = _db_dt(s), _db_dt(e)
+                    if s is None or e is None or not q:
+                        continue
+                    if e.time() == time() and e >= s:
+                        e += timedelta(days=1)  # FINDATES end_date names the period's last day
+                    self.fin.setdefault(tr, []).append((float(q), s, max(s, e)))
+        self.counts = {"calendar_time": 0, "curves": 0, "unknown_curve": 0, "period_actuals": 0}
+
+    def item(self, q: float, s: datetime, e: datetime, cal: Optional[_Cal], shape=None) -> tuple:
+        """One spread item; a span without working time on cal is spread over calendar time (counted)."""
+        if e > s and (cal is None or cal.error or cal.work_hours(s, e) <= 0):
+            self.counts["calendar_time"] += 1
+            cal = None
+        return (q, s, e, cal, shape)
+
+    def shape(self, r: Mapping) -> Optional[tuple]:
+        cid = r["curv_id"]
+        if cid is None:
+            return None
+        if cid in self.curves:
+            self.counts["curves"] += 1
+            return self.curves[cid]
+        self.counts["unknown_curve"] += 1
+        return None
+
+    def actual(self, r: Mapping, a: float, s: datetime, e: datetime, cal: Optional[_Cal]) -> list[tuple]:
+        """Actual items of one assignment from s to e (actual start to actual finish, clipped at the data date):
+        its TRSRCFIN period actuals, each over its financial period inside [s, e] (the whole period clipped at e
+        when they do not overlap), and the rest (actual - stored) from the end of the last stored period, not
+        before s, to e; without stored periods one item from s to e."""
+        rows = self.fin.get(r["taskrsrc_id"]) if r["taskrsrc_id"] is not None else None
+        if not rows:
+            return [self.item(a, s, e, cal)]
+        self.counts["period_actuals"] += 1
+        out, done, last = [], 0.0, s
+        for q, fs, fe in rows:
+            lo, hi = max(fs, s), min(fe, e)
+            if hi <= lo:
+                lo, hi = min(fs, e), min(fe, e)
+            out.append(self.item(q, lo, max(lo, hi), cal))
+            done, last = done + q, max(last, min(fe, e))
+        if abs(a - done) > 1e-9:
+            out.append(self.item(a - done, min(last, e), e, cal))
+        return out
+
+
+def _measure_rows(con, pid: int, measure: str, resource: Optional[str] = None, every_type: bool = False,
+                  role: Optional[str] = None) -> list[sqlite3.Row]:
     """Assignments of a project: target, actual and remain quantity (measure 'units': labor and
-    nonlabor resources; 'cost': every resource), planned, actual and remaining dates and what
-    _perf_pct and _ev_pct need of the activity (WBS node; has_curve = a resource curve on one of its
-    assignments). resource= one resource (any type)."""
+    nonlabor resources, every type with every_type; 'cost': every resource), planned, actual and
+    remaining dates, what _perf_pct and _ev_pct need of the activity (WBS node; has_curve = a resource
+    curve on one of its assignments) and what the working time spread needs (taskrsrc_id, rsrc_id,
+    rsrc_type, activity type and calendar, resource calendar, curv_id). resource= one resource (any
+    type); role= the assignments of that Role ID."""
     cols, tc, k = _cols(con, "TASKRSRC"), _cols(con, "TASK"), "qty" if measure == "units" else "cost"
     act = " + ".join(f"COALESCE(tr.{c}, 0)" for c in (f"act_reg_{k}", f"act_ot_{k}") if c in cols) or "0"
     rtype = "COALESCE(tr.rsrc_type, r.rsrc_type)" if "rsrc_type" in cols else "r.rsrc_type"
@@ -7678,15 +7808,24 @@ def _measure_rows(con, pid: int, measure: str, resource: Optional[str] = None) -
            + ("t.complete_pct_type" if "complete_pct_type" in tc else "NULL") + f" AS pct_type, {tu('act')} AS task_act, "
            f"{tu('remain')} AS task_remain, t.wbs_id, "
            + ("EXISTS (SELECT 1 FROM TASKRSRC c WHERE c.task_id = t.task_id AND c.curv_id IS NOT NULL"
-              + _alive(con, "TASKRSRC", "c") + ")" if "curv_id" in cols else "0") + f" AS has_curve, {rtype} AS rsrc_kind "
+              + _alive(con, "TASKRSRC", "c") + ")" if "curv_id" in cols else "0") + " AS has_curve, "
+           f"tr.taskrsrc_id, tr.rsrc_id, {rtype} AS rsrc_type, {rtype} AS rsrc_kind, t.task_type, "
+           "t.clndr_id AS task_clndr_id, "
+           + ("r.clndr_id" if "clndr_id" in _cols(con, "RSRC") else "NULL") + " AS rsrc_clndr_id, "
+           + ("tr.curv_id" if "curv_id" in cols else "NULL") + " AS curv_id "
            "FROM TASKRSRC tr JOIN TASK t ON t.task_id = tr.task_id "
            "LEFT JOIN RSRC r ON r.rsrc_id = tr.rsrc_id" + _alive(con, "RSRC", "r") + " WHERE t.proj_id = ?"
            + _alive(con, "TASKRSRC", "tr") + _alive(con, "TASK", "t"))
+    args: list = [pid]
+    if role is not None:
+        sql += (" AND tr.role_id IN (SELECT role_id FROM ROLES WHERE role_short_name = ?" + _alive(con, "ROLES") + ")"
+                if "role_id" in cols else " AND 0")
+        args.append(role)
     if resource:
-        return con.execute(sql + " AND r.rsrc_short_name = ? ORDER BY tr.taskrsrc_id", (pid, resource)).fetchall()
-    if measure == "units":
+        return con.execute(sql + " AND r.rsrc_short_name = ? ORDER BY tr.taskrsrc_id", (*args, resource)).fetchall()
+    if measure == "units" and not every_type:
         sql += f" AND {rtype} IN ('RT_Labor', 'RT_Equip')"
-    return con.execute(sql + " ORDER BY tr.taskrsrc_id", (pid,)).fetchall()
+    return con.execute(sql + " ORDER BY tr.taskrsrc_id", args).fetchall()
 
 
 def _perf_pct(r: Mapping) -> float:
@@ -7780,13 +7919,41 @@ def _ev_pct(r: Mapping, ev: Optional[Mapping]) -> float:
     return _perf_pct(r)
 
 
-def _curve_items(rows: Sequence, dd: datetime, ev: Optional[Mapping] = None) -> dict:
-    """Curves of _measure_rows at data date dd, as (qty, start, end): planned (target over the planned
-    dates), actual (actual from the actual start to the actual finish, clipped at dd; dates missing =
-    at dd), remaining (remain from the remaining start, not before dd, to the remaining finish). Plus
-    budget, actual_qty, remain_qty and earned (target x _ev_pct under the WBS techniques of ev =
-    _ev_map) totals, clipped (actual dates after dd), clamped (remaining start before dd) and unspread
-    (target without planned dates)."""
+SPREAD_RULES = ("Periods: each assignment's quantities are spread over the working time of its calendar (the "
+                "resource's calendar for a resource dependent activity, else the activity's), on its resource curve "
+                "when it has one (21 points, one per 5 % of the duration), planned over the planned dates, remaining "
+                "over the remaining dates from the data date and actual from the actual start to the actual finish "
+                "or the data date.")
+
+
+def _spread_note(counts: Mapping) -> str:
+    """Note text of a working time spread (p6_progress_curve, p6_resource_loading) from _Spread.counts plus
+    trsrcfin (TRSRCFIN rows of the project)."""
+    fin = ("Stored period actuals (TRSRCFIN) place the actual of their financial periods; the rest of an "
+           "assignment's actual runs from the end of its last stored period to the data date."
+           if counts.get("period_actuals") else
+           "The database holds no period actuals for these assignments (TRSRCFIN), so the actual curve is rebuilt "
+           "from the actual dates." if not counts.get("trsrcfin") else
+           "Period actuals (TRSRCFIN) exist but none for these assignments: the actual curve is rebuilt from the actual dates.")
+    return (SPREAD_RULES + " " + fin + " Still approximate per period: an in-progress assignment takes its whole curve "
+            "over its remaining dates, units per time that vary inside an assignment and the activity level TASKFIN "
+            "rows are not read"
+            + (f"; {counts['calendar_time']} spans without working time on their calendar run over calendar time"
+               if counts.get("calendar_time") else "")
+            + (f"; {counts['unknown_curve']} assignments name a curve that is missing or unreadable (spread linearly)"
+               if counts.get("unknown_curve") else "") + ".")
+
+
+def _curve_items(rows: Sequence, dd: datetime, ev: Optional[Mapping] = None, sp: Optional[_Spread] = None) -> dict:
+    """Curves of _measure_rows at data date dd: planned (target over the planned dates), actual (actual
+    from the actual start to the actual finish, clipped at dd; dates missing = at dd), remaining (remain
+    from the remaining start, not before dd, to the remaining finish). Items are (qty, start, end) spread
+    linearly over calendar time without sp; with sp (_Spread) (qty, start, end, calendar, shape): working
+    time of the assignment's calendar (_spread_cal), the resource curve of the assignment on planned and
+    remaining (the whole curve over the remaining dates), the TRSRCFIN period actuals on actual
+    (_Spread.actual). Plus budget, actual_qty, remain_qty and earned (target x _ev_pct under the WBS
+    techniques of ev = _ev_map) totals, clipped (actual dates after dd), clamped (remaining start before
+    dd) and unspread (target without planned dates)."""
     out: dict[str, Any] = {"planned": [], "actual": [], "remaining": [], "budget": 0.0, "actual_qty": 0.0,
                            "remain_qty": 0.0, "earned": 0.0, "clipped": 0, "clamped": 0, "unspread": 0.0}
     for r in rows:
@@ -7795,21 +7962,27 @@ def _curve_items(rows: Sequence, dd: datetime, ev: Optional[Mapping] = None) -> 
         out["actual_qty"] += a
         out["remain_qty"] += rem
         out["earned"] += _ev_pct(r, ev) / 100 * q
+        cal = _spread_cal(r, sp.cals) if sp else None
+        shape = sp.shape(r) if sp and (q or rem) else None
         s, e = _db_dt(r["target_start_date"]), _db_dt(r["target_end_date"])
         if q and s and e:
-            out["planned"].append((q, s, max(s, e)))
+            out["planned"].append(sp.item(q, s, max(s, e), cal, shape) if sp else (q, s, max(s, e)))
         elif q:
             out["unspread"] += q
         if a:
             s, e = _db_dt(r["act_start_date"]), _db_dt(r["act_end_date"])
             out["clipped"] += bool((s and s > dd) or (e and e > dd))
             e = min(e or dd, dd)
-            out["actual"].append((a, min(s or e, e), e))
+            if sp:
+                out["actual"] += sp.actual(r, a, min(s or e, e), e, cal)
+            else:
+                out["actual"].append((a, min(s or e, e), e))
         if rem:
             s = _db_dt(r["restart_date"]) or dd
             out["clamped"] += s < dd
             s = max(s, dd)
-            out["remaining"].append((rem, s, max(_db_dt(r["reend_date"]) or s, s)))
+            e = max(_db_dt(r["reend_date"]) or s, s)
+            out["remaining"].append(sp.item(rem, s, e, cal, shape) if sp else (rem, s, e))
     return out
 
 
@@ -7850,8 +8023,9 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
     the same schedule (Project IDs): their earned and actual totals at their own data date
     (earned_points). from_date / to_date (YYYY-MM-DD) trim the periods; cumulatives stay exact.
     checks: totals reached by the last period, actuals clipped at the data date, remaining starts
-    moved to it, quantities without dates, WBS nodes per earned value technique. Spread is
-    linear over calendar time: an approximation, see note."""
+    moved to it, quantities without dates, WBS nodes per earned value technique, spread (spans
+    over calendar time, resource curves applied or unknown, period actuals used). Periods spread
+    each assignment over the working time of its calendar and on its resource curve; see note."""
     if period not in get_args(Period):
         raise ValueError(f"period must be one of {list(get_args(Period))}")
     if measure not in get_args(Measure):
@@ -7879,16 +8053,19 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
         if dd is None:
             raise ValueError(f"{project} has no data date (PROJECT.last_recalc_date)")
         evm = _ev_map(con, pid)
-        cur = _curve_items(_measure_rows(con, pid, measure, resource), dd, evm)
+        sp = _Spread(con, [pid] + ([bid] if bid is not None else []), measure)
+        cur = _curve_items(_measure_rows(con, pid, measure, resource), dd, evm, sp)
+        spread = dict(sp.counts)  # the project's own assignments
         base = bdd = bname = None
         if bid is not None:
             bdd, bname = dd_of(bid), con.execute("SELECT proj_short_name FROM PROJECT WHERE proj_id = ?", (bid,)).fetchone()[0]
-            base = _curve_items(_measure_rows(con, bid, measure, resource), bdd or dd, _ev_map(con, bid))
+            base = _curve_items(_measure_rows(con, bid, measure, resource), bdd or dd, _ev_map(con, bid), sp)
         pts = [(u, dd_of(p), _curve_items(_measure_rows(con, p, measure, resource), dd_of(p) or dd, _ev_map(con, p)))
                for u, p in upd]
         week_day = _prefer(con, "week_start_day_num") or 1
         fin = {t: con.execute(f"SELECT COUNT(*) FROM {t} WHERE proj_id = ?" + _alive(con, t), (pid,)).fetchone()[0]
                if "proj_id" in _cols(con, t) else 0 for t in ("TRSRCFIN", "TASKFIN")}
+        spread["trsrcfin"] = fin["TRSRCFIN"]
         costb = _cost_ev(con, pid, bid, dd, resource) if measure == "cost" else None
         ev_other = 0  # WBS nodes whose stored technique is not EC_Cmp_pct (activity percent complete)
         if "ev_compute_type" in _cols(con, "PROJWBS"):
@@ -7902,7 +8079,7 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
         raise ValueError(f"{project} has no planned {measure} on {what}: use measure='cost' or resource=")
     curves = {**({"baseline": base["planned"]} if base else {}), "planned": cur["planned"], "actual": cur["actual"],
               "forecast": cur["actual"] + cur["remaining"]}
-    dates = [d for v in curves.values() for _, s, e in v for d in (s, e)]
+    dates = [d for v in curves.values() for it in v for d in it[1:3]]
     if not dates:
         raise ValueError(f"no assignment of {project} has dates")
     edges = _period_edges(lo or min(dates), hi or max(dates), period, week_day)
@@ -7927,11 +8104,11 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
     point = lambda u, d, c: {"project": u, "data_date": d and _fmt_dt(d), "earned": r2(c["earned"]),  # noqa: E731
                              "actual": r2(c["actual_qty"]), "budget": r2(c["budget"]),
                              "pct": r2(100 * c["earned"] / c["budget"]) if c["budget"] else None}
-    note = ("Approximation: quantities are spread linearly over calendar time between assignment dates; P6 spreads over "
-            "working time and resource curves. " + ("The database holds no period actuals (TRSRCFIN and TASKFIN are empty), "
-            "so" if not any(fin.values()) else "Period actuals (TRSRCFIN, TASKFIN) are not used:") + " the actual curve is "
-            "rebuilt from actual dates; only values at the data date are exact. Earned value (budget x activity % complete) "
-            "exists at a data date only: to_date, and earned_points of earlier updates (updates=). Planned uses the current "
+    note = (_spread_note(spread) + " Exact: the totals and every value at the data date; to_date keeps the planned value "
+            "of the planned dates linear over calendar time (baseline_planned, planned, variance, spi: the definition used "
+            "before 3.6.0), so it can differ a little from the period curve at the data date. Earned value (budget x "
+            "activity % complete) exists at a data date only: to_date, and earned_points of earlier updates (updates=). "
+            "Planned uses the current "
             "project planned dates, which move with the schedule for unstarted work; use a baseline for a true plan."
             + ("" if base else " No baseline: pass baseline= or set a project baseline in P6.")
             + (f" {ev_other} WBS nodes use another earned value technique than activity percent complete: earned "
@@ -7953,6 +8130,7 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
                                     key=lambda p: p["data_date"] or ""),
             "checks": {"totals_reached": reached, "clipped_actuals": cur["clipped"], "clamped_remaining": cur["clamped"],
                        "unspread_planned": r2(cur["unspread"]), "trsrcfin_rows": fin["TRSRCFIN"], "taskfin_rows": fin["TASKFIN"],
+                       "spread": spread,
                        "wbs_other_ev_technique": ev_other, "ev_techniques": evm["nodes"],
                        "ev_unknown_techniques": evm["unknown"]},
             "schedule_state": _schedule_state(con, pid), "note": note}
@@ -8578,9 +8756,184 @@ def p6_resource_summary(project: ProjectId, resource: Optional[str] = None, offs
         con.rollback()
     res.update(totals={"resources": tot["resources"], **figures(tot), "other_type_assignments": tot["other"] or 0},
                note="Quantities and costs as stored on the assignments (resource units: hours for labor and nonlabor), "
-                    "not time-phased: no loading against max units. Quantity totals cover labor and nonlabor only: "
-                    "material quantities stay in their own rows and unit. Values of the last F9 and progress update.")
+                    "not time-phased (p6_resource_loading spreads them per period against max units). Quantity totals "
+                    "cover labor and nonlabor only: material quantities stay in their own rows and unit. Values of the "
+                    "last F9 and progress update.")
     return res
+
+
+RSRC_KINDS = {"RT_Labor": "labor", "RT_Equip": "nonlabor", "RT_Mat": "material"}  # P6 resource types
+LOAD_KIND_ORDER = {"labor": 0, "nonlabor": 0, "material": 1}  # labor and nonlabor first, material apart, then others
+
+
+def _rsrc_limits(con, ids: Iterable[int]) -> dict[int, tuple[list[tuple[Optional[datetime], float]], str]]:
+    """Max units per hour of resources by effective date: {rsrc_id: (segments, source)}. RSRCRATE rows
+    (start_date, max_qty_per_hr) sorted by date (a row without a date first; the same date twice: the higher
+    rsrc_rate_id), source 'RSRCRATE'; else the RSRC column max_qty_per_hr when the schema has one (no date),
+    source 'RSRC'. A resource without either is left out (no limit)."""
+    ids = [i for i in ids if i is not None]
+    found: dict[int, dict] = {}
+    if not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    rc = _cols(con, "RSRCRATE")
+    if {"rsrc_id", "max_qty_per_hr"} <= set(rc):
+        order = ", rsrc_rate_id" if "rsrc_rate_id" in rc else ""
+        date = "start_date" if "start_date" in rc else "NULL"
+        for rid, d, m in con.execute(f"SELECT rsrc_id, {date}, max_qty_per_hr FROM RSRCRATE WHERE rsrc_id IN ({marks})"
+                                     + _alive(con, "RSRCRATE") + f" AND max_qty_per_hr IS NOT NULL ORDER BY rsrc_id{order}",
+                                     ids):
+            found.setdefault(rid, {})[_db_dt(d)] = float(m)
+    out = {rid: (sorted(segs.items(), key=lambda x: (x[0] is not None, x[0] or datetime.min)), "RSRCRATE")
+           for rid, segs in found.items()}
+    if "max_qty_per_hr" in _cols(con, "RSRC"):
+        for rid, m in con.execute(f"SELECT rsrc_id, max_qty_per_hr FROM RSRC WHERE rsrc_id IN ({marks})"
+                                  " AND max_qty_per_hr IS NOT NULL" + _alive(con, "RSRC"), ids):
+            out.setdefault(rid, ([(None, float(m))], "RSRC"))
+    return out
+
+
+def _available(cal: _Cal, segs: Sequence[tuple[Optional[datetime], float]], a: datetime, b: datetime) -> float:
+    """Units a resource can give from a to b: working hours of its calendar x max units per hour, cut at each
+    effective date of segs (_rsrc_limits; the first rate also applies before its date)."""
+    tot = 0.0
+    for k, (_, m) in enumerate(segs):
+        lo = a if k == 0 else max(a, segs[k][0])
+        hi = b if k + 1 == len(segs) else min(b, segs[k + 1][0])
+        if hi > lo:
+            tot += cal.work_hours(lo, hi) * m
+    return tot
+
+
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+def p6_resource_loading(project: ProjectId, resource: Optional[str] = None, role: Optional[str] = None,
+                        period: Period = "month", from_date: Optional[DateStr] = None, to_date: Optional[DateStr] = None,
+                        offset: Offset = 0, limit: Limit = 100) -> dict:
+    """Time-phased resource loading of a project, one page: {total, offset, returned, next_offset, rows,
+    periods, resources, counts, data_date, schedule_state, note}. One row per resource and month or week
+    (period=), ordered by resource (labor and nonlabor first, then material, each by Resource ID) then
+    period start, from the resource's first to its last loaded period: budget (budgeted units on the
+    planned dates), actual (up to the data date; null for periods after it), remaining (from the remaining
+    dates), load (actual + remaining), available (working hours of the resource's calendar in the period x
+    its max units per hour by effective date, RSRCRATE), load_pct, over (load above available) and over_by.
+    Quantities are spread over the working time of each assignment's calendar and on its resource curve,
+    as p6_progress_curve. resources: per resource kind, unit, calendar, max units per hour at the data date,
+    totals (budget, actual, remaining, at completion: the quantities of p6_resource_summary), peak period
+    and over-allocated periods. Material quantities are in their own unit and not compared with a limit.
+    resource= one Resource ID, role= the assignments of one Role ID; from_date / to_date (YYYY-MM-DD) trim
+    the periods. counts: over-allocated periods and resources over (labor and nonlabor), resources without
+    a max units limit."""
+    if period not in get_args(Period):
+        raise ValueError(f"period must be one of {list(get_args(Period))}")
+    lo = _parse_dt(from_date, "from_date")[0] if from_date else None
+    hi = _parse_dt(to_date, "to_date")[0] if to_date else None
+    if lo and hi and hi < lo:
+        raise ValueError("to_date is before from_date")
+    offset, limit = _check_page(offset, limit)
+    con = _connect()
+    pid = _project_id(con, project)
+    if resource and not con.execute("SELECT 1 FROM RSRC WHERE rsrc_short_name = ?" + _alive(con, "RSRC"),
+                                    (resource,)).fetchone():
+        raise ValueError(f"Resource not found: {resource}")
+    if role is not None and not (_cols(con, "ROLES") and con.execute(
+            "SELECT 1 FROM ROLES WHERE role_short_name = ?" + _alive(con, "ROLES"), (role,)).fetchone()):
+        raise ValueError(f"Role not found: {role}")
+    con.execute("BEGIN")  # assignments, calendars, curves, period actuals and limits from one snapshot
+    try:
+        dd = (_db_dt(con.execute("SELECT last_recalc_date FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()[0])
+              if "last_recalc_date" in _cols(con, "PROJECT") else None)
+        if dd is None:
+            raise ValueError(f"{project} has no data date (PROJECT.last_recalc_date)")
+        rows = _measure_rows(con, pid, "units", resource, every_type=True, role=role)
+        sp = _Spread(con, [pid], "units")
+        rcols = _cols(con, "RSRC")
+        unit_sql = ("(SELECT u.unit_abbrev FROM UMEASURE u WHERE u.unit_id = r.unit_id" + _alive(con, "UMEASURE", "u")
+                    + ")") if {"unit_id", "unit_abbrev"} <= _cols(con, "UMEASURE") and "unit_id" in rcols else "NULL"
+        ids = sorted({r["rsrc_id"] for r in rows if r["rsrc_id"] is not None})
+        info = {x["rsrc_id"]: x for x in con.execute(
+            f"SELECT r.rsrc_id, r.rsrc_short_name, r.rsrc_name, r.rsrc_type, {unit_sql} AS unit, "
+            + ("r.clndr_id" if "clndr_id" in rcols else "NULL") + " AS clndr_id FROM RSRC r WHERE r.rsrc_id IN ("
+            + ",".join("?" * len(ids)) + ")", ids)} if ids else {}
+        limits = _rsrc_limits(con, ids)
+        week_day = _prefer(con, "week_start_day_num") or 1
+        fin_rows = (con.execute("SELECT COUNT(*) FROM TRSRCFIN WHERE proj_id = ?" + _alive(con, "TRSRCFIN"), (pid,))
+                    .fetchone()[0] if "proj_id" in _cols(con, "TRSRCFIN") else 0)
+    finally:
+        con.rollback()
+    groups: dict[Optional[int], list] = {}
+    for r in rows:
+        groups.setdefault(r["rsrc_id"], []).append(r)
+    items = {rid: _curve_items(g, dd, None, sp) for rid, g in groups.items()}
+    dates = [d for c in items.values() for k in ("planned", "actual", "remaining") for it in c[k] for d in it[1:3]]
+    edges = _period_edges(lo or min(dates), hi or max(dates), period, week_day) if dates else []  # none: no assignment
+    r2 = lambda v: None if v is None else round(v, 2)  # noqa: E731
+
+    def meta(rid: Optional[int]) -> dict:
+        x = info.get(rid)
+        typ = (x and x["rsrc_type"]) or groups[rid][0]["rsrc_type"]
+        kind = RSRC_KINDS.get(typ, "other")
+        return {"rsrc_id": rid, "resource": x["rsrc_short_name"] if x else "(no resource)",
+                "name": x["rsrc_name"] if x else None, "type": typ, "kind": kind,
+                "unit": (x["unit"] if x else None) or ("h" if kind in ("labor", "nonlabor") else None),
+                "cal": sp.cals.get(x["clndr_id"]) if x and x["clndr_id"] is not None else None}
+    res = sorted((meta(rid) for rid in groups), key=lambda m: (LOAD_KIND_ORDER.get(m["kind"], 2), m["rsrc_id"] is None,
+                                                               m["resource"], m["rsrc_id"] or 0))
+    out_rows, resources, no_limit = [], [], []
+    over_periods = resources_over = 0
+    for m in res:
+        rid, c, cal = m["rsrc_id"], items[m["rsrc_id"]], m["cal"]
+        cums = {k: _cum(c[k], edges) for k in ("planned", "actual", "remaining")}
+        segs, src = limits.get(rid, (None, None)) if m["kind"] in ("labor", "nonlabor") else (None, None)
+        cap = cal is not None and not cal.error and bool(segs)
+        if m["kind"] in ("labor", "nonlabor") and not cap:
+            no_limit.append(m["resource"])
+        per = [{k: cums[k][i + 1] - cums[k][i] for k in cums} for i in range(max(0, len(edges) - 1))]
+        used = [i for i, p in enumerate(per) if any(abs(v) > 1e-9 for v in p.values())]
+        mine, peak, n_over = [], None, 0
+        for i in range(used[0], used[-1] + 1) if used else ():
+            a, b, p = edges[i], edges[i + 1], per[i]
+            act = p["actual"] if a <= dd else None
+            load = (act or 0.0) + p["remaining"]
+            avail = _available(cal, segs, a, b) if cap else None
+            over = None if avail is None else r2(load) > r2(avail)
+            n_over += bool(over)
+            row = {"resource": m["resource"], "name": m["name"], "kind": m["kind"], "unit": m["unit"],
+                   "period": f"{a:%Y-%m}" if period == "month" else f"{a:%Y-%m-%d}", "start": f"{a:%Y-%m-%d}",
+                   "end": f"{b:%Y-%m-%d}", "budget": r2(p["planned"]), "actual": r2(act), "remaining": r2(p["remaining"]),
+                   "load": r2(load), "available": r2(avail),
+                   "load_pct": r2(100 * load / avail) if avail else None, "over": over,
+                   "over_by": r2(load - avail) if over else (None if over is None else 0.0)}
+            mine.append(row)
+            if peak is None or load > peak["load"] + 1e-9:
+                peak = {"period": row["period"], "load": load, "available": row["available"], "load_pct": row["load_pct"]}
+        out_rows += mine
+        over_periods += n_over
+        resources_over += n_over > 0
+        now = next((mq for d, mq in reversed(segs) if d is None or d <= dd), segs[0][1]) if segs else None
+        resources.append({
+            "resource": m["resource"], "name": m["name"], "type": m["type"], "kind": m["kind"], "unit": m["unit"],
+            "calendar": cal.name if cal else None, "max_units_per_hour": now,
+            "limit_source": src if cap else None, "assignments": len(groups[rid]), "budget": r2(c["budget"]), "actual": r2(c["actual_qty"]),
+            "remaining": r2(c["remain_qty"]), "at_completion": r2(c["actual_qty"] + c["remain_qty"]),
+            "unspread_budget": r2(c["unspread"]), "periods": len(mine), "over_periods": n_over if cap else None,
+            "peak": peak and {**peak, "load": r2(peak["load"])}})
+    page = _slice(out_rows, offset, limit)
+    page.update(
+        project=project, data_date=_fmt_dt(dd), period=period,
+        periods=[{"period": f"{a:%Y-%m}" if period == "month" else f"{a:%Y-%m-%d}", "start": f"{a:%Y-%m-%d}",
+                  "end": f"{b:%Y-%m-%d}"} for a, b in zip(edges, edges[1:])],
+        resources=resources,
+        counts={"resources": len(resources), "over_allocated_periods": over_periods, "resources_over": resources_over,
+                "material_resources": sum(m["kind"] == "material" for m in res), "no_limit": no_limit,
+                "spread": {**sp.counts, "trsrcfin": fin_rows}},
+        schedule_state=_schedule_state(con, pid),
+        note=_spread_note({**sp.counts, "trsrcfin": fin_rows}) + " Available = working hours of the resource's calendar in "
+        "the period x its max units per hour (RSRCRATE by effective date, the first rate also before its date); shift "
+        "calendars and leveling are not applied. Over-allocated = actual + remaining above available, both rounded to "
+        "2 decimals. Labor and nonlabor quantities are hours; material quantities are in their own unit and have no "
+        "limit here. Totals per resource are the stored assignment quantities (p6_resource_summary); with "
+        "from_date / to_date the rows cover only those periods. Values of the last F9 and progress update.")
+    return page
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})

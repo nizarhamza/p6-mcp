@@ -7,6 +7,25 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ### Added
 
+- `p6_resource_loading`: time-phased units per resource and month or week (labor and nonlabor in hours; material in
+  its own unit, listed after them), with budget on the planned dates, actual up to the data date and remaining from
+  the remaining dates, against what the resource can give in the period: working hours of its calendar x its max
+  units per hour by effective date (RSRCRATE). Rows flag over-allocated periods (actual + remaining above the
+  limit); `resources` gives each resource's totals (the quantities of `p6_resource_summary`), peak period and
+  over-allocated periods; `counts` the over-allocated periods, the resources over and the resources without a
+  limit. `resource=`, `role=`, `from_date` / `to_date`. Read only, also for remote clients.
+
+### Changed
+
+- `p6_progress_curve` periods are spread over working time: each assignment over its calendar (the resource's
+  calendar for a resource dependent activity, else the activity's), on the assignment's resource curve when it has
+  one (P6's 21 point curves of RSRCCURV), and with the stored period actuals (TRSRCFIN) placed in their financial
+  periods when P6 stored them. Values at the data date do not change (`to_date`, `measure`, `earned_points`,
+  `p6_project_summary`, the dashboard cards): `to_date` keeps the planned value of the planned dates linear over
+  calendar time, as before. On two real projects the cumulative curve moves by at most 0.8 point of the budget
+  (monthly at most 0.5). `checks.spread` counts the spans spread over calendar time (no working time on their
+  calendar), the curves applied or not found and the assignments with period actuals; the note says what is still
+  approximate. The dashboard S-curve follows.
 - Cost earned value at the data date: `p6_project_summary` returns a `cost` block beside the units figures, and
   `p6_progress_curve(measure='cost')` the same block as `to_date.cost`. It follows P6's earned value fields: BAC
   (budgeted cost of every assignment, labor, nonlabor and material, plus expenses), PV (the baseline's planned cost
