@@ -14,7 +14,7 @@ from typing import Any, Optional, Sequence, get_args
 from p6mcp.core import state as _state
 from p6mcp.core.constants import REL_TYPES_REV
 from p6mcp.registry import Removable, XerTable
-from p6mcp.core.db import _alive, _cols, _ids_sql, _insert, _next_key, _now_str, _project_id, _stamp_cols
+from p6mcp.core.db import _alive, _cols, _ids_sql, _insert, _next_key, _now_str, _prefer, _project_id, _stamp_cols
 from p6mcp.core.props import _blob_text, _project_row, SCHED_XER_COLS, _xer_project, _xer_sched_export
 from p6mcp.core.wbs_codes import _guid
 
@@ -182,14 +182,6 @@ def _xer_only(x: dict, xpid) -> dict:
         kept = {r.get("actv_code_type_id") for r in out.get("ACTVTYPE", [])}
         out["ACTVCODE"] = [r for r in out["ACTVCODE"] if r.get("actv_code_type_id") in kept]
     return out
-
-
-def _prefer(con, col: str) -> Optional[int]:
-    """A PREFER setting such as task_code_len, None when this P6 version has no such column."""
-    if col not in _cols(con, "PREFER"):
-        return None
-    r = con.execute(f"SELECT {col} FROM PREFER").fetchone()
-    return int(r[0]) if r and r[0] else None
 
 
 def _xer_preflight(header: list[str], x: dict, meta: dict, xer_project: Optional[str] = None,

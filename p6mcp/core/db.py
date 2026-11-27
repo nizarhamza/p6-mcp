@@ -466,6 +466,14 @@ def _projects_of(path: str) -> dict[str, tuple]:
         con.close()
 
 
+def _prefer(con, col: str) -> Optional[int]:
+    """A PREFER setting such as task_code_len, None when this P6 version has no such column."""
+    if col not in _cols(con, "PREFER"):
+        return None
+    r = con.execute(f"SELECT {col} FROM PREFER").fetchone()
+    return int(r[0]) if r and r[0] else None
+
+
 def _insert(con, table: str, row: dict) -> None:
     row = {k: v for k, v in row.items() if k in _cols(con, table)}
     con.execute(f"INSERT INTO {table} ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",

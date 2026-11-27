@@ -227,7 +227,8 @@ def test_whatif_critical_path_test_reuses_the_engine(p6, monkeypatch, edits, com
         return out
 
     monkeypatch.setattr(s._Cpm, "__init__", load)
-    monkeypatch.setattr(s, "_cpt", spy)
+    from p6mcp.core import explain  # _dcma_memory looks _cpt up there
+    monkeypatch.setattr(explain, "_cpt", spy)
     a = whatif(p6, edits, compare_to=compare_to)["assumptions"]["dcma"]
     assert seen == [(True, True), (True, True)] and len(loads) == 1
     assert None not in (a["before"]["critical_path_test"]["pass"], a["after"]["critical_path_test"]["pass"])
