@@ -45,7 +45,8 @@ from the schedule; the model explains it. Dates and float come from P6's last sc
   raise, not proof); a CPM engine checked against P6's F9 (`p6_cpm_validate` reports the match) for what-if
   scenarios and Monte Carlo risk, run in memory and never written.
 - **Progress and reporting**: S-curves and earned value at the data date, resource and cost summaries, groups by
-  status, WBS or code, and a one-page **Excel dashboard** with native charts.
+  status, WBS or code, a one-page **Excel dashboard** with native charts and a printable **Excel look-ahead**
+  with bars by day or week.
 - **XER files**: inspect, import (new project, baseline, update), export, or analyse XER files alone in XER-only
   mode, without a P6 database or P6 installed.
 - **P6 EPPM server** (3.0): pull projects and their baselines from a live P6 EPPM server into a local working
@@ -173,7 +174,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 ## Tools
 
 <!-- tools:start -->
-65 tools: 39 read-only (11 of them in the Basic profile), 3 that write a file, 22 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
+67 tools: 40 read-only (11 of them in the Basic profile), 4 that write a file, 22 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
 
 **Projects and structure**
 
@@ -184,6 +185,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 | `p6_project_summary` | One-call overview: dates, activity counts, critical counts, % complete by units, physical and duration, baseline variance and SPI | Read | yes |
 | `p6_list_wbs` | WBS tree in P6 order with roll-ups: activities, dates, float, units % and baseline planned % | Read | yes |
 | `p6_list_calendars` | Calendars with work week, hours per day and holiday exceptions | Read |  |
+| `p6_calendar_check` | Checks the calendars a project uses: holidays one calendar works and another does not, years without holidays, stale hours per day or week, unreadable or missing calendars | Read |  |
 | `p6_list_udfs` | User defined fields (UDF columns) with how much each one is used | Read |  |
 | `p6_schedule_options` | Schedule options of a project, of an XER file, or both side by side | Read |  |
 
@@ -225,6 +227,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 | `p6_group_summary` | Activities, units and dates grouped by status, type, WBS level or activity code | Read |  |
 | `p6_resource_summary` | Units and costs per resource, and activities per status | Read |  |
 | `p6_export_dashboard` | Excel project controls dashboard: one A3 page with charts, plus detail sheets | Writes a file |  |
+| `p6_export_lookahead` | Printable Excel look-ahead: activities by WBS with a day or week bar chart, critical work in red, data date marked | Writes a file |  |
 
 **Comparison, what-if and risk**
 
@@ -321,7 +324,7 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
 
 ![Settings: tools and safety](docs/images/settings-tools.png)
 
-- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 65).
+- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 67).
 - **Writes are off by default.** With the Full profile and "Allow write operations", every write takes two calls:
   a dry run that shows the plan and returns a single-use confirmation token, then, after your explicit yes, the
   same call with that token. Deleting a project or an activity and restoring a backup also need a confirmation
@@ -492,6 +495,15 @@ Options: `baseline` (default the project baseline), `baseline_dates` (`planned` 
 `prepared_by`, `revision`, and for this export only `company` (shown in the sidebar) and `colors`
 (`"primary,accent"` in hex). Slip and variance are in working days, as P6 variance columns.
 
+**Look-ahead sheet**: "export a 3-week look-ahead of DEMO-A to D:\Reports\lookahead.xlsx" runs
+`p6_export_lookahead`: the activities `p6_lookahead` lists for the window (in progress, starting, finishing,
+spanning; completed with `include_completed`), grouped by WBS with Activity ID, name, start, finish, remaining
+duration, total float, critical and status, then a bar per activity over a day grid (up to 6 weeks, `grid="day"`
+up to 13) or a week grid: critical in red, completed in gray, milestones as a diamond, non-work days of the
+project calendar shaded, the data date marked. It prints landscape on A3, fit to the page width, with the header
+rows on every page. Options: `weeks` (default 3), `from_date`, `grid`, `critical_only`, `wbs_name_contains`,
+`code_type` / `code_value`.
+
 ## XER-only mode
 
 Under **Database > Data source**, choose **XER files only**, add one or more XER files and click **Load and
@@ -529,7 +541,7 @@ working copy (do them in P6 EPPM, then pull again). Tested against P6 EPPM 25.12
 
 **What is an MCP server for Primavera P6?**
 MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant
-65 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
+67 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
 computed from the schedule rather than guessed by the model.
 
 **Can the AI change my schedule?**
