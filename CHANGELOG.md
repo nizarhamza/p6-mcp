@@ -5,6 +5,23 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+### Added
+
+- `p6_trend`: a trend across the schedule updates of one job, one row per update ordered by data date. Give the
+  Project IDs of the updates (`projects=`), or an EPS (`eps=`: every project of that EPS and of the EPS below it,
+  baselines and templates left out). Per update: data date and last F9, scheduled finish and must finish date,
+  the finish against the must finish date, the first update, the previous update and the baseline in working days
+  of the project calendar, units % complete, baseline planned % and SPI (units) as `p6_project_summary`, critical,
+  near critical and negative float counts, total float statistics of open activities, the DCMA weighted score with
+  its failed checks and BEI as `p6_health_check` (no snapshot saved; `dcma=False` skips it), the milestones present
+  in every update (or `codes=`) with their date, slip since the previous update and variance since the first, and
+  what changed since the previous update: activities and links added and removed, durations cut (as
+  `p6_compare_projects` and `p6_update_integrity` count them). Read only, every update from its own read snapshot.
+- `p6_export_dashboard(trend=[...])`: the Project IDs of the earlier updates add a **Trend** sheet (linked from the
+  sidebar) with the per-update table, a chart of the forecast finish and must finish per data date, a chart of
+  units % complete, baseline planned % and SPI per data date, and the milestones by update; the Reports sheet
+  explains it. Without `trend=` the workbook is the same as before.
+
 ## [3.4.0] - 2026-11-27
 
 ### Added

@@ -174,7 +174,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 ## Tools
 
 <!-- tools:start -->
-67 tools: 40 read-only (11 of them in the Basic profile), 4 that write a file, 22 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
+68 tools: 41 read-only (11 of them in the Basic profile), 4 that write a file, 22 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
 
 **Projects and structure**
 
@@ -235,6 +235,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 |---|---|---|---|
 | `p6_compare_projects` | Two updates or a baseline compared activity by activity and link by link, with slip causes and float erosion | Read |  |
 | `p6_update_integrity` | Review of an update against the previous one: changes a reviewer should question | Read |  |
+| `p6_trend` | Trend across a series of updates: finish, variances, progress, SPI, critical counts, float, DCMA score, milestone slips and what changed between updates | Read |  |
 | `p6_cpm_validate` | Runs the built-in CPM engine against P6's last F9 and explains each difference: changed since the F9, bad input, an engine rule or unknown | Read |  |
 | `p6_schedule_whatif` | What-if in memory: add or remove links, change durations or constraints, see the new finish and what a reviewer would question | Read |  |
 | `p6_schedule_risk` | Monte Carlo schedule risk in memory: finish percentiles, on-time probability, criticality index | Read |  |
@@ -324,7 +325,7 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
 
 ![Settings: tools and safety](docs/images/settings-tools.png)
 
-- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 67).
+- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 68).
 - **Writes are off by default.** With the Full profile and "Allow write operations", every write takes two calls:
   a dry run that shows the plan and returns a single-use confirmation token, then, after your explicit yes, the
   same call with that token. Deleting a project or an activity and restoring a backup also need a confirmation
@@ -549,7 +550,7 @@ working copy (do them in P6 EPPM, then pull again). Tested against P6 EPPM 25.12
 
 **What is an MCP server for Primavera P6?**
 MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant
-67 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
+68 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
 computed from the schedule rather than guessed by the model.
 
 **Can the AI change my schedule?**
