@@ -101,6 +101,7 @@ Facts an assistant should get right:
 
 - `p6_update_activity`: Edits an activity: name, durations, constraint, actual dates, physical % complete (write)
 - `p6_update_activities`: Edits many activities in one all-or-nothing change (a progress update) (write)
+- `p6_add_activities`: Creates activities with their relationships in one all-or-nothing change (F9 afterwards) (write)
 - `p6_update_assignment`: Sets budgeted, actual or remaining units of one resource assignment (write)
 - `p6_update_assignments`: Sets the units of many assignments in one all-or-nothing change (write)
 - `p6_update_udf`: Sets or clears one activity UDF value (write)

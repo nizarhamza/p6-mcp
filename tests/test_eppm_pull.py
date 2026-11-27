@@ -362,7 +362,9 @@ def test_local_edits_become_pending_changes(p6, eppm_env, monkeypatch):
     # the golden database (the "server" here) never changed
     assert rows(e["golden"], "SELECT task_name FROM TASK ORDER BY task_id") == before_golden
     for tool, kw, msg in (("p6_delete_activity", {"project": "DEMO-A", "task_code": a}, "not deleted through"),
-                          ("p6_create_eps", {"name": "X"}, "not available on a P6 EPPM working copy")):
+                          ("p6_create_eps", {"name": "X"}, "not available on a P6 EPPM working copy"),
+                          ("p6_add_activities", {"project": "DEMO-A", "items": [{"task_code": "N1", "task_name": "N"}]},
+                           "not created through")):
         with pytest.raises(ValueError, match=msg):
             p6.call(tool, **kw)
     with pytest.raises(ValueError, match="1 local change"):
