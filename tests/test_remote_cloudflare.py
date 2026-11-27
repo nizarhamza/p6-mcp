@@ -454,7 +454,12 @@ console.log(JSON.stringify({ seen, status: r.status, up: r.headers.get("x-up"), 
   down: down.status, downVer: down.headers.get("x-p6mcp-relay"), rpcStatus: rpc.status, rpcBody,
   gwBody, noteStatus: note.status }));
 """, encoding="utf-8")
-    out = subprocess.run(["node", str(tmp_path / "run.mjs")], capture_output=True, text=True, timeout=60)
+    # The script makes no network call and has no wait: it runs in well under a second. A busy CI runner once took
+    # more than 60 s just to start node (the job ran at half speed), so the limit only guards against a hang.
+    try:
+        out = subprocess.run(["node", str(tmp_path / "run.mjs")], capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        pytest.fail("node did not finish in 300 s: a hung process or an overloaded machine, not a Worker result")
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout)
     assert res["seen"] == [{"url": "http://127.0.0.1:41234/mcp?a=1", "relay": "s3", "ip": "160.79.106.1",
