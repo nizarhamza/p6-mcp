@@ -45,7 +45,8 @@ def test_sql_select_reads(p6):
 
 
 def test_sql_select_timeout(p6, monkeypatch):
-    monkeypatch.setattr(p6.s, "SQL_QUERY_SECONDS", 0.3)
+    from p6mcp.tools import database  # p6_sql_select reads the limit there
+    monkeypatch.setattr(database, "SQL_QUERY_SECONDS", 0.3)
     slow = ("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 100000000) "
             "SELECT count(*) FROM n")
     with pytest.raises(ValueError, match="stopped after"):
