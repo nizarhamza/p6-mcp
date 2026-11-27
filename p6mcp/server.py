@@ -7809,7 +7809,8 @@ def _measure_rows(con, pid: int, measure: str, resource: Optional[str] = None, e
            f"{tu('remain')} AS task_remain, t.wbs_id, "
            + ("EXISTS (SELECT 1 FROM TASKRSRC c WHERE c.task_id = t.task_id AND c.curv_id IS NOT NULL"
               + _alive(con, "TASKRSRC", "c") + ")" if "curv_id" in cols else "0") + " AS has_curve, "
-           f"tr.taskrsrc_id, tr.rsrc_id, {rtype} AS rsrc_type, t.task_type, t.clndr_id AS task_clndr_id, "
+           f"tr.taskrsrc_id, tr.rsrc_id, {rtype} AS rsrc_type, {rtype} AS rsrc_kind, t.task_type, "
+           "t.clndr_id AS task_clndr_id, "
            + ("r.clndr_id" if "clndr_id" in _cols(con, "RSRC") else "NULL") + " AS rsrc_clndr_id, "
            + ("tr.curv_id" if "curv_id" in cols else "NULL") + " AS curv_id "
            "FROM TASKRSRC tr JOIN TASK t ON t.task_id = tr.task_id "
@@ -8017,7 +8018,8 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
     by the earned value technique of the activity's WBS node: activity % complete by its percent
     complete type, 0/100, 50/50, custom %, WBS milestones or resource curves), variance
     (earned - baseline planned), spi (earned / baseline planned) and spi_actual (actual / baseline
-    planned, the units-based index). updates= earlier updates of
+    planned, the units-based index); with measure='cost', to_date.cost = the cost earned value block of
+    p6_project_summary (expenses included; resource= that resource only), else null. updates= earlier updates of
     the same schedule (Project IDs): their earned and actual totals at their own data date
     (earned_points). from_date / to_date (YYYY-MM-DD) trim the periods; cumulatives stay exact.
     checks: totals reached by the last period, actuals clipped at the data date, remaining starts
@@ -8064,6 +8066,7 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
         fin = {t: con.execute(f"SELECT COUNT(*) FROM {t} WHERE proj_id = ?" + _alive(con, t), (pid,)).fetchone()[0]
                if "proj_id" in _cols(con, t) else 0 for t in ("TRSRCFIN", "TASKFIN")}
         spread["trsrcfin"] = fin["TRSRCFIN"]
+        costb = _cost_ev(con, pid, bid, dd, resource) if measure == "cost" else None
         ev_other = 0  # WBS nodes whose stored technique is not EC_Cmp_pct (activity percent complete)
         if "ev_compute_type" in _cols(con, "PROJWBS"):
             ev_other = con.execute("SELECT COUNT(*) FROM PROJWBS WHERE proj_id = ? AND ev_compute_type <> 'EC_Cmp_pct'"
@@ -8121,7 +8124,7 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
             "to_date": {"baseline_planned": r2(bp), "planned": r2(_value_at(cur["planned"], dd)), "actual": r2(act),
                         "actual_pct": r2(100 * act / cur["budget"]), "earned": r2(ev), "earned_pct": r2(100 * ev / cur["budget"]),
                         "variance": r2(None if bp is None else ev - bp), "spi": round(ev / bp, 4) if bp else None,
-                        "spi_actual": round(act / bp, 4) if bp else None},
+                        "spi_actual": round(act / bp, 4) if bp else None, "cost": costb},
             "periods": periods, "period_count": len(periods),
             "earned_points": sorted([point(project, dd, cur)] + [point(u, d, c) for u, d, c in pts],
                                     key=lambda p: p["data_date"] or ""),
@@ -8268,6 +8271,178 @@ def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, base
     return res
 
 
+# Cost earned value at the data date (p6_project_summary cost, p6_progress_curve to_date.cost).
+COST_SOURCES = ("labor", "nonlabor", "material", "other", "expenses")
+COST_SOURCE_OF = {"RT_Labor": "labor", "RT_Equip": "nonlabor", "RT_Mat": "material"}
+# P6 technique for computing estimate to complete (PROJWBS / PREFER ev_etc_compute_type) -> name. EE_Rem_hr and
+# EE_PF_cpi are stored by P6 25.12; the tokens of PF = 1, PF = 1 / (CPI x SPI) and PF = custom are not known: a
+# token naming spi, user (or custom) or ending in 1 is read as that technique (_etc_technique).
+ETC_TECHNIQUES = {"EE_Rem_hr": "remaining_cost", "EE_PF_cpi": "pf_cpi"}
+ETC_FORMULAS = {"remaining_cost": "AC + remaining cost (ETC = remaining cost for activity)",
+                "pf_1": "AC + (BAC - EV) (PF = 1)", "pf_cpi": "AC + (BAC - EV) / CPI = BAC / CPI (PF = 1 / CPI)",
+                "pf_cpi_spi": "AC + (BAC - EV) / (CPI x SPI) (PF = 1 / (CPI x SPI))",
+                "pf_custom": "AC + PF x (BAC - EV) (PF = the custom value)"}
+
+
+def _etc_technique(tok: Optional[str]) -> Optional[str]:
+    """Estimate to complete technique of an ev_etc_compute_type token, None when unknown."""
+    if not tok:
+        return None
+    if tok in ETC_TECHNIQUES:
+        return ETC_TECHNIQUES[tok]
+    t = tok.lower()
+    if "spi" in t:
+        return "pf_cpi_spi"
+    if "cpi" in t:
+        return "pf_cpi"
+    if re.search(r"usr|user|cust", t):
+        return "pf_custom"
+    if re.search(r"pf_?1$", t):
+        return "pf_1"
+    return None
+
+
+def _etc_setting(con, pid: int) -> dict:
+    """Estimate to complete technique of a project: the project WBS node's ev_etc_compute_type /
+    ev_etc_user_value, else PREFER's (the admin default), else ETC = remaining cost. other_nodes =
+    WBS nodes below whose own stored technique differs (P6 applies each node's; the project figure uses
+    the project's)."""
+    wc, pc = _cols(con, "PROJWBS"), _cols(con, "PREFER")
+    col = lambda cs, c: c if c in cs else "NULL"  # noqa: E731
+    rows = con.execute(f"SELECT proj_node_flag, {col(wc, 'ev_etc_compute_type')}, {col(wc, 'ev_etc_user_value')} "
+                       "FROM PROJWBS WHERE proj_id = ?" + _alive(con, "PROJWBS"), (pid,)).fetchall()
+    pref = (con.execute(f"SELECT {col(pc, 'ev_etc_compute_type')}, {col(pc, 'ev_etc_user_value')} FROM PREFER")
+            .fetchone() if pc else None) or (None, None)
+    node = next((r for r in rows if r[0] == "Y"), None)
+    if node and node[1]:
+        tok, pf, src = node[1], node[2], "project WBS node (PROJWBS.ev_etc_compute_type)"
+    elif pref[0]:
+        tok, pf, src = pref[0], pref[1], "admin preferences (PREFER.ev_etc_compute_type)"
+    else:
+        tok, pf, src = None, None, "default (no technique stored)"
+    tech = _etc_technique(tok)
+    return {"token": tok, "technique": tech or "remaining_cost", "pf": None if pf is None else float(pf), "source": src,
+            "unknown": tok if tok and tech is None else None,
+            "other_nodes": sum(1 for r in rows if r[0] != "Y" and r[1] and r[1] != tok)}
+
+
+def _expense_rows(con, pid: int) -> list[dict]:
+    """Expenses (PROJCOST) of a project's activities as _measure_rows rows: target / actual / remain =
+    budgeted / actual / remaining cost, planned dates of the activity by accrual type (CL_Start at its
+    planned start, CL_End at its planned finish, else spread over them) and what _ev_pct needs of the
+    activity. Empty when this P6 version has no PROJCOST costs."""
+    ec, tc, rc = _cols(con, "PROJCOST"), _cols(con, "TASK"), _cols(con, "TASKRSRC")
+    if not {"task_id", "target_cost"} <= set(ec):
+        return []
+    c = lambda x: f"COALESCE(e.{x}, 0)" if x in ec else "0"  # noqa: E731
+    tu = lambda kind: " + ".join(f"COALESCE(t.{kind}_{x}_qty, 0)" for x in ("work", "equip")  # noqa: E731
+                                 if f"{kind}_{x}_qty" in tc) or "0"
+    curve = ("EXISTS (SELECT 1 FROM TASKRSRC a WHERE a.task_id = t.task_id AND a.curv_id IS NOT NULL"
+             + _alive(con, "TASKRSRC", "a") + ")" if "curv_id" in rc else "0")
+    q = (f"SELECT {c('target_cost')} AS target, {c('act_cost')} AS actual, {c('remain_cost')} AS remain, "
+         + ("e.cost_load_type" if "cost_load_type" in ec else "NULL") + " AS load_type, t.target_start_date AS ts, "
+         "t.target_end_date AS te, t.phys_complete_pct, t.status_code, t.target_drtn_hr_cnt, t.remain_drtn_hr_cnt, "
+         + ("t.complete_pct_type" if "complete_pct_type" in tc else "NULL") + f" AS pct_type, {tu('act')} AS task_act, "
+         f"{tu('remain')} AS task_remain, t.wbs_id, t.clndr_id, {curve} AS has_curve FROM PROJCOST e "
+         "JOIN TASK t ON t.task_id = e.task_id WHERE t.proj_id = ?" + _alive(con, "PROJCOST", "e") + _alive(con, "TASK", "t")
+         + " ORDER BY " + ("e.cost_item_id" if "cost_item_id" in ec else "e.rowid"))
+    out = []
+    for r in con.execute(q, (pid,)):
+        d = _dict(r)
+        s, e = {"CL_Start": (d["ts"], d["ts"]), "CL_End": (d["te"], d["te"])}.get(d.pop("load_type"), (d["ts"], d["te"]))
+        del d["ts"], d["te"]
+        d.update(target_start_date=s, target_end_date=e, act_start_date=None, act_end_date=None, restart_date=None,
+                 reend_date=None, rsrc_kind="expense")
+        out.append(d)
+    return out
+
+
+def _cost_ev(con, pid: int, bid: Optional[int], dd: Optional[datetime], resource: Optional[str] = None) -> dict:
+    """Cost earned value of a project at data date dd (run inside the caller's snapshot), P6's earned value
+    fields: BAC = budgeted cost of every assignment (labor, nonlabor, material) plus expenses; PV = the
+    baseline's planned cost at dd (its budgeted costs over its planned dates, spread as p6_progress_curve);
+    EV = budgeted cost x the earned % of each activity (_ev_pct under its WBS node's technique); AC = actual
+    costs (regular + overtime) plus actual expense costs; CV, SV, CPI, SPI; ETC / EAC by the project's
+    estimate to complete technique (_etc_setting) and the standard variants; VAC; TCPI. resource= one
+    resource's assignments, expenses left out. Every key is present; figures are None without costs, PV, SV,
+    SPI (and what needs SPI) None without a baseline or data date."""
+    t = dd or datetime.max
+
+    def items(p: int) -> dict:
+        ev = _ev_map(con, p)
+        g: dict[str, list] = {k: [] for k in COST_SOURCES}
+        for r in _measure_rows(con, p, "cost", resource):
+            g[COST_SOURCE_OF.get(r["rsrc_kind"], "other")].append(r)
+        if resource is None:
+            g["expenses"] = _expense_rows(con, p)
+        return {k: _curve_items(v, t, ev) for k, v in g.items()}
+    cur = items(pid)
+    base = items(bid) if bid is not None else None
+    etc = _etc_setting(con, pid)
+    cr = con.execute("SELECT curr_short_name FROM CURRTYPE WHERE base_exch_rate = 1" + _alive(con, "CURRTYPE")
+                     ).fetchone() if {"curr_short_name", "base_exch_rate"} <= set(_cols(con, "CURRTYPE")) else None
+    r2, r4 = (lambda v: None if v is None else round(v, 2) + 0.0), (lambda v: None if v is None else round(v, 4) + 0.0)  # noqa: E731
+    pv_of = lambda k: _value_at(base[k]["planned"], dd) if base and dd else None  # noqa: E731
+    by = {k: {"bac": r2(c["budget"]), "pv": r2(pv_of(k)), "ev": r2(c["earned"]), "ac": r2(c["actual_qty"]),
+              "remaining": r2(c["remain_qty"])} for k, c in cur.items()}
+    bac, ev, ac, rem = (sum(c[x] for c in cur.values()) for x in ("budget", "earned", "actual_qty", "remain_qty"))
+    pv = sum(pv_of(k) for k in COST_SOURCES) if base and dd else None
+    has = any(abs(v) > 1e-9 for v in (bac, ac, rem))
+    cpi = ev / ac if ac else None
+    spi = ev / pv if pv else None
+    pf = etc["pf"]
+    variants = {"ac_plus_remaining": ac + rem, "ac_plus_bac_minus_ev": ac + bac - ev,
+                "bac_over_cpi": bac / cpi if cpi else None,
+                "ac_plus_bac_minus_ev_over_cpi_spi": ac + (bac - ev) / (cpi * spi) if cpi and spi else None,
+                "ac_plus_pf_x_bac_minus_ev": None if pf is None else ac + pf * (bac - ev)}
+    eac = {"remaining_cost": variants["ac_plus_remaining"], "pf_1": variants["ac_plus_bac_minus_ev"],
+           "pf_cpi": variants["bac_over_cpi"], "pf_cpi_spi": variants["ac_plus_bac_minus_ev_over_cpi_spi"],
+           "pf_custom": variants["ac_plus_pf_x_bac_minus_ev"]}[etc["technique"]]
+    fig = {"bac": bac, "pv": pv, "ev": ev, "ac": ac, "remaining": rem, "cv": ev - ac, "sv": None if pv is None else ev - pv,
+           "etc": None if eac is None else eac - ac, "eac": eac, "vac": None if eac is None else bac - eac}
+    out: dict[str, Any] = {"available": has, "currency": cr and cr[0],
+                           **{k: r2(v) if has else None for k, v in fig.items()},
+                           "cpi": r4(cpi) if has else None, "spi": r4(spi) if has else None,
+                           "tcpi": r4((bac - ev) / (eac - ac)) if has and eac is not None and abs(eac - ac) > 1e-9 else None,
+                           "tcpi_bac": r4((bac - ev) / (bac - ac)) if has and abs(bac - ac) > 1e-9 else None,
+                           "earned_pct": r2(100 * ev / bac) if has and bac else None,
+                           "planned_pct": r2(100 * pv / bac) if has and bac and pv is not None else None,
+                           "baseline_bac": r2(sum(c["budget"] for c in base.values())) if base else None,
+                           "eac_method": {"technique": etc["technique"], "token": etc["token"], "pf": etc["pf"],
+                                          "source": etc["source"], "formula": ETC_FORMULAS[etc["technique"]],
+                                          "wbs_nodes_other_technique": etc["other_nodes"]},
+                           "eac_variants": {k: r2(v) if has else None for k, v in variants.items()},
+                           "by_source": by, "scope": f"resource {resource}, expenses left out" if resource else
+                           "every assignment (labor, nonlabor, material) plus expenses (PROJCOST)",
+                           "formulas": {"bac": "budgeted cost of the assignments + budgeted expense cost",
+                                        "pv": "baseline budgeted costs spread linearly over the baseline planned dates, "
+                                              "at the data date", "ev": "sum(budgeted cost x earned % of the activity's "
+                                                                        "WBS technique)",
+                                        "ac": "actual regular + overtime cost of the assignments + actual expense cost",
+                                        "cv": "EV - AC", "sv": "EV - PV", "cpi": "EV / AC", "spi": "EV / PV",
+                                        "eac": ETC_FORMULAS[etc["technique"]], "etc": "EAC - AC", "vac": "BAC - EAC",
+                                        "tcpi": "(BAC - EV) / (EAC - AC)", "tcpi_bac": "(BAC - EV) / (BAC - AC)"}}
+    notes = []
+    if not has:
+        notes.append("No costs: the assignments and expenses of this project carry no budgeted, actual or "
+                     "remaining cost, so every cost figure is null.")
+    if bid is None:
+        notes.append("No baseline: PV, SV and SPI are null.")
+    elif dd is None:
+        notes.append("No data date: PV, SV and SPI are null.")
+    if etc["unknown"]:
+        notes.append(f"Unknown estimate to complete technique {etc['unknown']}: EAC uses AC + remaining cost.")
+    if eac is None and has:
+        notes.append("EAC is null: its technique needs " + ("a CPI (no actual or earned cost)"
+                                                             if etc["technique"] != "pf_custom" else "a PF value")
+                     + ("" if etc["technique"] != "pf_cpi_spi" else " and an SPI (baseline planned cost)") + ".")
+    if etc["other_nodes"]:
+        notes.append(f"{etc['other_nodes']} WBS nodes store another estimate to complete technique than the project: "
+                     "EAC applies the project's at project level.")
+    out["note"] = " ".join(notes) or None
+    return out
+
+
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None) -> dict:
     """One-call overview of a project (values of the last F9): project (name, calendar), dates (data
@@ -8285,8 +8460,13 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
     baseline; finish variance = scheduled finish minus the baseline's scheduled finish in
     calendar days and in working days of the project calendar, baseline planned units % at the
     data date and spi_units = earned units / baseline planned units, earned value and linear spread
-    as p6_progress_curve), counts (WBS, assignments, resources, calendars, code assignments) and
-    schedule_state."""
+    as p6_progress_curve), cost (earned value in cost at the data date, P6's earned value fields:
+    BAC = budgeted cost of every assignment plus expenses, PV = baseline planned cost at the data date,
+    EV = budgeted cost x earned % of each activity's WBS technique, AC = actual cost plus actual
+    expenses, CV, SV, CPI, SPI, ETC, EAC by the project's estimate to complete technique (eac_method)
+    with the standard variants in eac_variants, VAC, TCPI; by_source: labor, nonlabor, material, other,
+    expenses; every key present, null without costs, PV, SV and SPI null without a baseline), counts
+    (WBS, assignments, resources, calendars, code assignments) and schedule_state."""
     con = _connect()
     pid = _project_id(con, project)
     con.execute("BEGIN")  # settings and every figure from one snapshot
@@ -8351,6 +8531,7 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
                   "items": _curve_items(_measure_rows(con, bid, "units"), dd, _ev_map(con, bid)) if dd else None,
                   "cur": _curve_items(_measure_rows(con, pid, "units"), dd, _ev_map(con, pid)) if dd else None}
         names = (name_of(pbid), name_of(bid))
+        cost = _cost_ev(con, pid, bid, dd)
     finally:
         con.rollback()
     r2, r4 = (lambda v: None if v is None else round(v, 2)), (lambda v: None if v is None else round(v, 4))  # noqa: E731
@@ -8400,7 +8581,7 @@ def p6_project_summary(project: ProjectId, baseline: Optional[ProjectId] = None)
                                               "activities_completed": "completed / all activities",
                                               "units_vs_physical_mismatch": "activities with units where |physical % - "
                                                                             "100 x actual / (actual + remaining)| > 0.01"}},
-            "baseline": base, "counts": counts, "schedule_state": _schedule_state(con, pid), "notes": notes}
+            "baseline": base, "cost": cost, "counts": counts, "schedule_state": _schedule_state(con, pid), "notes": notes}
 
 
 def _float_edges(edges_days: Optional[Sequence[float]]) -> tuple[list[float], list[str]]:
