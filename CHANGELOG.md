@@ -26,6 +26,17 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   3,120-activity update): the existing rows are matched from keys read once per table instead of one query per row,
   and the updates are sent in batches. Counts, rows, soft-deleted rows coming back, the edit log and the result are
   unchanged.
+- Earned value (`p6_progress_curve` to date and earned points, `p6_project_summary` `spi_units`) applies each WBS
+  node's own technique: activity percent complete, 0/100, 50/50, custom percent complete, WBS milestones percent
+  complete and activity percent complete using resource curves (a node without one takes the project node's, then
+  the admin default). Before, every node counted as activity percent complete. The rules follow the P6
+  documentation; no P6 earned value figure was available to check them. `checks` adds `ev_techniques` (WBS nodes
+  per technique) and `ev_unknown_techniques`. Projects whose WBS all use activity percent complete get the same
+  values as before.
+- `p6_update_assignment` and `p6_update_assignments` say which P6 summary rows (SUMTASK, SUMTASKSPREAD,
+  SUMTRSRC) the change leaves out of date (`summaries_stale`, plus a plan line) and that Tools > Summarize in P6
+  refreshes them. The summary tables are still never written: they are time-phased spreads that could not be
+  rebuilt to match P6.
 
 ### Fixed
 
