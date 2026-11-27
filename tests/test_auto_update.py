@@ -249,6 +249,50 @@ def test_settings_app_exits_during_setup_and_opens_after(monkeypatch, tmp_path):
     assert runtime.take_window_request() and not runtime.take_window_request()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows")
+def test_wait_for_setup_end():
+    import ctypes
+    import threading
+    from p6mcp import runtime
+    name = f"P6MCP-Setup-wait-{os.getpid()}"
+    assert runtime.wait_for_setup_end(0.1, 0.01, name)  # no setup: at once
+    k32 = ctypes.windll.kernel32
+    h = k32.CreateMutexW(None, False, name)
+    ender = threading.Timer(0.2, k32.CloseHandle, (h,))
+    try:
+        assert not runtime.wait_for_setup_end(0.1, 0.02, name)  # still held: gives up
+        ender.start()  # setup ends while the app waits
+        assert runtime.wait_for_setup_end(5, 0.05, name)
+    finally:
+        if not ender.is_alive() and not ender.finished.is_set():
+            k32.CloseHandle(h)  # the timer never ran
+        ender.join()
+
+
+def test_settings_app_started_by_setup_waits_for_it(monkeypatch, tmp_path):
+    """setup's own [Run] entries start the app while setup still holds its mutex: --after-setup waits instead of
+    exiting (an automatic update used to leave no tray app until the next sign-in)."""
+    from p6mcp import runtime
+    from p6mcp.settings_app.__main__ import main
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(runtime, "setup_running", lambda name=runtime.SETUP_MUTEX: True)
+    waited = []
+    monkeypatch.setattr(runtime, "wait_for_setup_end", lambda *a, **k: waited.append(1) or False)
+    assert main(["p6mcp-settings", "--minimized"]) == 0 and not waited  # a start by Windows: no wait
+    assert main(["p6mcp-settings", "--minimized", "--after-setup"]) == 0 and waited == [1]
+    assert not runtime.take_window_request()
+    assert main(["p6mcp-settings", "--after-setup"]) == 0  # setup never ended: the window opens next start
+    assert runtime.take_window_request()
+
+
+def test_installer_starts_the_app_after_setup():
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "packaging", "installer.iss")
+    with open(path, encoding="utf-8") as fh:
+        iss = fh.read()
+    runs = [ln for ln in iss.splitlines() if ln.startswith('Filename: "{app}\\p6mcp-settings.exe"')]
+    assert runs and all("--after-setup" in ln for ln in runs)
+
+
 def test_server_refuses_to_start_during_setup(monkeypatch, capsys):
     import p6mcp.__main__ as entry
     from p6mcp import runtime

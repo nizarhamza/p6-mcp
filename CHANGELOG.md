@@ -5,6 +5,14 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+### Fixed
+
+- After an automatic update the notification area app did not start again, so remote access stayed off until the
+  next Windows sign-in: setup starts it while it still holds its mutex, and the app exited at once. Setup now starts
+  it with `--after-setup`, which waits for setup to end (also for "Open Settings" on the last setup page).
+- The Windows startup entry is put back when the app starts, if the settings ask for one and it is missing or names
+  another command (removed by another program, a moved install). It is never removed there: only Save does.
+
 ## [3.3.0] - 2026-11-26
 
 ### Added

@@ -37,6 +37,30 @@ def test_sync(key):
     assert startup.sync({"run_at_startup": False}, key) is None and startup.current(key) is None
 
 
+def test_heal(key):
+    on = {"run_at_startup": True, "start_minimized": True}
+    assert startup.heal({"run_at_startup": False}, key) is None and startup.current(key) is None
+    assert startup.heal(on, key) == startup.command(True) and startup.current(key) == startup.command(True)
+    assert startup.heal(on, key) is None  # already right: nothing written
+    startup.enable(False, key)  # another command (a moved install, no --minimized)
+    assert startup.heal(on, key) == startup.command(True)
+    assert startup.heal({"run_at_startup": False}, key) is None and startup.current(key)  # never removes
+
+
+def test_heal_only_in_the_installed_app(monkeypatch):
+    from p6mcp import config
+    from p6mcp.settings_app import __main__ as entry
+    calls = []
+    monkeypatch.setattr(startup, "heal", lambda data, key=startup.RUN_KEY: calls.append(data))
+    monkeypatch.setattr(config, "read_file", lambda *a, **k: ({"run_at_startup": True}, None))
+    monkeypatch.delattr(entry.sys, "frozen", raising=False)
+    entry._heal_startup()
+    assert calls == []  # a run from source never registers its Python
+    monkeypatch.setattr(entry.sys, "frozen", True, raising=False)
+    entry._heal_startup()
+    assert calls == [{"run_at_startup": True}]
+
+
 def test_command(monkeypatch):
     monkeypatch.setattr(startup.sys, "executable", r"C:\py\python.exe")
     assert startup.command() == r'"C:\py\pythonw.exe" -m p6mcp.settings_app --minimized'

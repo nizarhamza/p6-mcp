@@ -99,9 +99,10 @@ Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register vscode"; Descr
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register vscode_insiders"; Description: "{cm:RegisterWith,VS Code Insiders}"; Flags: postinstall runhidden; Check: ClientDetected('vscode_insiders') and not IsAutoUpdate
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register lmstudio"; Description: "{cm:RegisterWith,LM Studio}"; Flags: postinstall runhidden; Check: ClientDetected('lmstudio') and not IsAutoUpdate
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register cline"; Description: "{cm:RegisterWith,Cline}"; Flags: postinstall runhidden; Check: ClientDetected('cline') and not IsAutoUpdate
-Filename: "{app}\p6mcp-settings.exe"; Description: "{cm:OpenSettings}"; Flags: postinstall nowait skipifsilent
+; --after-setup: these run while setup still holds its SetupMutex, so the app waits for setup to end (else it exits)
+Filename: "{app}\p6mcp-settings.exe"; Parameters: "--after-setup"; Description: "{cm:OpenSettings}"; Flags: postinstall nowait skipifsilent
 ; an automatic update (/AUTOUPDATE=1, run by the tray app after it quit): start the tray app again
-Filename: "{app}\p6mcp-settings.exe"; Parameters: "--minimized"; Flags: nowait; Check: IsAutoUpdate
+Filename: "{app}\p6mcp-settings.exe"; Parameters: "--minimized --after-setup"; Flags: nowait; Check: IsAutoUpdate
 
 [UninstallRun]
 ; remove only the p6mcp entries, the P6 skills (and command files of 1.7 and earlier) MCP for Primavera P6 wrote, and the startup entry; settings, backups and logs are kept

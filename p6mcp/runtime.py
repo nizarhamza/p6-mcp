@@ -111,6 +111,17 @@ def setup_running(name: str = SETUP_MUTEX) -> bool:
     return True
 
 
+def wait_for_setup_end(timeout: float = 300.0, poll: float = 0.5, name: str = SETUP_MUTEX) -> bool:
+    """True once setup has ended (False after timeout seconds). Only for a program setup itself started after
+    copying its files (--after-setup): its own [Run] entries run while it still holds its mutex."""
+    deadline = time.monotonic() + timeout
+    while setup_running(name):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll)
+    return True
+
+
 def window_request_path() -> str:
     return os.path.join(config.localdata_dir(), "show_window_after_setup")
 
