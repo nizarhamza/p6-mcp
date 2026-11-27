@@ -508,6 +508,12 @@ only once a test shows it works. Optionally add a **read-only SQL account** (SQL
 every table as stored and is faster; its driver is downloaded from PyPI only when you ask, and each file is
 checked against the checksum PyPI publishes. Click **Use this server**, then **Save**.
 
+**Proxy**: by default the calls go through the proxy set in Windows (or the `HTTP_PROXY` and `HTTPS_PROXY`
+variables), with its bypass list. A server can instead use **No proxy** or **This proxy** (`http://host:port`, for
+that server only), with an optional proxy user whose password goes to the Windows Credential Manager (Basic proxy
+sign-in only, not NTLM or Kerberos). A Windows proxy setup script (PAC) is not run: enter the proxy in the server's
+settings. A server on this PC is never proxied; the SQL account always connects directly.
+
 Then, from your MCP client:
 
 1. `p6_eppm_projects` lists the projects your P6 user can read; `p6_eppm_pull` copies the ones you name, with
@@ -520,7 +526,9 @@ Then, from your MCP client:
    since the pull, then, after your yes and the text `PUSH TO <server>`, sends one object per call and stops at
    the first failure; a journal records what reached the server, and a new push sends the rest.
 4. `p6_eppm_schedule` runs P6 EPPM's own scheduler (optionally with a new data date), returns its log and pulls
-   the projects again. It never runs by itself after a push.
+   the projects again. It never runs by itself after a push: ask for it with `p6_eppm_push(schedule=True)`,
+   which schedules the pushed projects once every call has succeeded, under the same confirmation (the text is
+   then `PUSH TO <server> AND SCHEDULE`).
 
 Not in this version: deleting activities, UDF edits, schedule options and other structure changes through the
 working copy (do them in P6 EPPM, then pull again). Tested against P6 EPPM 25.12 on SQL Server.

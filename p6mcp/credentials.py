@@ -5,6 +5,7 @@ Entries live under the service name "P6MCP" (P6MCP_SECRET_SERVICE overrides it, 
   db:<profile name>   password of a database connection profile (server backends, later)
   eppm:<profile>      REST password of a P6 EPPM server profile (config eppm_profiles)
   eppm-sql:<profile>  password of that profile's read-only SQL account
+  eppm-proxy:<profile>  password of that profile's proxy user (Basic proxy sign-in)
 """
 
 from __future__ import annotations
@@ -77,6 +78,11 @@ def eppm_key(profile: str) -> str:
 def eppm_sql_key(profile: str) -> str:
     """Password of the read-only SQL account of a P6 EPPM server profile."""
     return f"eppm-sql:{profile}"
+
+
+def eppm_proxy_key(profile: str) -> str:
+    """Password of the proxy user of a P6 EPPM server profile."""
+    return f"eppm-proxy:{profile}"
 
 
 def new_token() -> str:

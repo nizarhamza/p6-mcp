@@ -7,6 +7,27 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ### Added
 
+- P6 EPPM proxy: the calls to a P6 EPPM server go through the proxy set in Windows (or the `HTTP_PROXY` and
+  `HTTPS_PROXY` variables) with its bypass list, automatically. A server's settings can instead say **No proxy** or
+  **This proxy** (an `http://host:port` address for that server only), with an optional proxy user whose password is
+  kept in the Windows Credential Manager (Basic proxy sign-in). A server on this PC is never proxied, the SQL account
+  always connects directly, and a proxy address with a user or a password in it is refused. Test connection uses
+  the setting and says which proxy it went through; `p6_diagnose` reports it (never a password). A Windows proxy
+  setup script (PAC) is not run: it is reported, and the proxy can be entered in the server's settings.
+- `p6_eppm_push(schedule=True)`: once every call of the push has succeeded, the pushed projects are scheduled on
+  the server with P6's own scheduler (optionally with `new_data_date`) and, with `pull_after` (default), pulled
+  again. The dry run lists the schedule after the push, and one confirmation covers both steps (the text becomes
+  `PUSH TO <server> AND SCHEDULE`); a push that fails or meets a conflict schedules nothing. The result and the edit
+  log hold both steps.
+- `p6_export_xer` and `p6_import_xer` carry activity notebooks (TASKMEMO, topics in MEMOTYPE), steps (TASKPROC),
+  expenses (PROJCOST, categories in COSTTYPE), roles (ROLES, ROLERATE, and the role of each resource assignment)
+  and risks (RISKTYPE, PROJRISK, TASKRISK). A project exported then imported keeps them. The import matches topics,
+  expense categories, roles (by Role ID under the same parent role) and risk types by name and creates the missing
+  ones (role prices only for new roles); in update mode notebooks are matched by activity and topic, steps and
+  expenses by activity and name, risks by Risk ID, and the ones missing from the XER are kept. A table the database
+  lacks is skipped with a warning (`p6_inspect_xer`: `tables_not_in_database`). The place of these tables in the
+  file follows P6's table order rule; no P6 export containing them was available to confirm it.
+- The EPPM SQL pull also copies steps, expenses, expense categories and role prices.
 - `detail="brief"` on `p6_query_activities`, `p6_critical_path`, `p6_lookahead`, `p6_float_paths`, `p6_milestones`
   and `p6_get_activity`: rows without their empty (null) values, and in `p6_get_activity` links without
   `direction`, `lag_h` (`lag_d` stays) and `other_project` when it is the activity's own project. On a
@@ -35,9 +56,30 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 - The tool list the AI app reads at the start of a chat is 11 % smaller (132 KB instead of 149 KB with every tool
   on): schema titles that repeated each parameter's name are left out, and so is the deprecated `confirm`
   parameter, which is still accepted.
+- `p6_schedule_whatif` about 45 % faster (1.6 s instead of 2.9 s on a 3,120-activity project): its DCMA critical
+  path test reuses the networks and engine runs the what-if already has (the stored database before, the edited
+  network after) instead of loading and running the engine again, and the test's delayed run skips the free float
+  and float paths it never reads. Results, `p6_health_check` included, are unchanged.
+- `p6_import_xer` in update mode about 2.5 times as fast (a dry run takes 1.05 s instead of 2.7 s for a
+  3,120-activity update): the existing rows are matched from keys read once per table instead of one query per row,
+  and the updates are sent in batches. Counts, rows, soft-deleted rows coming back, the edit log and the result are
+  unchanged.
+- Earned value (`p6_progress_curve` to date and earned points, `p6_project_summary` `spi_units`) applies each WBS
+  node's own technique: activity percent complete, 0/100, 50/50, custom percent complete, WBS milestones percent
+  complete and activity percent complete using resource curves (a node without one takes the project node's, then
+  the admin default). Before, every node counted as activity percent complete. The rules follow the P6
+  documentation; no P6 earned value figure was available to check them. `checks` adds `ev_techniques` (WBS nodes
+  per technique) and `ev_unknown_techniques`. Projects whose WBS all use activity percent complete get the same
+  values as before.
+- `p6_update_assignment` and `p6_update_assignments` say which P6 summary rows (SUMTASK, SUMTASKSPREAD,
+  SUMTRSRC) the change leaves out of date (`summaries_stale`, plus a plan line) and that Tools > Summarize in P6
+  refreshes them. The summary tables are still never written: they are time-phased spreads that could not be
+  rebuilt to match P6.
 
 ### Fixed
 
+- Deleting an activity or a project now also deletes the UDF values of its steps, expenses and risks,
+  which were left without their row before.
 - Remote access, Connect with this PC: the notification area app could reset the browser's connection instead of
   answering when it refused a request (it closed the connection before reading the request body). It now reads
   the body first, and stops waiting for a body after 10 s.
