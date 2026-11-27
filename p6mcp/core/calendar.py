@@ -348,3 +348,24 @@ def _lag_hpd_of(rule: str, p_hpd, s_hpd, proj_cal) -> float:
     """Hours per lag day under the lag rule, from loaded calendars (_lag_hpd reads the database)."""
     return {"rcal_Successor": s_hpd, "rcal_24Hour": 24.0,
             "rcal_ProjDefault": proj_cal.hpd if proj_cal else 8.0}.get(rule, p_hpd) or 8.0
+
+
+def _hhmm(m: int) -> str:
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _week_text(cal) -> Optional[str]:
+    """'Mon-Fri 08:00-16:00; Sat 08:00-12:00' (days without work left out)."""
+    if cal is None or getattr(cal, "error", None) or not hasattr(cal, "week"):
+        return None
+    names = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    parts, i = [], 0
+    while i < 7:
+        j = i
+        while j + 1 < 7 and cal.week[j + 1] == cal.week[i]:
+            j += 1
+        if cal.week[i]:
+            parts.append((names[i] if i == j else f"{names[i]}-{names[j]}") + " "
+                         + ", ".join(f"{_hhmm(s)}-{_hhmm(f)}" for s, f in cal.week[i]))
+        i = j + 1
+    return "; ".join(parts) or "no working day"
