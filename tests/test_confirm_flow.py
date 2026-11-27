@@ -115,13 +115,14 @@ def test_plan_mismatch_is_refused(p6):
 
 
 def test_p6_running_keeps_the_token_for_a_retry(p6, monkeypatch):
+    from p6mcp.core import db  # the write guard reads _p6_running there
     dry = p6.call("p6_update_activity", **UPD)
-    monkeypatch.setattr(p6.s, "_p6_running", lambda: True)
+    monkeypatch.setattr(db, "_p6_running", lambda: True)
     p6.set(block_when_p6_running=True)
     with pytest.raises(RuntimeError, match="PM.exe"):
         p6.call("p6_update_activity", **UPD, dry_run=False, confirmation_token=dry["confirmation_token"])
     assert rem_hours(p6) == 120
-    monkeypatch.setattr(p6.s, "_p6_running", lambda: False)
+    monkeypatch.setattr(db, "_p6_running", lambda: False)
     res = p6.call("p6_update_activity", **UPD, dry_run=False, confirmation_token=dry["confirmation_token"])
     assert res["applied"] is True
 

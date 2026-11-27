@@ -9,6 +9,8 @@ import sqlite3
 from datetime import date, datetime, time, timedelta
 from typing import Optional
 
+from p6mcp.core.db import _alive, _fmt_dt, _parse_dt
+
 
 CAL_EPOCH = date(1899, 12, 30)  # P6 calendar exception dates are day serials from this date
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # Python weekday order
@@ -224,7 +226,7 @@ def _calendars(con, only: Optional[int] = None) -> dict[int, _Cal]:
     resource calendar without one takes its base calendar's week (P6 stores the base's week hours on it).
     A base calendar gives its exceptions (the calendar's own dates win). An unreadable clndr_data gives a
     calendar without working time (nothing taken from its base) and .error set."""
-    from p6mcp.server import _alive, _blob_text
+    from p6mcp.server import _blob_text
     has_type = any(r[1].lower() == "clndr_type" for r in con.execute("PRAGMA table_info(CALENDAR)"))
     typ = "clndr_type" if has_type else "NULL AS clndr_type"
     sql = (f"SELECT clndr_id, clndr_name, base_clndr_id, day_hr_cnt, clndr_data, {typ} FROM CALENDAR WHERE "
@@ -277,7 +279,6 @@ def _resolve_dt(cal: Optional[_Cal], value: str, field: str, edge: str) -> tuple
     day is not a work day of cal). A date alone takes the first shift start (edge 'start') or the
     last shift end (edge 'finish', 24:00 = next day 00:00) of that day, and is refused on a non-work
     day. Without a readable calendar a date alone starts at 08:00 and a finish needs a time."""
-    from p6mcp.server import _fmt_dt, _parse_dt
     dt, has_time = _parse_dt(value, field)
     d = dt.date()
     if has_time:
