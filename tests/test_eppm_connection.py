@@ -366,7 +366,7 @@ def test_failed_sign_ins_query_and_finding():
     assert eppm.lock_check(profile()) is None  # no SQL account: no check
 
 
-# ----------------------------------------------------------------- proxy (3.5.0)
+# ----------------------------------------------------------------- proxy (3.4.0)
 
 class Proxy:
     """A tiny forward proxy on 127.0.0.1: absolute-URI requests (plain http) and CONNECT tunnels. It resolves the host

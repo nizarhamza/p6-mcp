@@ -1,4 +1,4 @@
-"""Proxy of the REST calls to a P6 EPPM server (owner's choice for 3.5.0: the Windows proxy plus an override).
+"""Proxy of the REST calls to a P6 EPPM server (owner's choice for 3.4.0: the Windows proxy plus an override).
 
 A server profile chooses with its `proxy` setting:
 - system (the default, also when the key is absent): the proxy Windows uses (Internet Settings, read by

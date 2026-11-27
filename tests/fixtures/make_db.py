@@ -158,7 +158,7 @@ _STAMPS = [("create_date", "TEXT"), ("create_user", "TEXT"), ("update_date", "TE
 SCHEMA["FINTMPL"] = [("fintmpl_id", "INTEGER PRIMARY KEY"), ("fintmpl_name", "TEXT")] + _STAMPS
 SCHEMA["RSRCRATE"] = [("rsrc_rate_id", "INTEGER PRIMARY KEY"), ("rsrc_id", "INTEGER"),
                       ("cost_per_qty", "REAL")] + _STAMPS
-# Activity steps, expenses, role prices and risks (XER round trip, 3.5.0)
+# Activity steps, expenses, role prices and risks (XER round trip, 3.4.0)
 SCHEMA["TASKPROC"] = [("proc_id", "INTEGER PRIMARY KEY"), ("task_id", "INTEGER"), ("proj_id", "INTEGER"),
                       ("seq_num", "INTEGER"), ("proc_name", "TEXT"), ("complete_flag", "TEXT"), ("proc_wt", "REAL"),
                       ("complete_pct", "REAL"), ("proc_descr", "BLOB")] + _STAMPS

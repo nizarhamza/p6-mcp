@@ -1,4 +1,4 @@
-"""XER round trip of activity notebooks, steps, expenses, roles and risks (3.5.0) on the synthetic database.
+"""XER round trip of activity notebooks, steps, expenses, roles and risks (3.4.0) on the synthetic database.
 
 Fixture (tests/fixtures/make_db.py, project DEMO-A): notebook topics Scope and Site notes, a BLOB notebook on A1010
 and a TEXT one on A1030, three steps on A1010, two expenses (categories Materials and Travel), roles ENG > LEAD and a

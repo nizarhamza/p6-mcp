@@ -64,6 +64,11 @@ Planned, early and late dates and float are never written: P6 recalculates them 
   catalog index's SHA256; with the shop off, the core set comes from the copy shipped with MCP for Primavera P6). MCP for Primavera P6
   never sends anything to the
   catalog: sharing a skill is a GitHub issue the user creates in the browser.
+- P6 EPPM mode connects only to the EPPM server the user configures (REST over HTTPS, or the SQL route), and
+  through a proxy when the Windows or environment settings or the profile name one (3.4); a server on this PC is
+  never proxied. The EPPM, SQL and proxy passwords are kept in the Windows Credential Manager, never in
+  config.json (a proxy address holding a user name or password is refused), and are stored only after a
+  connection test that worked.
 - Skills are text only: SKILL.md and up to 5 text reference files (.md, .txt, .csv, .json); scripts are
   refused on import. A skill names tools; it gets no permission of its own: write tools keep the dry run and
   confirmation token, and `p6_shop_install` shows the whole skill and needs a confirmation too.
