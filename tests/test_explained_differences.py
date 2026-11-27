@@ -195,3 +195,39 @@ def test_whatif_near_critical_flag(p6):
     assert a["near_critical"]["became_near_critical"] == 1
     assert a["near_critical"]["rows"] == [{"task_code": "A1060", "task_name": "Permits", "total_float_d_before": 20.0,
                                            "total_float_d_after": 5.0}]
+
+
+EDIT_KINDS = [[{"op": "duration", "task_code": "A1030", "remaining_days": 30}],
+              [{"op": "duration", "task_code": "A1060", "add_remaining_days": 25}],
+              [{"op": "add_link", "predecessor_code": "A1060", "successor_code": "A1040", "lag_days": 3}],
+              [{"op": "delete_link", "predecessor_code": "A1000", "successor_code": "A1060"}],
+              [{"op": "constraint", "task_code": "A1040", "constraint": "start_on_or_after",
+                "constraint_date": "2026-06-15"}]]
+
+
+@pytest.mark.parametrize("edits", EDIT_KINDS,
+                         ids=["duration", "add_remaining", "add_link", "delete_link", "constraint"])
+@pytest.mark.parametrize("compare_to", ["current", "engine"])
+def test_whatif_critical_path_test_reuses_the_engine(p6, monkeypatch, edits, compare_to):
+    """The DCMA critical path test of the what-if takes the network and run it already has (3.5.0): the stored
+    database before (compare_to current), the edited network after, as the temp tables hold it. The engine is
+    loaded once; the test it gives equals the one that reloads the network from the temp tables and runs it."""
+    s = p6.s
+    cpt, init, loads, seen = s._cpt, s._Cpm.__init__, [], []
+
+    def load(self, con, pid):
+        loads.append(pid)
+        init(self, con, pid)
+
+    def spy(con, pid, net=None):
+        out = cpt(con, pid, net)
+        n = len(loads)
+        seen.append((net is not None, out == cpt(con, pid)))  # the old way: load and run the engine here
+        del loads[n:]
+        return out
+
+    monkeypatch.setattr(s._Cpm, "__init__", load)
+    monkeypatch.setattr(s, "_cpt", spy)
+    a = whatif(p6, edits, compare_to=compare_to)["assumptions"]["dcma"]
+    assert seen == [(True, True), (True, True)] and len(loads) == 1
+    assert None not in (a["before"]["critical_path_test"]["pass"], a["after"]["critical_path_test"]["pass"])
