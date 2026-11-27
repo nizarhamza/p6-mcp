@@ -54,8 +54,8 @@ class StubVerifier:
 # ----------------------------------------------------------------- policy
 
 EXPECTED_NEVER = {"p6_delete_activity", "p6_delete_project", "p6_eppm_push", "p6_restore_backup", "p6_export_xer",
-                  "p6_export_dashboard", "p6_import_xer", "p6_inspect_xer", "p6_shop_search", "p6_shop_get",
-                  "p6_shop_install"}
+                  "p6_export_dashboard", "p6_export_lookahead", "p6_import_xer", "p6_inspect_xer", "p6_shop_search",
+                  "p6_shop_get", "p6_shop_install"}
 
 
 def test_every_tool_has_a_remote_decision(server):
@@ -139,7 +139,7 @@ LIST_TOOLS = {"p6_list_projects": {}, "p6_list_eps": {}, "p6_list_wbs": {"projec
               "p6_get_relationships": {"project": "DEMO-A", "task_code": "A1020"},
               "p6_list_calendars": {"include_exceptions": True}, "p6_lookahead": {"project": "DEMO-A"},
               "p6_milestones": {"project": "DEMO-A"}, "p6_group_summary": {"project": "DEMO-A"},
-              "p6_resource_summary": {"project": "DEMO-A"},
+              "p6_resource_summary": {"project": "DEMO-A"}, "p6_calendar_check": {"project": "DEMO-A"},
               "p6_sql_select": {"sql": "SELECT * FROM TASK"}}
 
 

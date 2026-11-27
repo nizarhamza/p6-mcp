@@ -36,6 +36,7 @@ Facts an assistant should get right:
 - `p6_project_summary`: One-call overview: dates, activity counts, critical counts, % complete by units, physical and duration, baseline variance and SPI (read)
 - `p6_list_wbs`: WBS tree in P6 order with roll-ups: activities, dates, float, units % and baseline planned % (read)
 - `p6_list_calendars`: Calendars with work week, hours per day and holiday exceptions (read)
+- `p6_calendar_check`: Checks the calendars a project uses: holidays one calendar works and another does not, years without holidays, stale hours per day or week, unreadable or missing calendars (read)
 - `p6_list_udfs`: User defined fields (UDF columns) with how much each one is used (read)
 - `p6_schedule_options`: Schedule options of a project, of an XER file, or both side by side (read)
 
@@ -69,6 +70,7 @@ Facts an assistant should get right:
 - `p6_group_summary`: Activities, units and dates grouped by status, type, WBS level or activity code (read)
 - `p6_resource_summary`: Units and costs per resource, and activities per status (read)
 - `p6_export_dashboard`: Excel project controls dashboard: one A3 page with charts, plus detail sheets (writes a file)
+- `p6_export_lookahead`: Printable Excel look-ahead: activities by WBS with a day or week bar chart, critical work in red, data date marked (writes a file)
 
 ### Comparison, what-if and risk
 

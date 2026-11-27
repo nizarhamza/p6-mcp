@@ -22,7 +22,8 @@ from p6mcp import server  # noqa: E402
 
 GROUPS: list[tuple[str, list[str]]] = [
     ("Projects and structure", ["p6_list_projects", "p6_list_eps", "p6_project_summary", "p6_list_wbs",
-                                "p6_list_calendars", "p6_list_udfs", "p6_schedule_options"]),
+                                "p6_list_calendars", "p6_calendar_check", "p6_list_udfs",
+                                "p6_schedule_options"]),
     ("Activities and relationships", ["p6_query_activities", "p6_get_activity", "p6_get_relationships",
                                       "p6_lookahead", "p6_milestones"]),
     ("Critical path and float", ["p6_critical_path", "p6_driving_path", "p6_float_paths", "p6_float_origin",
@@ -30,7 +31,7 @@ GROUPS: list[tuple[str, list[str]]] = [
     ("Schedule quality", ["p6_health_check", "p6_health_check_compare", "p6_dangling", "p6_redundant_links",
                           "p6_progress_check"]),
     ("Progress and reporting", ["p6_progress_curve", "p6_group_summary", "p6_resource_summary",
-                                "p6_export_dashboard"]),
+                                "p6_export_dashboard", "p6_export_lookahead"]),
     ("Comparison, what-if and risk", ["p6_compare_projects", "p6_update_integrity", "p6_cpm_validate",
                                       "p6_schedule_whatif", "p6_schedule_risk"]),
     ("XER files", ["p6_inspect_xer", "p6_import_xer", "p6_export_xer"]),
@@ -54,6 +55,8 @@ SUMMARY = {
                           "and duration, baseline variance and SPI",
     "p6_list_wbs": "WBS tree in P6 order with roll-ups: activities, dates, float, units % and baseline planned %",
     "p6_list_calendars": "Calendars with work week, hours per day and holiday exceptions",
+    "p6_calendar_check": "Checks the calendars a project uses: holidays one calendar works and another does not, "
+                         "years without holidays, stale hours per day or week, unreadable or missing calendars",
     "p6_list_udfs": "User defined fields (UDF columns) with how much each one is used",
     "p6_schedule_options": "Schedule options of a project, of an XER file, or both side by side",
     "p6_query_activities": "Search activities by name, Activity ID, WBS, status, total float, dates, activity "
@@ -79,6 +82,8 @@ SUMMARY = {
     "p6_group_summary": "Activities, units and dates grouped by status, type, WBS level or activity code",
     "p6_resource_summary": "Units and costs per resource, and activities per status",
     "p6_export_dashboard": "Excel project controls dashboard: one A3 page with charts, plus detail sheets",
+    "p6_export_lookahead": "Printable Excel look-ahead: activities by WBS with a day or week bar chart, critical "
+                           "work in red, data date marked",
     "p6_compare_projects": "Two updates or a baseline compared activity by activity and link by link, with slip "
                            "causes and float erosion",
     "p6_update_integrity": "Review of an update against the previous one: changes a reviewer should question",

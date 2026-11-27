@@ -186,6 +186,17 @@ CAL_WINDOW_DAYS = 3660
 # p6_list_calendars(include_exceptions=True): calendars and exception dates per page, dates per calendar (< 200 KB)
 CAL_EXC_ROWS, CAL_EXC_PAGE, CAL_EXC_EACH = 50, 800, 100
 LOOKAHEAD_DAYS = 14  # p6_lookahead window without days= or weeks=
+CAL_CHECK_YEARS = 10  # p6_calendar_check: years compared at most (from the start year of the span)
+# p6_calendar_check finding kinds in report order, with their severity
+CAL_CHECK_KINDS = {"calendar_missing": "error", "unreadable": "error", "base_missing": "error",
+                   "no_working_time": "error", "rsrc_dep_no_calendar": "error",
+                   "project_holiday_worked": "warning", "holiday_not_in_project": "warning",
+                   "no_exceptions_in_year": "warning", "day_hours_stale": "warning",
+                   "week_hours_stale": "info", "work_week_differs": "info"}
+SEVERITY_RANK = {"error": 0, "warning": 1, "info": 2}
+LA_EXPORT_CAP = 5000  # p6_export_lookahead: activity rows written at most
+LA_DAY_GRID_MAX = 92  # p6_export_lookahead: a day grid covers at most this many days (else weeks)
+LA_AUTO_DAYS = 42  # grid='auto': days up to this window length, weeks beyond
 FLOAT_EDGES = (-20.0, -10.0, -5.0, 0.0, 5.0, 10.0, 20.0, 44.0)  # p6_float_analysis default bucket edges (days)
 STATUS_NAMES = {"TK_NotStart": "Not Started", "TK_Active": "In Progress", "TK_Complete": "Completed"}
 TYPE_NAMES = {"TT_Task": "Task Dependent", "TT_Rsrc": "Resource Dependent", "TT_Mile": "Start Milestone",
@@ -236,6 +247,13 @@ Measure = Literal["units", "cost"]
 Level = Annotated[int, Field(ge=1, description="Hierarchy level (1 = top).")]
 WindowDays = Annotated[int, Field(ge=1, le=366, description="Window length in calendar days (max 366).")]
 WindowWeeks = Annotated[int, Field(ge=1, le=52, description="Window length in weeks (max 52).")]
+CalCheckKind = Literal["calendar_missing", "unreadable", "base_missing", "no_working_time", "rsrc_dep_no_calendar",
+                       "project_holiday_worked", "holiday_not_in_project", "no_exceptions_in_year", "day_hours_stale",
+                       "week_hours_stale", "work_week_differs"]
+assert tuple(CAL_CHECK_KINDS) == get_args(CalCheckKind)
+CalCheckKinds = Annotated[list[CalCheckKind], Field(description="Finding kinds to list (default all).")]
+Year = Annotated[int, Field(ge=1900, le=2200, description="Calendar year, e.g. 2026.")]
+LaGrid = Literal["auto", "day", "week"]
 FloatEdges = Annotated[list[float], Field(min_length=1, description="Bucket edges in days, increasing; 0 is always added.")]
 ProjectIds = Annotated[list[ProjectId], Field(description="Project IDs (earlier updates of the same schedule).")]
 ActivityIds = Annotated[list[ActivityId], Field(description="Activity IDs (task_code).")]
@@ -7538,11 +7556,42 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
     n = int(days) if days is not None else 7 * int(weeks) if weeks is not None else LOOKAHEAD_DAYS
     if not 1 <= n <= 366:
         raise ValueError("the window must be 1 to 366 days (days=, or weeks= up to 52)")
-    frm = _parse_dt(from_date, "from_date")[0] if from_date else None
+    if from_date:
+        _parse_dt(from_date, "from_date")
     row_fn, brief = _act_row(fields), _brief_on(detail)
     con = _connect()
     pid = _project_id(con, project)
     con.execute("BEGIN")  # data date, code filter, page and counts from one snapshot
+    try:
+        la = _la_query(con, pid, project, n, from_date, include_in_progress, include_completed, wbs_name_contains,
+                       code_type, code_value, include_child_codes, critical_only)
+
+        def row(r: sqlite3.Row) -> dict:
+            out = {**row_fn(r), **la["extra"](r)}
+            return _brief(out) if brief else out
+        res = _page(con, la["sql"], la["args"], offset, limit, row)
+        counts = la["counts"]()
+    finally:
+        con.rollback()
+    res.update(window=la["window"], weeks=la["weeks"], data_date=la["data_date"], counts=counts,
+               critical_definition=la["critical_definition"])
+    if la["code_filter"]:
+        res["code_filter"] = la["code_filter"]
+    res.update(schedule_state=_schedule_state(con, pid),
+               note="Dates of the last F9. The data date has a time (e.g. 18:00): pass from_date for whole days.")
+    return res
+
+
+def _la_query(con, pid: int, project: str, n: int, from_date: Optional[str], include_in_progress: bool,
+              include_completed: bool, wbs_name_contains: Optional[str], code_type: Optional[str],
+              code_value: Optional[str], include_child_codes: bool, critical_only: bool) -> dict:
+    """The look-ahead of p6_lookahead and p6_export_lookahead, inside the caller's snapshot: sql (TASK rows t.* with
+    hpd, wbs_name and the w_* category flags, ordered) and args, extra(row) (window, critical, fcst_start,
+    fcst_finish, start_week, finish_week), counts() over every row, window, weeks, data_date (stored text), frm / to
+    (datetimes), critical_definition, code_filter."""
+    if not 1 <= n <= 366:
+        raise ValueError("the window must be 1 to 366 days (days=, or weeks= up to 52)")
+    frm = _parse_dt(from_date, "from_date")[0] if from_date else None
     dd = (con.execute("SELECT last_recalc_date FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()[0]
           if "last_recalc_date" in _cols(con, "PROJECT") else None)
     frm = frm or _db_dt(dd)
@@ -7573,29 +7622,21 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
         d = _db_dt(v)
         return int((d - frm).total_seconds() // (7 * 86400)) + 1 if d is not None and frm <= d < to else None
 
-    def row(r: sqlite3.Row) -> dict:
-        out = {**row_fn(r), "window": [k for k in cat if r[f"w_{k}"]], "critical": bool(r["w_crit"]),
-               "fcst_start": r["f_st"], "fcst_finish": r["f_fin"], "start_week": week(r["f_st"]),
-               "finish_week": week(r["f_fin"])}
-        return _brief(out) if brief else out
-    try:
-        res = _page(con, q, [*crit_args, *args], offset, limit, row)
+    def extra(r: sqlite3.Row) -> dict:
+        return {"window": [k for k in cat if r[f"w_{k}"]], "critical": bool(r["w_crit"]), "fcst_start": r["f_st"],
+                "fcst_finish": r["f_fin"], "start_week": week(r["f_st"]), "finish_week": week(r["f_fin"])}
+
+    def counts() -> dict:
         c = con.execute("SELECT " + ", ".join(f"SUM({x})" for x in [*cat.values(), is_crit]) + f" FROM ({inner}) t",
                         [*crit_args, *args]).fetchone()
-    finally:
-        con.rollback()
+        return {**{k: c[i] or 0 for i, k in enumerate(cat)}, "critical": c[len(cat)] or 0}
     weeks = [{"week": k + 1, "from": _fmt_dt(frm + timedelta(days=7 * k)),
               "to": _fmt_dt(min(to, frm + timedelta(days=7 * k + 7)))}
              for k in range((n + 6) // 7)]
-    res.update(window={"from": _fmt_dt(frm), "to": _fmt_dt(to), "days": n,
+    return {"sql": q, "args": [*crit_args, *args], "extra": extra, "counts": counts, "frm": frm, "to": to,
+            "window": {"from": _fmt_dt(frm), "to": _fmt_dt(to), "days": n,
                        "basis": "calendar days, half-open [from, to), from " + ("from_date" if from_date else "the data date")},
-               weeks=weeks, data_date=dd, counts={**{k: c[i] or 0 for i, k in enumerate(cat)}, "critical": c[len(cat)] or 0},
-               critical_definition=crit_def + "; open activities")
-    if cinfo:
-        res["code_filter"] = cinfo
-    res.update(schedule_state=_schedule_state(con, pid),
-               note="Dates of the last F9. The data date has a time (e.g. 18:00): pass from_date for whole days.")
-    return res
+            "weeks": weeks, "data_date": dd, "critical_definition": crit_def + "; open activities", "code_filter": cinfo}
 
 
 def _cum(items: Sequence[tuple], edges: Sequence[datetime]) -> list[float]:
@@ -8423,6 +8464,248 @@ def p6_list_calendars(project: Optional[ProjectId] = None, name_contains: Option
     if any(r.get("exception_dates_truncated") for r in res["rows"]):
         res["note"] = (f"exception dates capped at {CAL_EXC_EACH} per calendar and {CAL_EXC_PAGE} per page "
                        "(exception_dates_truncated): narrow with project=, from_date/to_date or name_contains.")
+    return res
+
+
+def _week_diff(a: _Cal, b: _Cal) -> list[str]:
+    """Days whose shifts differ between the work weeks of a and b: 'Sat 08:00-12:00 (project: off)'."""
+    def txt(sh: tuple) -> str:
+        return ", ".join(_shift_txt(sh)) or "off"
+    return [f"{WEEKDAYS[i]} {txt(a.week[i])} (project: {txt(b.week[i])})" for i in range(7) if a.week[i] != b.week[i]]
+
+
+def _holidays(cal: _Cal, y0: int, y1: int) -> list[date]:
+    """Holidays of cal in the years y0 to y1: exception dates without working time on a weekday its work week works."""
+    return sorted(d for d, sh in cal.exc.items() if not sh and cal.week[d.weekday()] and y0 <= d.year <= y1)
+
+
+def _cal_check_read(con, pid: int) -> dict:
+    """What p6_calendar_check needs, in the caller's snapshot: project row, calendars (parsed and stored rows),
+    activity and assignment counts per calendar, open resource dependent assignments and the project finish."""
+    al = functools.partial(_alive, con)
+    pcols, ccols, tcols = _cols(con, "PROJECT"), _cols(con, "CALENDAR"), _cols(con, "TASK")
+    prj = con.execute("SELECT " + ", ".join(c if c in pcols else f"NULL AS {c}" for c in (
+        "clndr_id", "plan_start_date", "plan_end_date", "scd_end_date", "last_recalc_date"))
+        + " FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()
+    raw = {r["clndr_id"]: r for r in con.execute(
+        "SELECT clndr_id, clndr_name, base_clndr_id, day_hr_cnt, "
+        + ", ".join(c if c in ccols else f"NULL AS {c}" for c in ("week_hr_cnt", "clndr_type"))
+        + " FROM CALENDAR WHERE 1=1" + al("CALENDAR"))}
+    acts = {r[0]: (r[1], r[2] or 0) for r in con.execute(
+        "SELECT clndr_id, COUNT(*), SUM(status_code <> 'TK_Complete') FROM TASK WHERE proj_id = ?" + al("TASK")
+        + " GROUP BY clndr_id", (pid,))}
+    asg: dict = {}
+    rd: list = []
+    if _cols(con, "TASKRSRC") and "clndr_id" in _cols(con, "RSRC"):
+        base = ("FROM TASKRSRC a JOIN TASK t ON t.task_id = a.task_id LEFT JOIN RSRC rs ON rs.rsrc_id = a.rsrc_id"
+                + al("RSRC", "rs") + " WHERE t.proj_id = ? AND a.rsrc_id IS NOT NULL" + al("TASKRSRC", "a") + al("TASK", "t"))
+        asg = {r[0]: r[1] for r in con.execute(f"SELECT rs.clndr_id, COUNT(*) {base} AND rs.rsrc_id IS NOT NULL "
+                                                "GROUP BY rs.clndr_id", (pid,))}
+        rd = con.execute("SELECT t.task_id, t.task_code, t.task_name, t.clndr_id, a.rsrc_id, rs.rsrc_id AS found, "
+                         f"rs.rsrc_short_name, rs.clndr_id AS rsrc_clndr_id {base} AND t.task_type = 'TT_Rsrc' "
+                         "AND t.status_code <> 'TK_Complete' ORDER BY t.task_code, t.task_id, a.taskrsrc_id",
+                         (pid,)).fetchall()
+    ends = [c for c in ("reend_date", "early_end_date", "act_end_date") if c in tcols]
+    last = (con.execute(f"SELECT MAX(COALESCE({', '.join(ends)})) FROM TASK WHERE proj_id = ?" + al("TASK"),
+                        (pid,)).fetchone()[0] if ends else None)
+    return {"prj": prj, "raw": raw, "cals": _calendars(con), "acts": acts, "asg": asg, "rd": rd, "last": last,
+            "state": _schedule_state(con, pid)}
+
+
+@_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+def p6_calendar_check(project: ProjectId, kinds: Optional[CalCheckKinds] = None, from_year: Optional[Year] = None,
+                      to_year: Optional[Year] = None, offset: Offset = 0, limit: Limit = 100) -> dict:
+    """Checks the calendars a project uses (its project calendar, its activities' calendars, the calendars of its
+    assigned resources, and their base calendars), one page of findings: {total, offset, returned, next_offset,
+    rows, project, span, calendars, counts, by_severity, schedule_state, note}. Kinds, by severity:
+    error: calendar_missing (a calendar id that no calendar has, or activities without one), unreadable
+    (calendar data that cannot be read: no working time), base_missing, no_working_time (no work in the span),
+    rsrc_dep_no_calendar (open resource dependent activity with an assigned resource without a usable calendar:
+    one row per activity); warning: project_holiday_worked (a holiday of the project calendar, on a weekday it
+    works, that another used calendar works), holiday_not_in_project (a holiday of another used calendar that the
+    project calendar works), no_exceptions_in_year (a year of the span without any exception date),
+    day_hours_stale (hours per day differ from the work week's day hours); info: week_hours_stale (stored week
+    hours differ from the work week), work_week_differs (work week other than the project calendar's). Span:
+    whole years from the data date (else the project start) to the project finish (scheduled finish, else the
+    latest activity finish), at most 10 years; from_year / to_year override it. Rows: kind, severity, clndr_id,
+    calendar, calendar_type, roles (project, activity, resource, base), date, year, task_code, task_name, detail,
+    activities (activities of the project on that calendar), resource_assignments (assignments of the project
+    whose resource uses it). calendars lists the calendars checked with their counts and findings. counts and
+    by_severity cover every kind, whatever kinds= keeps. Order: severity, kind, calendar, date or year, Activity ID."""
+    want = list(CAL_CHECK_KINDS) if kinds is None else list(dict.fromkeys([kinds] if isinstance(kinds, str) else kinds))
+    bad = [k for k in want if k not in CAL_CHECK_KINDS]
+    if bad or not want:
+        raise ValueError(f"kinds: choose from {list(CAL_CHECK_KINDS)}" + (f" (unknown: {bad})" if bad else ""))
+    for k, v in (("from_year", from_year), ("to_year", to_year)):
+        if v is not None and not 1900 <= int(v) <= 2200:
+            raise ValueError(f"{k} must be a year from 1900 to 2200")
+    _check_page(offset, limit)
+    con = _connect()
+    pid = _project_id(con, project)
+    con.execute("BEGIN")  # project, calendars, counts and assignments from one snapshot
+    try:
+        d = _cal_check_read(con, pid)
+    finally:
+        con.rollback()
+    prj, raw, cals, acts, asg = d["prj"], d["raw"], d["cals"], d["acts"], d["asg"]
+    notes: list[str] = []
+    # span of whole years
+    a = _db_dt(prj["last_recalc_date"]) or _db_dt(prj["plan_start_date"])
+    b = _db_dt(prj["scd_end_date"]) or _db_dt(prj["plan_end_date"]) or _db_dt(d["last"])
+    basis = (f"{'data date' if prj['last_recalc_date'] else 'project start'} {a.date()} to "
+             f"{'scheduled finish' if prj['scd_end_date'] else 'planned finish' if prj['plan_end_date'] else 'latest activity finish'}"
+             f" {b.date()}") if a and b else None
+    y0 = int(from_year) if from_year is not None else a.year if a else None
+    y1 = int(to_year) if to_year is not None else b.year if b else None
+    if y0 is None or y1 is None:
+        raise ValueError(f"{project} has no data date, start or finish: pass from_year and to_year")
+    if y1 < y0:
+        if to_year is not None or from_year is not None:
+            raise ValueError("to_year is before from_year")
+        y1 = y0  # finish before the data date: the data date's year
+    if y1 - y0 + 1 > CAL_CHECK_YEARS:
+        if from_year is not None and to_year is not None:
+            raise ValueError(f"at most {CAL_CHECK_YEARS} years (from_year to to_year)")
+        notes.append(f"Span cut to {CAL_CHECK_YEARS} years ({y0} to {y0 + CAL_CHECK_YEARS - 1}).")
+        y1 = y0 + CAL_CHECK_YEARS - 1
+    years = range(y0, y1 + 1)
+
+    # calendars used, with their roles; then their base chains
+    roles: dict = {}
+    if prj["clndr_id"] is not None:
+        roles.setdefault(prj["clndr_id"], []).append("project")
+    for cid in acts:
+        if cid is not None:
+            roles.setdefault(cid, []).append("activity")
+    for cid in asg:
+        if cid is not None:
+            roles.setdefault(cid, []).append("resource")
+    chain = list(roles)
+    for cid in chain:  # appends the bases while it walks (each id once)
+        base = raw[cid]["base_clndr_id"] if cid in raw else None
+        if base is not None and base != cid and base in raw and base not in roles:
+            roles[base] = ["base"]
+            chain.append(base)
+    proj = cals.get(prj["clndr_id"])
+    proj = proj if proj is not None and not proj.error else None
+    if prj["clndr_id"] is None:
+        notes.append("The project has no calendar: holidays and work weeks are not compared.")
+    elif proj is None:
+        notes.append("The project calendar is missing or unreadable: holidays and work weeks are not compared.")
+
+    found: list[dict] = []
+
+    def add(kind: str, cid, detail: str, when: Optional[date] = None, year: Optional[int] = None,
+            task: Optional[sqlite3.Row] = None) -> None:
+        r = raw.get(cid)
+        found.append({"kind": kind, "severity": CAL_CHECK_KINDS[kind], "clndr_id": cid,
+                      "calendar": r["clndr_name"] if r else None, "calendar_type": r["clndr_type"] if r else None,
+                      "roles": roles.get(cid, []), "date": when.isoformat() if when else None, "year": year,
+                      "task_code": task["task_code"] if task else None, "task_name": task["task_name"] if task else None,
+                      "detail": detail, "activities": acts.get(cid, (0, 0))[0] if cid is not None else 0,
+                      "resource_assignments": asg.get(cid, 0) if cid is not None else 0})
+
+    if None in acts:
+        add("calendar_missing", None, f"{acts[None][0]} activities of the project have no calendar.")
+    t0, t1 = datetime(y0, 1, 1), datetime(y1 + 1, 1, 1)
+    for cid in chain:
+        r, cal = raw.get(cid), cals.get(cid)
+        if r is None or cal is None:
+            add("calendar_missing", cid, f"Calendar {cid} is not in the database; used as {', '.join(roles[cid])} "
+                "calendar.")
+            continue
+        if r["base_clndr_id"] is not None and r["base_clndr_id"] != cid and r["base_clndr_id"] not in raw:
+            add("base_missing", cid, f"Base calendar {r['base_clndr_id']} is not in the database: its exceptions "
+                "(and, for a resource calendar, its work week) are not applied.")
+        if cal.error:
+            add("unreadable", cid, f"Calendar data cannot be read ({cal.error}): it has no working time here.")
+            continue
+        if roles[cid] == ["base"]:
+            continue  # a base calendar is checked through the calendars built on it
+        work_h = cal.work_hours(t0, t1)
+        if work_h <= 0:
+            add("no_working_time", cid, f"No working time from {y0} to {y1}"
+                + (f": open activities on it that cannot be scheduled: {acts[cid][1]}." if acts.get(cid, (0, 0))[1]
+                   else "."))
+            continue
+        hours = [sum(f - s for s, f in sh) / 60 for sh in cal.week]
+        day_h, n_days = sorted({h for h in hours if h}), sum(1 for h in hours if h)
+        hpd = r["day_hr_cnt"]
+        if not hpd:
+            add("day_hours_stale", cid, "Hours per day is empty: 8 h per day is used to show durations and float.")
+        elif day_h and all(abs(float(hpd) - h) > 1e-6 for h in day_h) \
+                and abs(float(hpd) - sum(hours) / n_days) > 1e-6:
+            add("day_hours_stale", cid, f"Hours per day is {float(hpd):g} but the work days have "
+                f"{', '.join(f'{h:g}' for h in day_h)} h (average {sum(hours) / n_days:g} h): durations and float "
+                "in days use the stored value.")
+        if r["week_hr_cnt"] is not None and abs(float(r["week_hr_cnt"]) - sum(hours)) > 1e-6:
+            add("week_hours_stale", cid, f"Stored hours per week {float(r['week_hr_cnt']):g}, the work week has "
+                f"{sum(hours):g} h.")
+        for y in years:
+            if not any(x.year == y for x in cal.exc):
+                add("no_exceptions_in_year", cid, f"No exception date (holiday or changed hours) in {y}.", year=y)
+        if proj is None or cid == prj["clndr_id"]:
+            continue
+        diff = _week_diff(cal, proj)
+        if diff:
+            add("work_week_differs", cid, f"Work week differs from the project calendar {proj.name!r}: "
+                + "; ".join(diff) + ".")
+        for x in _holidays(proj, y0, y1):
+            if cal.is_workday(x):
+                add("project_holiday_worked", cid, f"{WEEKDAYS[x.weekday()]} {x} is a holiday of the project calendar "
+                    f"{proj.name!r}; this calendar works {cal.day_hours(x):g} h that day.", when=x)
+        for x in _holidays(cal, y0, y1):
+            if proj.is_workday(x):
+                add("holiday_not_in_project", cid, f"{WEEKDAYS[x.weekday()]} {x} is a holiday of this calendar; the "
+                    f"project calendar {proj.name!r} works {proj.day_hours(x):g} h that day.", when=x)
+    # open resource dependent activities whose assigned resources have no usable calendar
+    by_task: dict = {}
+    for t in d["rd"]:
+        rc = cals.get(t["rsrc_clndr_id"])
+        why = ("resource not found" if t["found"] is None else "no calendar" if t["rsrc_clndr_id"] is None
+               else f"calendar {t['rsrc_clndr_id']} not found" if rc is None else "calendar unreadable" if rc.error
+               else None)
+        if why:
+            by_task.setdefault(t["task_id"], [t, []])[1].append(f"{t['rsrc_short_name'] or t['rsrc_id']} ({why})")
+    for t, res in by_task.values():
+        add("rsrc_dep_no_calendar", t["clndr_id"], "Resource dependent activity; assigned resources without a usable "
+            f"calendar: {', '.join(res)}. This server's CPM engine schedules those assignments on the activity "
+            "calendar.", task=t)
+
+    kind_rank = {k: i for i, k in enumerate(CAL_CHECK_KINDS)}
+    found.sort(key=lambda f: (SEVERITY_RANK[f["severity"]], kind_rank[f["kind"]], (f["calendar"] or "").lower(),
+                              f["clndr_id"] if f["clndr_id"] is not None else -1, f["date"] or "", f["year"] or 0,
+                              f["task_code"] or ""))
+    counts = {k: 0 for k in CAL_CHECK_KINDS}
+    per_cal: dict = {}
+    for f in found:
+        counts[f["kind"]] += 1
+        per_cal[f["clndr_id"]] = per_cal.get(f["clndr_id"], 0) + 1
+    by_sev = {s: sum(n for k, n in counts.items() if CAL_CHECK_KINDS[k] == s) for s in SEVERITY_RANK}
+    role_rank = {"project": 0, "activity": 1, "resource": 2, "base": 3}
+    listed = []
+    for cid in sorted(chain, key=lambda c: (role_rank[roles[c][0]], (raw[c]["clndr_name"] if c in raw else "").lower(), c)):
+        r, cal = raw.get(cid), cals.get(cid)
+        ok = cal is not None and not cal.error
+        listed.append({"clndr_id": cid, "name": r["clndr_name"] if r else None, "type": r["clndr_type"] if r else None,
+                       "roles": roles[cid], "base_clndr_id": r["base_clndr_id"] if r else None,
+                       "activities": acts.get(cid, (0, 0))[0], "open_activities": acts.get(cid, (0, 0))[1],
+                       "resource_assignments": asg.get(cid, 0),
+                       "hours_per_day": float(r["day_hr_cnt"]) if r and r["day_hr_cnt"] else None,
+                       "work_week": _week_text(cal) if ok else None,
+                       "week_hours": sum(sum(f - s for s, f in sh) for sh in cal.week) / 60 if ok else None,
+                       "holidays_in_span": len(_holidays(cal, y0, y1)) if ok else None,
+                       "exceptions_in_span": sum(1 for x in cal.exc if y0 <= x.year <= y1) if ok else None,
+                       "findings": per_cal.get(cid, 0)})
+    res = _slice([f for f in found if f["kind"] in want], offset, limit)
+    res.update(project=project, span={"from_year": y0, "to_year": y1, "basis": "from_year / to_year" if (
+        from_year is not None or to_year is not None) else basis},
+               calendars=listed[:MAX_ROWS], counts=counts, by_severity=by_sev, schedule_state=d["state"],
+               note=" ".join(notes + [
+                   "Holidays = exception dates without working time on a weekday the calendar's work week works; "
+                   "a calendar's exceptions include its base calendar's. Compared with the project calendar only. "
+                   "Hours per day convert hours to days; stored hours per week are never used in arithmetic here."]
+                   + ([f"calendars lists the first {MAX_ROWS} of {len(listed)}."] if len(listed) > MAX_ROWS else [])))
     return res
 
 
@@ -13192,6 +13475,286 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
             "warnings": warnings, "schedule_state": state,
             "note": "Values of the last F9 in P6. The Dashboard sheet is protected (no password) and prints on one A3 "
                     "landscape page."}
+
+
+# ----------------------------------------------------------------- look-ahead export (p6_export_lookahead)
+
+LA_COLS = (("Activity ID", 13), ("Activity name", 44), ("Start", 12.5), ("Finish", 12.5), ("Rem. dur. (d)", 8),
+           ("Total float (d)", 8), ("Critical", 8), ("Status", 11.5))
+LA_BAR = {"critical": "B2182B", "normal": "2B6CB0", "completed": "9CA3AF"}  # bar fills
+LA_NONWORK, LA_BAND, LA_DD = "E5E7EB", "DCE6F1", "E67E22"  # non-work day, WBS band, data date marker
+
+
+class _XlCells:
+    """Cell writer for openpyxl sheets with one Font / Alignment / PatternFill / Border object per distinct style
+    (openpyxl hashes every new style object it is given). Text from the database is never a formula."""
+
+    def __init__(self):
+        from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        self._re, self._mk = ILLEGAL_CHARACTERS_RE, (Alignment, Border, Font, PatternFill, Side)
+        self._cache: dict = {}
+
+    def _get(self, key: tuple, make: Callable):
+        if key not in self._cache:
+            self._cache[key] = make()
+        return self._cache[key]
+
+    def fill(self, color: str):
+        return self._get(("fill", color), lambda: self._mk[3]("solid", fgColor=color))
+
+    def border(self, left: Optional[tuple] = None, bottom: Optional[tuple] = None):
+        """left / bottom: (style, color) or None."""
+        side = self._mk[4]
+        return self._get(("border", left, bottom), lambda: self._mk[1](
+            left=side(style=left[0], color=left[1]) if left else side(),
+            bottom=side(style=bottom[0], color=bottom[1]) if bottom else side()))
+
+    def put(self, ws, r: int, c: int, v, fmt: Optional[str] = None, bold: bool = False, size: float = 9,
+            color: str = DASH_INK, bg: Optional[str] = None, h: Optional[str] = None, wrap: bool = False):
+        if isinstance(v, str):
+            v = self._re.sub("", v)[:32000]
+        cell = ws.cell(row=r, column=c, value=v)
+        if isinstance(v, str) and v.startswith("="):
+            cell.data_type = "s"  # text from the database, never a formula
+        cell.font = self._get(("font", size, bold, color), lambda: self._mk[2](name="Calibri", size=size, bold=bold,
+                                                                               color=color))
+        cell.alignment = self._get(("align", h, wrap), lambda: self._mk[0](horizontal=h, vertical="center",
+                                                                           wrap_text=wrap))
+        if fmt:
+            cell.number_format = fmt
+        if bg:
+            cell.fill = self.fill(bg)
+        return cell
+
+
+def _la_book(d: dict) -> tuple[Any, dict]:
+    """The look-ahead workbook of what p6_export_lookahead read: one sheet, the fixed columns LA_COLS then a day or
+    week grid of the window with bars. Returns (workbook, {activities, wbs_bands, grid_columns, bars,
+    data_date_column})."""
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter as letter
+    from openpyxl.worksheet.page import PageMargins
+
+    x, frm, to, cal = _XlCells(), d["frm"], d["to"], d["cal"]
+    wb = Workbook()
+    wb.properties.creator = "MCP for Primavera P6 server"
+    wb.properties.title = f"{d['project']} look-ahead"
+    ws = wb.active
+    ws.title = "Look-ahead"
+    nfix, g0 = len(LA_COLS), len(LA_COLS) + 1
+    if d["grid"] == "day":
+        last = (to - timedelta(microseconds=1)).date()
+        cols = [(datetime.combine(frm.date() + timedelta(days=k), time()),
+                 datetime.combine(frm.date() + timedelta(days=k + 1), time()))
+                for k in range((last - frm.date()).days + 1)]
+    else:
+        cols = [(_db_dt(w["from"]), _db_dt(w["to"])) for w in d["weeks"]]
+    DATE = "dd-mmm-yy"
+    head, ink = DASH_HEAD, _ink_on(DASH_HEAD)
+    # title, window, legend, source
+    x.put(ws, 1, 1, f"Look-ahead of {d['project']}" + (f", {d['name']}" if d["name"] else ""), bold=True, size=14)
+    ws.row_dimensions[1].height = 22
+    dd_txt = _db_dt(d["data_date"]).strftime("%d-%b-%y %H:%M") if _db_dt(d["data_date"]) else "none"
+    lsd = _db_dt(d["last_schedule_date"])
+    x.put(ws, 2, 1, f"Data date {dd_txt}. Window {frm:%d-%b-%y %H:%M} to {to:%d-%b-%y %H:%M} ({d['days']} calendar "
+          f"days, {d['grid']} grid). Last F9 {lsd.strftime('%d-%b-%y %H:%M') if lsd else 'not recorded'}.", color=DASH_MUTED)
+    x.put(ws, 3, 1, "Bars:", bold=True)
+    legend = [("Critical", LA_BAR["critical"]), ("Not critical", LA_BAR["normal"]), ("Completed", LA_BAR["completed"]),
+              ("Data date", LA_DD), ("Non-work", LA_NONWORK)]
+    for i, (text, color) in enumerate(legend):
+        x.put(ws, 3, 3 + i, text, bold=True, color=_ink_on(color), bg=color, h="center")
+    x.put(ws, 4, 1, f"Source: {d['db']}. Values of the last F9 in P6; non-work days of the project calendar"
+          + (f" {d['cal'].name!r}." if cal else " (not shaded: the project calendar is missing or unreadable)."),
+          color=DASH_MUTED, size=8)
+    # headers: fixed columns over rows 5 and 6, the grid's weeks in row 5 and its days (or weeks) in row 6
+    for i, (lab, width) in enumerate(LA_COLS, 1):
+        ws.merge_cells(start_row=5, start_column=i, end_row=6, end_column=i)
+        x.put(ws, 5, i, lab, bold=True, color=ink, bg=head, h="center", wrap=True)
+        x.put(ws, 6, i, None, bg=head)
+        ws.column_dimensions[letter(i)].width = width
+    ids = [len(str(a["task_code"] or "")) for _, items in d["groups"] for a in items]
+    ws.column_dimensions["A"].width = min(32, max(LA_COLS[0][1], 1.1 * max(ids, default=0) + 2))  # the longest ID
+    dd = _db_dt(d["data_date"])
+    try:  # the line goes before the next work time from the data date (a data date at 18:00 marks the next day)
+        mark_at = cal.next_work_start(dd) if cal and dd else dd
+    except ValueError:
+        mark_at = dd
+    dd_col = next((g0 + k for k, (a, b) in enumerate(cols) if mark_at and a <= mark_at < b), None)
+    if d["grid"] == "day":
+        k = 0
+        while k < len(cols):  # one merged label per window week
+            wk = min((cols[k][0].date() - frm.date()).days // 7, len(d["weeks"]) - 1)
+            j = k
+            while j + 1 < len(cols) and min((cols[j + 1][0].date() - frm.date()).days // 7, len(d["weeks"]) - 1) == wk:
+                j += 1
+            if j > k:
+                ws.merge_cells(start_row=5, start_column=g0 + k, end_row=5, end_column=g0 + j)
+            x.put(ws, 5, g0 + k, f"Week {wk + 1}" + (f", {cols[k][0]:%d-%b}" if j - k >= 3 else ""), bold=True,
+                  color=ink, bg=head, h="center")
+            for c in range(k + 1, j + 1):
+                x.put(ws, 5, g0 + c, None, bg=head)
+            k = j + 1
+        for k, (a, _) in enumerate(cols):
+            off = cal is not None and not cal.is_workday(a.date())
+            on_dd = g0 + k == dd_col
+            x.put(ws, 6, g0 + k, f"{'MTWTFSS'[a.weekday()]}\n{a.day}", bold=on_dd, size=8,
+                  color="FFFFFF" if on_dd else DASH_INK, bg=LA_DD if on_dd else LA_NONWORK if off else "F3F4F6",
+                  h="center", wrap=True)
+            ws.column_dimensions[letter(g0 + k)].width = 3.6
+    else:
+        for k, (a, _) in enumerate(cols):
+            on_dd = g0 + k == dd_col
+            x.put(ws, 5, g0 + k, f"Week {k + 1}", bold=True, color=ink, bg=head, h="center")
+            x.put(ws, 6, g0 + k, f"{a:%d-%b}", bold=on_dd, size=8, color="FFFFFF" if on_dd else DASH_INK,
+                  bg=LA_DD if on_dd else "F3F4F6", h="center")
+            ws.column_dimensions[letter(g0 + k)].width = 7
+    ws.row_dimensions[6].height = 24
+    nonwork = [d["grid"] == "day" and cal is not None and not cal.is_workday(a.date()) for a, _ in cols]
+
+    r, bars, acts, bands = 7, 0, 0, 0
+    for band, items in d["groups"]:
+        x.put(ws, r, 1, band, bold=True, bg=LA_BAND)
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=nfix)
+        for c in range(2, nfix + len(cols) + 1):
+            x.put(ws, r, c, None, bg=LA_BAND)
+        r, bands = r + 1, bands + 1
+        for a in items:
+            s, f = _db_dt(a["fcst_start"]), _db_dt(a["fcst_finish"])
+            done = a["status_code"] == "TK_Complete"
+            x.put(ws, r, 1, a["task_code"])
+            x.put(ws, r, 2, a["task_name"])
+            x.put(ws, r, 3, s, fmt=DATE + ('" A"' if a["act_start_date"] else ""), h="center")
+            x.put(ws, r, 4, f, fmt=DATE + ('" A"' if done and a["act_end_date"] else ""), h="center")
+            x.put(ws, r, 5, a["rem_dur_d"], fmt="0.0", h="right")
+            x.put(ws, r, 6, None if done else a["total_float_d"], fmt="0.0", h="right")
+            x.put(ws, r, 7, "Yes" if a["critical"] else None, bold=True, color=LA_BAR["critical"], h="center")
+            x.put(ws, r, 8, STATUS_NAMES.get(a["status_code"], a["status_code"]), h="center")
+            color = LA_BAR["completed"] if done else LA_BAR["critical"] if a["critical"] else LA_BAR["normal"]
+            mile = a["task_type"] in ("TT_Mile", "TT_FinMile")
+            for k, (c0, c1) in enumerate(cols):
+                on = s is not None and f is not None and (
+                    (c0 <= s < c1) if (mile or s == f) else (s < c1 and f > c0))
+                if on:
+                    bars += 1
+                    x.put(ws, r, g0 + k, "◆" if mile else None, color=color if mile else "FFFFFF",
+                          bg=None if mile else color, h="center", size=8)
+                elif nonwork[k]:
+                    x.put(ws, r, g0 + k, None, bg=LA_NONWORK)
+            r, acts = r + 1, acts + 1
+    if dd_col is not None:  # the data date: a line on the left edge of its column, header to the last row
+        for rr in range(5, r):
+            ws.cell(rr, dd_col).border = x.border(left=("medium", LA_DD))
+    ws.freeze_panes = ws.cell(7, g0)
+    ws.print_title_rows = "5:6"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A3
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
+    ws.page_margins = PageMargins(left=0.4, right=0.4, top=0.5, bottom=0.6)
+    ws.oddFooter.center.text = "Page &P of &N"
+    ws.oddFooter.left.text = f"{d['project']} look-ahead".replace("&", "&&")  # & starts a header code
+    ws.print_area = f"A1:{letter(nfix + len(cols))}{max(r - 1, 6)}"
+    return wb, {"activities": acts, "wbs_bands": bands, "grid_columns": len(cols), "bars": bars,
+                "data_date_column": letter(dd_col) if dd_col else None}
+
+
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
+def p6_export_lookahead(project: ProjectId, path: str, weeks: WindowWeeks = 3, from_date: Optional[DateTimeStr] = None,
+                        grid: LaGrid = "auto", include_in_progress: bool = True, include_completed: bool = False,
+                        critical_only: bool = False, wbs_name_contains: Optional[str] = None,
+                        code_type: Optional[str] = None, code_value: Optional[str] = None,
+                        include_child_codes: bool = True, overwrite: bool = False) -> dict:
+    """Write the p6_lookahead window of a project as a printable Excel sheet to path (.xlsx in an existing folder;
+    an existing file is refused unless overwrite=True; never writes the database). Same window, activities,
+    categories and critical flag as p6_lookahead with weeks= (default 3) and the same filters. The sheet: title
+    with project, data date and window; activities grouped by WBS (P6 order, one band per WBS holding listed
+    activities) with Activity ID, name, start, finish (actual dates marked A), remaining duration and total float
+    in days of each calendar, critical, status; then a grid of the window, days (grid='day', at most 92 days) or
+    weeks (grid='week'; 'auto' = days up to 6 weeks), with a bar per activity (critical red, completed gray,
+    others blue, milestones as a diamond), non-work days of the project calendar shaded and the data date marked.
+    Landscape A3, fit to width, header rows repeated on every page, panes frozen. Result: path, rows written
+    (activities, wbs_bands, grid_columns, bars), counts per category (as p6_lookahead), window, warnings."""
+    weeks = int(weeks)
+    if not 1 <= weeks <= 52:
+        raise ValueError("weeks must be 1 to 52")
+    if grid not in get_args(LaGrid):
+        raise ValueError(f"grid must be one of {list(get_args(LaGrid))}")
+    days = 7 * weeks
+    use = grid if grid != "auto" else "day" if days <= LA_AUTO_DAYS else "week"
+    if use == "day" and days > LA_DAY_GRID_MAX:
+        raise ValueError(f"grid='day' covers at most {LA_DAY_GRID_MAX} days ({LA_DAY_GRID_MAX // 7} weeks): "
+                         "use grid='week' or fewer weeks")
+    if from_date:
+        _parse_dt(from_date, "from_date")
+    path = _export_target(path, ".xlsx")
+    if os.path.exists(path) and not overwrite:
+        raise ValueError(f"{path} already exists: pass overwrite=True to replace it, or choose another path.")
+    _openpyxl()
+    con = _connect()
+    pid = _project_id(con, project)
+    con.execute("BEGIN")  # window, activities, counts, WBS tree and calendar from one snapshot
+    try:
+        la = _la_query(con, pid, project, days, from_date, include_in_progress, include_completed, wbs_name_contains,
+                       code_type, code_value, include_child_codes, critical_only)
+        rows = con.execute(f"{la['sql']}\nLIMIT {LA_EXPORT_CAP + 1}", la["args"]).fetchall()
+        counts = la["counts"]()
+        tree = _wbs_tree(con, pid)
+        pcols = _cols(con, "PROJECT")
+        prj = con.execute("SELECT " + ", ".join(c if c in pcols else f"NULL AS {c}" for c in ("clndr_id", "last_schedule_date"))
+                          + " FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()
+        cal = _calendars(con).get(prj["clndr_id"]) if prj["clndr_id"] is not None else None
+        state = _schedule_state(con, pid)
+    finally:
+        con.rollback()
+    warnings: list[str] = []
+    cut = len(rows) > LA_EXPORT_CAP
+    if cut:
+        rows = rows[:LA_EXPORT_CAP]
+        warnings.append(f"More than {LA_EXPORT_CAP:,} activities: the first {LA_EXPORT_CAP:,} in look-ahead order are "
+                        "written; narrow with wbs_name_contains, code_type / code_value or critical_only.")
+    if cal is None or cal.error:
+        warnings.append("The project calendar is missing or unreadable: non-work days are not shaded.")
+        cal = None
+    if state["stale"]:
+        warnings.append("This server changed the schedule after the last F9: open P6 and press F9, then export again.")
+    order = {n["wbs_id"]: i for i, n in enumerate(tree)}
+    node = {n["wbs_id"]: n for n in tree}
+    acts = [{**_act_view(r), **la["extra"](r), "wbs_id": r["wbs_id"]} for r in rows]
+    nodates = sum(1 for a in acts if not a["fcst_start"] or not a["fcst_finish"])
+    if nodates:
+        warnings.append(f"{nodates} activities have no start or finish date: no bar is drawn for them.")
+    groups: dict = {}
+    for a in acts:  # look-ahead order kept inside each WBS
+        groups.setdefault(a["wbs_id"] if a["wbs_id"] in order else None, []).append(a)
+    bands = [(f"{node[w]['wbs_code']}  {node[w]['wbs_name'] or ''}".rstrip() if w is not None
+              else "(not in the WBS tree)", items)
+             for w, items in sorted(groups.items(), key=lambda kv: order.get(kv[0], len(order)))]
+    name = next((n["wbs_name"] for n in tree if n["depth"] == 0), None)
+    source = (", ".join(os.path.basename(f) for f in SETTINGS.xer_files) if SETTINGS.xer_files  # XER-only mode
+              else os.path.basename(DB_PATH))
+    data = {"project": project, "name": name, "db": source, "frm": la["frm"], "to": la["to"], "days": days,
+            "weeks": la["weeks"], "grid": use, "cal": cal, "data_date": la["data_date"],
+            "last_schedule_date": prj["last_schedule_date"], "groups": bands}
+    wb, written = _la_book(data)
+    if written["data_date_column"] is None:
+        warnings.append("The data date is outside the window: no data date line.")
+    tmp = path + ".tmp"
+    try:  # written beside the target, then swapped in: a failed export leaves the old file intact
+        wb.save(tmp)
+        os.replace(tmp, path)
+    except PermissionError as e:
+        raise ValueError(f"Cannot write {path}: close it in Excel, then export again ({e.strerror})") from None
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    res = {"path": path, "project": project, "data_date": la["data_date"], "window": la["window"],
+           "weeks": la["weeks"], "grid": use, "rows": written, "counts": counts, "truncated": cut,
+           "critical_definition": la["critical_definition"], "warnings": warnings, "schedule_state": state,
+           "note": "Values of the last F9 in P6. One sheet, landscape A3 fit to width, header rows repeated."}
+    if la["code_filter"]:
+        res["code_filter"] = la["code_filter"]
+    return res
 
 
 # ----------------------------------------------------------------- P6 EPPM server (p6mcp.eppm)

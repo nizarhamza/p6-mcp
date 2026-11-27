@@ -35,6 +35,19 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   32 %. `fields=` works with it. The default `detail="full"` keeps every key of every row, as before.
 - `explain=True` on `p6_update_integrity` and `p6_compare_projects` returns the fixed texts described below, so
   the result is the same as in 3.4.
+- `p6_calendar_check`: checks the calendars a project uses (project calendar, activity calendars, calendars of
+  the assigned resources and their base calendars) over the years from the data date to the project finish.
+  Findings, one row each with the calendar, date or year, a detail and the number of activities on that calendar:
+  a holiday of the project calendar that another calendar works and the reverse, years without any exception
+  date, hours per day or per week that disagree with the work week, work weeks other than the project calendar's,
+  unreadable or missing calendars and base calendars, calendars without working time, and open resource dependent
+  activities whose resources have no usable calendar. Read only, paged, with counts per kind and per severity.
+- `p6_export_lookahead`: the `p6_lookahead` window as a printable Excel sheet (same activities, categories,
+  critical flag and filters): activities grouped by WBS in P6 order with Activity ID, name, start, finish (actual
+  dates marked A), remaining duration, total float, critical and status, then a day or week grid with a bar per
+  activity (critical in red, completed in gray, milestones as a diamond), non-work days of the project calendar
+  shaded and the data date marked. Landscape A3 fit to width, header rows repeated on every page, panes frozen.
+  Writes a file, like `p6_export_dashboard`: Full profile only, never offered to remote clients.
 
 ### Changed
 

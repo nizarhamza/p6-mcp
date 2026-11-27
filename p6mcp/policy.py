@@ -35,9 +35,9 @@ TOOL_KIND: dict[str, str] = {
     "p6_schedule_options": READ, "p6_schedule_whatif": READ, "p6_inspect_xer": READ,
     "p6_list_backups": READ, "p6_edit_log": READ, "p6_diagnose": READ, "p6_sql_select": READ,
     "p6_list_udfs": READ, "p6_shop_search": READ, "p6_shop_get": READ,
-    "p6_eppm_projects": READ, "p6_eppm_status": READ,
+    "p6_eppm_projects": READ, "p6_eppm_status": READ, "p6_calendar_check": READ,
     # file output (p6_eppm_pull: the local working copy, the server is only read)
-    "p6_export_xer": FILE, "p6_export_dashboard": FILE, "p6_eppm_pull": FILE,
+    "p6_export_xer": FILE, "p6_export_dashboard": FILE, "p6_export_lookahead": FILE, "p6_eppm_pull": FILE,
     # write
     "p6_update_activity": WRITE, "p6_update_activities": WRITE, "p6_update_assignment": WRITE,
     "p6_update_assignments": WRITE,
@@ -131,7 +131,8 @@ def refusal(tool: str, profile: str, allow_writes: bool, shop: bool = True) -> O
 # - writes, and p6_eppm_pull (it rewrites the local working copy), need the remote switch remote_allow_writes
 #   on top of the local rules, and a grant approved with edits (scope p6:write).
 REMOTE_READ_SCOPE, REMOTE_WRITE_SCOPE = "p6:read", "p6:write"
-LOCAL_PATH_TOOLS = frozenset({"p6_import_xer", "p6_inspect_xer", "p6_export_xer", "p6_export_dashboard"})
+LOCAL_PATH_TOOLS = frozenset({"p6_import_xer", "p6_inspect_xer", "p6_export_xer", "p6_export_dashboard",
+                              "p6_export_lookahead"})
 REMOTE_NEVER = LOCAL_PATH_TOOLS | SHOP_TOOLS | frozenset(t for t, k in TOOL_KIND.items() if k in (DESTRUCTIVE, CONFIG))
 REMOTE_AS_WRITE = frozenset({"p6_eppm_pull"})
 REMOTE_NO_PATH_ARGS = {"p6_schedule_options": ("xer_path",)}  # listed remotely, but these arguments are refused
