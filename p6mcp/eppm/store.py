@@ -458,11 +458,11 @@ def _finish(out: sqlite3.Connection, profile: dict, projects: list[dict], sched_
         if out.execute("UPDATE NEXTKEY SET key_seq_num = ? WHERE lower(key_name) = lower(?)",
                        (LOCAL_ID_BASE, key)).rowcount == 0:
             out.execute("INSERT INTO NEXTKEY (key_name, key_seq_num) VALUES (?, ?)", (key, LOCAL_ID_BASE))
-    s = server_module
-    if s is None:
-        from p6mcp import server as s
+    # the schedule option writer and the column cache of the server (server_module: accepted from older
+    # callers, no longer needed); imported here, not at the top: p6mcp.core.state imports this module
+    from p6mcp.core import props, state
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    s._cols_cache.clear()
+    state._cols_cache.clear()
     try:
         for p in projects:
             row = sched_rows.get(p["object_id"])
@@ -477,8 +477,8 @@ def _finish(out: sqlite3.Connection, profile: dict, projects: list[dict], sched_
             warnings += [f"{p['project_id']}: {w}" for w in warn]
             try:
                 vals = {k: (v if k == "key_activity_for_multiple_longest_paths"
-                            else s._norm_opt("scheduling", k, v, lenient=True)[0]) for k, v in vals.items()}
-                s._set_props(out, p["object_id"], "scheduling", vals, lpl, now)
+                            else props._norm_opt("scheduling", k, v, lenient=True)[0]) for k, v in vals.items()}
+                props._set_props(out, p["object_id"], "scheduling", vals, lpl, now)
                 # a copy of the server's options, not an edit: stamped with the project's last schedule, so the
                 # staleness check (rows changed after the last F9) does not count the pull itself
                 cols = {r[1].lower() for r in out.execute("PRAGMA table_info(PROJPROP)")}
@@ -491,4 +491,4 @@ def _finish(out: sqlite3.Connection, profile: dict, projects: list[dict], sched_
             except (ValueError, sqlite3.Error) as e:
                 warnings.append(f"{p['project_id']}: schedule options not stored: {e}")
     finally:
-        s._cols_cache.clear()  # the cache describes the active database, not this copy
+        state._cols_cache.clear()  # the cache describes the active database, not this copy

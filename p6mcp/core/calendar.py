@@ -10,6 +10,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Optional
 
 from p6mcp.core.db import _alive, _fmt_dt, _parse_dt
+from p6mcp.core.props import _blob_text, _p6_find, _p6_tree
 
 
 CAL_EPOCH = date(1899, 12, 30)  # P6 calendar exception dates are day serials from this date
@@ -44,7 +45,6 @@ def _cal_parse(data: str) -> tuple[Optional[tuple], tuple]:
     """CALENDAR.clndr_data -> (week, exceptions), immutable because cached. week: shifts per Python
     weekday (P6 day '1' is Sunday), None without a DaysOfWeek node. exceptions: ((date, shifts), ...),
     serial dates from 1899-12-30, no shifts = non-work day."""
-    from p6mcp.server import _p6_find, _p6_tree
     tree = _p6_tree(data)
     try:
         week, node = None, _p6_find(tree, "DaysOfWeek")
@@ -226,7 +226,6 @@ def _calendars(con, only: Optional[int] = None) -> dict[int, _Cal]:
     resource calendar without one takes its base calendar's week (P6 stores the base's week hours on it).
     A base calendar gives its exceptions (the calendar's own dates win). An unreadable clndr_data gives a
     calendar without working time (nothing taken from its base) and .error set."""
-    from p6mcp.server import _blob_text
     has_type = any(r[1].lower() == "clndr_type" for r in con.execute("PRAGMA table_info(CALENDAR)"))
     typ = "clndr_type" if has_type else "NULL AS clndr_type"
     sql = (f"SELECT clndr_id, clndr_name, base_clndr_id, day_hr_cnt, clndr_data, {typ} FROM CALENDAR WHERE "

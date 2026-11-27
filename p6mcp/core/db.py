@@ -16,13 +16,33 @@ from datetime import datetime
 from typing import Callable, Iterable, Mapping, Optional, Sequence, get_args
 
 from p6mcp import config as _config
+from p6mcp import confirm as _confirm
 from p6mcp import policy as _policy
 from p6mcp import schema as _schema
 
 from p6mcp.core import state as _state
 from p6mcp.core.state import _cols_cache, _ro_cons, _schema_cache
-from p6mcp.core.constants import _cstr_label, HPD_SQL, MAX_ROWS, XER_READ_ONLY
+from p6mcp.core.constants import _cstr_label, HPD_SQL, MAX_ROWS, SQL_PRAGMAS, XER_READ_ONLY
 from p6mcp.registry import ACT_FIELDS, ACT_HOURS, DATETIME_PATTERN, Detail
+
+
+_SQL_ALLOWED = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION,
+                getattr(sqlite3, "SQLITE_RECURSIVE", 33)}
+
+
+_SQL_SECRET_COL = re.compile(r"pass(wd|word)|pwd", re.I)  # USERS.passwd, email_srv_passwd, EXTAPP, EXPPROJ...
+
+
+def _sql_authorizer(action: int, arg1, arg2, dbname, source) -> int:
+    """p6_sql_select: only reading is authorized (no write, ATTACH, schema change or PRAGMA that sets). For a remote
+    client (claude.ai, ChatGPT) credential columns read as NULL: their values would leave the PC."""
+    if action == sqlite3.SQLITE_READ and _confirm.CLIENT.get() is not None and _SQL_SECRET_COL.search(str(arg2)):
+        return sqlite3.SQLITE_IGNORE
+    if action in _SQL_ALLOWED:
+        return sqlite3.SQLITE_OK
+    if action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() in SQL_PRAGMAS:
+        return sqlite3.SQLITE_OK
+    return sqlite3.SQLITE_DENY
 
 
 def _schema_info() -> dict:

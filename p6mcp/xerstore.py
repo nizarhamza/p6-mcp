@@ -104,7 +104,7 @@ def _shift(col: str, value, offset: int):
 
 def build(paths: Sequence[str], dest: str) -> dict:
     """Load the XER files into a new SQLite database at dest. Returns the manifest."""
-    from p6mcp import server as s  # the XER reader and the schedule option writer live in the server
+    from p6mcp.core import xer  # here, not at the top: p6mcp.core.state imports this module
 
     if not paths:
         raise XerStoreError("No XER file selected.")
@@ -118,7 +118,7 @@ def build(paths: Sequence[str], dest: str) -> dict:
     try:
         for k, path in enumerate(paths):
             try:
-                header, tables, meta = s._xer_read_meta(path)
+                header, tables, meta = xer._xer_read_meta(path)
             except (OSError, ValueError) as e:
                 raise XerStoreError(f"{os.path.basename(path)}: {e}") from e
             if "PROJECT" not in tables or not tables["PROJECT"]:
@@ -126,7 +126,7 @@ def build(paths: Sequence[str], dest: str) -> dict:
             offset = k * ID_STEP
             info = {"path": os.path.abspath(path), "xer_version": header[1] if len(header) > 1 else None,
                     "id_offset": offset, "projects": [], "rows": {}, "warnings": []}
-            fields = {s.XER_ALIASES.get(t, t): f for t, f in xer_fields(path).items()}
+            fields = {xer.XER_ALIASES.get(t, t): f for t, f in xer_fields(path).items()}
             for t in [t for t in fields if t not in tables]:  # tables without rows keep their columns
                 tables[t] = []
             for t, rows in tables.items():
@@ -167,8 +167,8 @@ def build(paths: Sequence[str], dest: str) -> dict:
                 info["warnings"].append(f"rows with a wrong field count: {meta['bad_rows']}")
             info["_tables"] = tables
             manifest["files"].append(info)
-        _support_tables(con, s)
-        _schedule_options(con, s, manifest)
+        _support_tables(con, None)
+        _schedule_options(con, manifest)
         con.commit()
     except BaseException:
         con.close()
@@ -212,10 +212,11 @@ def _support_tables(con: sqlite3.Connection, s) -> None:
             con.execute(f"CREATE INDEX IF NOT EXISTS ix_{t}_{c} ON {t} ({c})")
 
 
-def _schedule_options(con: sqlite3.Connection, s, manifest: dict) -> None:
+def _schedule_options(con: sqlite3.Connection, manifest: dict) -> None:
     """XER SCHEDOPTIONS -> PROJPROP 'scheduling' of each project, through the server's own writer."""
+    from p6mcp.core import props, state  # here, not at the top: p6mcp.core.state imports this module
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    s._cols_cache.clear()
+    state._cols_cache.clear()
     try:
         for f in manifest["files"]:
             x = f["_tables"]
@@ -231,12 +232,12 @@ def _schedule_options(con: sqlite3.Connection, s, manifest: dict) -> None:
                 def key_map(raw: str, off=off):
                     return int(raw) + off if _INT.fullmatch(raw) and int(raw) > 0 else None
                 try:
-                    _res, warn = s._sched_write(con, p["proj_id"], (x, xp, key_map), {}, None, None, now)
+                    _res, warn = props._sched_write(con, p["proj_id"], (x, xp, key_map), {}, None, None, now)
                     f["warnings"] += warn
                 except (ValueError, sqlite3.Error) as e:
                     f["warnings"].append(f"schedule options of {p['project_id']} not loaded: {e}")
     finally:
-        s._cols_cache.clear()  # the cache describes the active database, not this store
+        state._cols_cache.clear()  # the cache describes the active database, not this store
 
 
 def ensure(paths: Sequence[str]) -> tuple[str, dict]:
