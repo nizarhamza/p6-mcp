@@ -3,6 +3,11 @@ P6 Professional (standalone SQLite) MCP server.
 
 Reads and edits a local Primavera P6 Professional SQLite database (PPMDB*.db).
 
+This module is the facade of the server (split in 3.7.0): the code lives in p6mcp.registry (tool
+registration, parameter types), p6mcp.core (state, database access, calendars, CPM engine,
+analysis, reporting, XER, workbooks) and p6mcp.tools (the tools by family, imported below in the
+order of the tool list). Every name of those modules stays importable from here.
+
 Safety model:
   * Every write tool is a DRY RUN unless called with confirm=True.
   * A confirmed write refuses to run while P6 (PM.exe) is open.

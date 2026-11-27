@@ -158,7 +158,7 @@ def _xer_read_meta(path: str) -> tuple[list[str], dict[str, list[dict]], dict]:
             if len(vals) != len(fields):
                 mismatch[cur] += 1
                 vals = (vals + [""] * len(fields))[:len(fields)]
-            tables[cur].append({f: _xer_decode(v) for f, v in zip(fields, vals)})
+            tables[cur].append({f: _xer_decode(v) for f, v in zip(fields, vals, strict=False)})
         elif line.startswith("%E"):
             end = True
     if not header:
@@ -675,7 +675,8 @@ def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[s
         (one(f"SELECT rsrc_id FROM PROJRISK WHERE risk_id IN {_ids_sql(risks)}") if has("PROJRISK", "rsrc_id") else set())
     while True:  # parents of used resources
         more = one(f"SELECT parent_rsrc_id FROM RSRC WHERE rsrc_id IN {_ids_sql(rsrc)}") - rsrc
-        if not more: break
+        if not more:
+            break
         rsrc |= more
     cals = one(f"SELECT clndr_id FROM PROJECT WHERE proj_id = {pid}") | \
         one(f"SELECT clndr_id FROM TASK WHERE proj_id = {pid}{al('TASK')}") | \
@@ -683,14 +684,16 @@ def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[s
         one(f"SELECT clndr_id FROM CALENDAR WHERE proj_id = {pid}{al('CALENDAR')}")
     while True:
         more = one(f"SELECT base_clndr_id FROM CALENDAR WHERE clndr_id IN {_ids_sql(cals)}") - cals
-        if not more: break
+        if not more:
+            break
         cals |= more
     types = one(f"SELECT actv_code_type_id FROM TASKACTV WHERE task_id IN {_ids_sql(tasks)}") | \
         one(f"SELECT actv_code_type_id FROM ACTVTYPE WHERE proj_id = {pid}{al('ACTVTYPE')}")
     obs = one(f"SELECT obs_id FROM PROJWBS WHERE proj_id = {pid}{al('PROJWBS')}")
     while True:
         more = one(f"SELECT parent_obs_id FROM OBS WHERE obs_id IN {_ids_sql(obs)}") - obs
-        if not more: break
+        if not more:
+            break
         obs |= more
     roles = tree("ROLES", "role_id", "parent_role_id",
                  (one(f"SELECT role_id FROM TASKRSRC WHERE proj_id = {pid}{al('TASKRSRC')}")

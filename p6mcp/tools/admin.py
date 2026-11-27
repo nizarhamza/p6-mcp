@@ -230,7 +230,8 @@ def p6_create_eps(eps_id: str, eps_name: str, parent_eps: Optional[str] = None,
         parent = _eps_wbs_id(con, parent_eps) if parent_eps else None
         _create_eps(con, eps_id, eps_name, parent, _now_str(con))
         plan = [f"Create EPS {eps_id} '{eps_name}'" + (f" under {parent_eps}" if parent_eps else " (top level)")]
-        if backup: plan.append(f"Backup: {backup}")
+        if backup:
+            plan.append(f"Backup: {backup}")
         return _commit(con, plan, confirm, log=[{"operation": "create_eps", "table": "PROJECT", "keys": {"eps_id": eps_id},
                                                  "after": {"eps_name": eps_name, "parent_eps": parent_eps},
                                                  "summary": plan[0]}])
@@ -301,7 +302,8 @@ def p6_set_schedule_options(project: ProjectId, options: Optional[SchedValues] =
         if xer:
             plan.append(f"Source: {os.path.basename(from_xer)} (project {xer[1]['proj_short_name']}), then the "
                         "options given")
-        if backup: plan.append(f"Backup: {backup}")
+        if backup:
+            plan.append(f"Backup: {backup}")
         log = [{"operation": "set_schedule_options", "proj_id": pid, "table": "PROJPROP",
                 "keys": {"proj_id": pid, "prop_name": prop},
                 "before": {o["option"]: o["old"] for o in rows if o["changed"]},
@@ -412,7 +414,8 @@ def p6_delete_project(project: ProjectList, include_baselines: bool = True, allo
         plan.append("Rows deleted: " + ", ".join(f"{t} {n}" for t, n in sorted(counts.items(), key=lambda kv: -kv[1])))
         if cleared:
             plan.append("References cleared: " + ", ".join(f"{k} {n}" for k, n in cleared.items()))
-        if backup: plan.append(f"Backup: {backup}")
+        if backup:
+            plan.append(f"Backup: {backup}")
         extra = {"projects": named, "baselines": {"included": include_baselines, "rows": bls},
                  "counts": {t: {"deleted": n} for t, n in counts.items()}, "cleared": dict(cleared),
                  "cross_project_links": cross,

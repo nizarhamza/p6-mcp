@@ -5,6 +5,13 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+### Changed
+
+- The server is split into modules: `p6mcp/server.py` (15,456 lines) becomes a facade over `p6mcp/registry.py`,
+  `p6mcp/core/` (state, database access, calendars, schedule options, CPM engine, analysis, reporting, XER,
+  Excel workbooks...) and `p6mcp/tools/` (one module per tool family). No change in behaviour: the same tools, in
+  the same order, with the same schemas and results; `p6mcp.server` still exposes every name.
+
 ### Added
 
 - `p6_resource_loading`: time-phased units per resource and month or week (labor and nonlabor in hours; material in

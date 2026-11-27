@@ -143,7 +143,7 @@ def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Opt
         if i is None:
             rel = [n["wbs_code"][len(top) + len(sep):] for n in nodes[1:]]
             near = (difflib.get_close_matches(p, rel, n=10)
-                    or [r for r, n in zip(rel, nodes[1:]) if n["depth"] == 1][:10])
+                    or [r for r, n in zip(rel, nodes[1:], strict=False) if n["depth"] == 1][:10])
             raise ValueError(f"WBS code {parent!r} not found in {project}. Close codes: {near}")
     d0 = nodes[i]["depth"]
     end = next((k for k in range(i + 1, len(nodes)) if nodes[k]["depth"] <= d0), len(nodes))
@@ -232,13 +232,17 @@ def p6_query_activities(
     q = _act_from(con) + cflt + uflt
     args: list[Any] = [pid, *cargs, *uargs]
     if name_contains:
-        q += " AND t.task_name LIKE ?"; args.append(f"%{name_contains}%")
+        q += " AND t.task_name LIKE ?"
+        args.append(f"%{name_contains}%")
     if code_prefix:
-        q += " AND t.task_code LIKE ?"; args.append(f"{code_prefix}%")
+        q += " AND t.task_code LIKE ?"
+        args.append(f"{code_prefix}%")
     if wbs_name_contains:
-        q += " AND w.wbs_name LIKE ?"; args.append(f"%{wbs_name_contains}%")
+        q += " AND w.wbs_name LIKE ?"
+        args.append(f"%{wbs_name_contains}%")
     if status:
-        q += " AND t.status_code = ?"; args.append(status)
+        q += " AND t.status_code = ?"
+        args.append(status)
     if max_total_float_days is not None:
         q += f" AND t.total_float_hr_cnt <= ? * {HPD_SQL}"
         args.append(max_total_float_days)
@@ -472,7 +476,8 @@ def p6_float_paths(project: ProjectId, path: Optional[PathNo] = None, include_co
     if stored:
         cond, args = status + " AND t.float_path IS NOT NULL", [pid]
         if path is not None:
-            cond += " AND t.float_path = ?"; args.append(int(path))
+            cond += " AND t.float_path = ?"
+            args.append(int(path))
         con.execute("BEGIN")
         try:
             res = _page(con, _act_from(con) + cond + " ORDER BY t.float_path, t.float_path_order, t.task_id",

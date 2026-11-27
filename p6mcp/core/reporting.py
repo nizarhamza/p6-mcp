@@ -990,7 +990,7 @@ def _trend(series: list[dict], baseline: Optional[str], codes: Optional[list[str
 def _float_edges(edges_days: Optional[Sequence[float]]) -> tuple[list[float], list[str]]:
     """Bucket edges in days (default FLOAT_EDGES), finite and increasing, with 0 added when missing."""
     e = [float(x) + 0.0 for x in (FLOAT_EDGES if edges_days is None else edges_days)]  # + 0.0: -0.0 becomes 0.0
-    if not e or not all(math.isfinite(x) for x in e) or any(b <= a for a, b in zip(e, e[1:])):
+    if not e or not all(math.isfinite(x) for x in e) or any(b <= a for a, b in zip(e, e[1:], strict=False)):
         raise ValueError("edges_days must be finite numbers in increasing order, e.g. [-10, -5, 0, 5, 10, 20, 44]")
     if 0.0 in e:
         return e, []
@@ -1000,7 +1000,7 @@ def _float_edges(edges_days: Optional[Sequence[float]]) -> tuple[list[float], li
 def _float_labels(edges: Sequence[float]) -> list[tuple[str, Optional[float], Optional[float]]]:
     """(label, from_d, to_d) of the float buckets of increasing edges holding 0, in order: below the
     first edge, [a, b) below zero, exactly 0, (a, b] above zero, above the last edge."""
-    pairs = list(zip(edges, edges[1:]))
+    pairs = list(zip(edges, edges[1:], strict=False))
     return ([(f"< {edges[0]:g}", None, edges[0])] + [(f"[{a:g}, {b:g})", a, b) for a, b in pairs if b <= 0]
             + [("= 0", 0.0, 0.0)] + [(f"({a:g}, {b:g}]", a, b) for a, b in pairs if a >= 0]
             + [(f"> {edges[-1]:g}", edges[-1], None)])
@@ -1018,7 +1018,7 @@ def _float_bucket(hours: Optional[float], hpd: float, edges: Sequence[float]) ->
         return f"< {edges[0]:g}"
     if h > edges[-1] * hpd:
         return f"> {edges[-1]:g}"
-    for a, b in zip(edges, edges[1:]):
+    for a, b in zip(edges, edges[1:], strict=False):
         if b <= 0 and a * hpd <= h < b * hpd:
             return f"[{a:g}, {b:g})"
         if a >= 0 and a * hpd < h <= b * hpd:

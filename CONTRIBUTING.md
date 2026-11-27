@@ -38,8 +38,9 @@ python -m venv .venv
 
 - One change per pull request, from a branch of your fork based on `main`.
 - Add or update tests with every change. `pytest` and `ruff check .` must pass: CI runs both.
-- Follow the conventions of `p6mcp/server.py`: check optional columns before using them (they differ
-  between P6 versions), read through read-only connections, and keep list tools paged.
+- Follow the conventions of the server (`p6mcp/core`, `p6mcp/tools`, see CLAUDE.md): check optional columns
+  before using them (they differ between P6 versions), read through read-only connections, and keep list
+  tools paged.
 - Write tools keep the two-step flow (dry run, then the confirmation token), the backup and the edit log,
   and never write planned, early or late dates or float: P6 recalculates them (F9).
 - A new tool needs its kind (read, file, write or destructive) in `TOOL_KIND` of `p6mcp/policy.py`.
