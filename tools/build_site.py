@@ -184,6 +184,8 @@ SKILL_TEXT = {
     "update-integrity-audit": "Changes in an update that a reviewer should question, against the previous update.",
     "schedule-risk": "Monte Carlo on the CPM engine: P50 and P80 finish, chance to finish on time, criticality.",
     "logic-date-integrity": "Do the stored dates follow from the logic? The CPM engine against the last F9.",
+    "trend-report": "Finish, progress, SPI, float, DCMA grade and milestone slips across a series of updates.",
+    "resource-loading-review": "Units per resource and period against their limits: peaks and over-allocated periods.",
 }
 
 

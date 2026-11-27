@@ -5,6 +5,13 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+### Changed
+
+- The core skills shipped with the app (installed on first start, or when the skill shop cannot be reached) follow
+  the skill shop at 3b082c3: two new skills, `trend-report` (`p6_trend`) and `resource-loading-review`
+  (`p6_resource_loading`), cost figures in `progress-earned-value` and `weekly-update-review`, and smaller activity
+  lists (`fields=`) in `float-near-critical`, `lookahead-brief` and `weekly-update-review`. 17 core skills.
+
 ## [3.5.0] - 2026-11-27
 
 ### Added
