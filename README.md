@@ -174,7 +174,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 ## Tools
 
 <!-- tools:start -->
-68 tools: 41 read-only (11 of them in the Basic profile), 4 that write a file, 22 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
+69 tools: 42 read-only (11 of them in the Basic profile), 4 that write a file, 22 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
 
 **Projects and structure**
 
@@ -223,9 +223,10 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 
 | Tool | What it does | Access | Basic |
 |---|---|---|---|
-| `p6_progress_curve` | S-curve by month or week (units or cost) against the baseline, earned value at the data date | Read |  |
+| `p6_progress_curve` | S-curve by month or week (units or cost) over working time and resource curves, against the baseline, earned value at the data date | Read |  |
 | `p6_group_summary` | Activities, units and dates grouped by status, type, WBS level or activity code | Read |  |
 | `p6_resource_summary` | Units and costs per resource, and activities per status | Read |  |
+| `p6_resource_loading` | Units per resource and month or week against max units: over-allocated periods and peaks | Read |  |
 | `p6_export_dashboard` | Excel project controls dashboard: one A3 page with charts, plus detail sheets | Writes a file |  |
 | `p6_export_lookahead` | Printable Excel look-ahead: activities by WBS with a day or week bar chart, critical work in red, data date marked | Writes a file |  |
 
@@ -550,7 +551,7 @@ working copy (do them in P6 EPPM, then pull again). Tested against P6 EPPM 25.12
 
 **What is an MCP server for Primavera P6?**
 MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant
-68 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
+69 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
 computed from the schedule rather than guessed by the model.
 
 **Can the AI change my schedule?**

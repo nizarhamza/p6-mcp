@@ -31,7 +31,7 @@ GROUPS: list[tuple[str, list[str]]] = [
     ("Schedule quality", ["p6_health_check", "p6_health_check_compare", "p6_dangling", "p6_redundant_links",
                           "p6_progress_check"]),
     ("Progress and reporting", ["p6_progress_curve", "p6_group_summary", "p6_resource_summary",
-                                "p6_export_dashboard", "p6_export_lookahead"]),
+                                "p6_resource_loading", "p6_export_dashboard", "p6_export_lookahead"]),
     ("Comparison, what-if and risk", ["p6_compare_projects", "p6_update_integrity", "p6_trend", "p6_cpm_validate",
                                       "p6_schedule_whatif", "p6_schedule_risk"]),
     ("XER files", ["p6_inspect_xer", "p6_import_xer", "p6_export_xer"]),
@@ -77,10 +77,11 @@ SUMMARY = {
     "p6_dangling": "Open starts and open finishes, each with a suggested link to close it",
     "p6_redundant_links": "Links that are candidates for removal (transitive, duplicate, to completed work)",
     "p6_progress_check": "Out-of-sequence progress and status inconsistencies",
-    "p6_progress_curve": "S-curve by month or week (units or cost) against the baseline, earned value at the data "
-                         "date",
+    "p6_progress_curve": "S-curve by month or week (units or cost) over working time and resource curves, against "
+                         "the baseline, earned value at the data date",
     "p6_group_summary": "Activities, units and dates grouped by status, type, WBS level or activity code",
     "p6_resource_summary": "Units and costs per resource, and activities per status",
+    "p6_resource_loading": "Units per resource and month or week against max units: over-allocated periods and peaks",
     "p6_export_dashboard": "Excel project controls dashboard: one A3 page with charts, plus detail sheets",
     "p6_export_lookahead": "Printable Excel look-ahead: activities by WBS with a day or week bar chart, critical "
                            "work in red, data date marked",

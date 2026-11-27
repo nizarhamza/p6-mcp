@@ -140,7 +140,8 @@ LIST_TOOLS = {"p6_list_projects": {}, "p6_list_eps": {}, "p6_list_wbs": {"projec
               "p6_get_relationships": {"project": "DEMO-A", "task_code": "A1020"},
               "p6_list_calendars": {"include_exceptions": True}, "p6_lookahead": {"project": "DEMO-A"},
               "p6_milestones": {"project": "DEMO-A"}, "p6_group_summary": {"project": "DEMO-A"},
-              "p6_resource_summary": {"project": "DEMO-A"}, "p6_calendar_check": {"project": "DEMO-A"},
+              "p6_resource_summary": {"project": "DEMO-A"}, "p6_resource_loading": {"project": "DEMO-A"},
+              "p6_calendar_check": {"project": "DEMO-A"},
               "p6_sql_select": {"sql": "SELECT * FROM TASK"}}
 
 
