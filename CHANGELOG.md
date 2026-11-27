@@ -5,6 +5,21 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+### Added
+
+- P6 EPPM proxy: the calls to a P6 EPPM server go through the proxy set in Windows (or the `HTTP_PROXY` and
+  `HTTPS_PROXY` variables) with its bypass list, automatically. A server's settings can instead say **No proxy** or
+  **This proxy** (an `http://host:port` address for that server only), with an optional proxy user whose password is
+  kept in the Windows Credential Manager (Basic proxy sign-in). A server on this PC is never proxied, the SQL account
+  always connects directly, and a proxy address with a user or a password in it is refused. Test connection uses
+  the setting and says which proxy it went through; `p6_diagnose` reports it (never a password). A Windows proxy
+  setup script (PAC) is not run: it is reported, and the proxy can be entered in the server's settings.
+- `p6_eppm_push(schedule=True)`: once every call of the push has succeeded, the pushed projects are scheduled on
+  the server with P6's own scheduler (optionally with `new_data_date`) and, with `pull_after` (default), pulled
+  again. The dry run lists the schedule after the push, and one confirmation covers both steps (the text becomes
+  `PUSH TO <server> AND SCHEDULE`); a push that fails or meets a conflict schedules nothing. The result and the edit
+  log hold both steps.
+
 ### Changed
 
 - Faster engine and report tools: stored dates are read once per distinct value instead of once per use. On a

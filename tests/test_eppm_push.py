@@ -106,6 +106,7 @@ def make_handler(db):
             if u.path.endswith("/job/schedule"):
                 body = self._body()
                 H.jobs.append(body)
+                H.calls_at_job = len(H.calls)  # push calls the server had when the job started
                 H.job_polls = 0
                 return self._send(201, [{"JobId": "1:7", "JobStatus": "Pending"}])
             if u.path.endswith("/job/readJobLog"):
@@ -440,3 +441,106 @@ def test_a_conflict_is_cleared_by_discarding_that_change(push_env):
     p6.apply("p6_eppm_discard", changes=[dry["conflicts"][0]["id"]])
     dry = p6.call("p6_eppm_push")
     assert not dry.get("would_refuse") and dry["calls"] == 1 and dry["would_do"][0].startswith(f"1. PUT activity {b}")
+
+
+def test_push_then_schedule_under_one_confirmation(push_env, monkeypatch):
+    from p6mcp.eppm import jobs
+    monkeypatch.setattr(jobs, "POLL_S", 0.01)
+    p6, H = push_env
+    wc = store.store_path("srv")
+    code, tid = rows(wc, "SELECT task_code, task_id FROM TASK WHERE proj_id = 2 ORDER BY task_id")[0]
+    p6.apply("p6_update_activity", project="DEMO-A", task_code=code, remaining_duration_days=9)
+    with pytest.raises(ValueError, match="schedule=True"):
+        p6.call("p6_eppm_push", new_data_date="2026-02-02 08:00")
+    dry = p6.call("p6_eppm_push", schedule=True, new_data_date="2026-02-02 08:00")
+    assert dry["calls"] == 1 and dry["would_do"][0].startswith(f"1. PUT activity {code}")
+    assert dry["would_do"][1:] == ["After the push, schedule DEMO-A on srv (data date 2026-01-05 08:00 -> "
+                                   "2026-02-02 08:00)", "Then pull them again into the working copy"]
+    assert dry["schedule"]["projects"] == ["DEMO-A"] and dry["schedule"]["new_data_date"] == "2026-02-02T08:00:00"
+    assert dry["confirmation_text_required"] == "PUSH TO srv AND SCHEDULE" and not H.jobs and not H.calls
+    # the text of a push alone does not cover the schedule, and the token is bound to the arguments
+    kw = {"schedule": True, "new_data_date": "2026-02-02 08:00", "dry_run": False,
+          "confirmation_token": dry["confirmation_token"]}
+    with pytest.raises(ValueError, match="PUSH TO srv AND SCHEDULE"):
+        p6.call("p6_eppm_push", **kw, confirmation_text="PUSH TO srv")
+    with pytest.raises(ValueError):
+        p6.call("p6_eppm_push", **dict(kw, new_data_date="2026-03-02 08:00"),
+                confirmation_text="PUSH TO srv AND SCHEDULE")
+    assert not H.calls and not H.jobs
+    res = p6.call("p6_eppm_push", **kw, confirmation_text="PUSH TO srv AND SCHEDULE")
+    assert res["applied"] and res["sent"] == [f"activity {code}"]
+    assert float(H.live["activity"][str(tid)]["RemainingDuration"]) == 72.0
+    # one job, started after the push call, for the pushed project, with the new data date
+    assert H.jobs == [{"ProjectObjectId": [2], "NewDataDate": "2026-02-02T08:00:00"}] and H.calls_at_job == 1
+    sch = res["schedule"]
+    assert sch["applied"] and sch["projects"] == ["DEMO-A"] and sch["job"]["status"] == "Complete"
+    assert sch["log_facts"]["critical"] == 3 and sch["pull"]["rows"]["TASK"] == 7 and "next" not in sch
+    assert res["next"].startswith("Pushed. Scheduled on the server and pulled again")
+    st = p6.call("p6_eppm_status", check_server=False)
+    assert st["pending"]["count"] == 0 and st["pulled_at"] == sch["pull"]["pulled_at"]
+    # the edit log holds both steps, from the push tool
+    es = [e for e in p6.s._log_entries() if e.get("tool") == "p6_eppm_push"]
+    assert [e["operation"] for e in es] == ["push_eppm", "schedule_eppm"]
+    assert es[1]["after"] == {"job": sch["job"], "new_data_date": "2026-02-02T08:00:00"}
+    assert es[1]["summary"].startswith("After the push, schedule DEMO-A on srv")
+
+
+def test_a_push_that_fails_or_conflicts_schedules_nothing(push_env, monkeypatch):
+    from p6mcp.eppm import jobs
+    monkeypatch.setattr(jobs, "POLL_S", 0.01)
+    p6, H = push_env
+    wc = store.store_path("srv")
+    (a, ta), (b, _tb) = rows(wc, "SELECT task_code, task_id FROM TASK WHERE proj_id = 2 ORDER BY task_id")[:2]
+    p6.apply("p6_update_activity", project="DEMO-A", task_code=a, task_name="First")
+    # a conflict: the dry run refuses, no token, nothing sent or scheduled
+    H.live["activity"][str(ta)]["Name"] = "Changed by someone else"
+    dry = p6.call("p6_eppm_push", schedule=True)
+    assert dry["would_refuse"] and "conflict" in dry["refuse_reasons"][0] and "confirmation_token" not in dry
+    p6.apply("p6_eppm_discard", changes=["all"])
+    p6.apply("p6_update_activity", project="DEMO-A", task_code=b, task_name="Second")
+    # a failed call: the push stops, the schedule is skipped and said so
+    H.fail_on.add(("PUT", "activity"))
+    dry = p6.call("p6_eppm_push", schedule=True, pull_after=False)
+    assert dry["would_do"][-1].startswith("After the push, schedule DEMO-A")  # no pull line
+    res = p6.call("p6_eppm_push", schedule=True, pull_after=False, dry_run=False,
+                  confirmation_token=dry["confirmation_token"], confirmation_text=dry["confirmation_text_required"])
+    assert res["applied"] is False and "500" in res["failed"]["error"]
+    assert res["schedule"] == {"applied": False, "projects": ["DEMO-A"],
+                               "skipped": "The push did not complete: nothing was scheduled."}
+    assert H.jobs == [] and not [e for e in p6.s._log_entries() if e.get("operation") == "schedule_eppm"]
+    # pushed, then the job fails: the push stands, the schedule reports the job and its log, nothing is pulled
+    H.fail_on.clear()
+    H.job_state = "Failed"
+    pulled_at = p6.call("p6_eppm_status", check_server=False)["pulled_at"]
+    dry = p6.call("p6_eppm_push", schedule=True)
+    res = p6.call("p6_eppm_push", schedule=True, dry_run=False, confirmation_token=dry["confirmation_token"],
+                  confirmation_text=dry["confirmation_text_required"])
+    assert res["applied"] and res["sent"] == [f"activity {b}"]
+    assert res["schedule"]["applied"] is False and res["schedule"]["job"]["status"] == "Failed"
+    assert "pull" not in res["schedule"] and "ended as 'Failed'" in res["next"]
+    assert p6.call("p6_eppm_status", check_server=False)["pulled_at"] == pulled_at
+
+
+def test_push_without_schedule_keeps_its_confirmation_text(push_env):
+    p6, H = push_env
+    code = rows(store.store_path("srv"), "SELECT task_code FROM TASK WHERE proj_id = 2 ORDER BY task_id")[0][0]
+    p6.apply("p6_update_activity", project="DEMO-A", task_code=code, task_name="X")
+    dry = p6.call("p6_eppm_push")
+    assert dry["confirmation_text_required"] == "PUSH TO srv" and "schedule" not in dry
+    assert not [x for x in dry["would_do"] if "schedule" in x.lower()]
+
+
+def test_diagnose_reports_the_proxy_without_secrets(push_env, monkeypatch):
+    from p6mcp.eppm import proxy
+    p6, _H = push_env
+    monkeypatch.setattr(proxy, "_pac", lambda: None)
+    vault = {"eppm:srv": PW, "eppm-sql:srv": SPW, "eppm-proxy:srv": "proxy-secret"}
+    monkeypatch.setattr("p6mcp.credentials.get", lambda k: vault.get(k))
+    prof = dict(p6.cfg["eppm_profiles"][0], proxy="custom", proxy_url="http://proxy.example.com:3128",
+                proxy_user="me")
+    p6.set(eppm_profiles=[prof])
+    px = p6.call("p6_diagnose")["eppm_mode"]["proxy"]
+    # the fake server is on this PC: never proxied, and said so
+    assert px["mode"] == "custom" and px["url"] is None and px["bypassed"] and px["user"] == "me"
+    assert "proxy-secret" not in json.dumps(p6.call("p6_diagnose"))
+    assert p6.call("p6_eppm_status")["changed_on_server"]["activities"] == {"DEMO-A": 0}  # direct, and it works
