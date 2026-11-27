@@ -174,7 +174,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 ## Tools
 
 <!-- tools:start -->
-67 tools: 40 read-only (11 of them in the Basic profile), 4 that write a file, 22 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
+68 tools: 41 read-only (11 of them in the Basic profile), 4 that write a file, 22 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
 
 **Projects and structure**
 
@@ -223,9 +223,10 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 
 | Tool | What it does | Access | Basic |
 |---|---|---|---|
-| `p6_progress_curve` | S-curve by month or week (units or cost) against the baseline, earned value at the data date | Read |  |
+| `p6_progress_curve` | S-curve by month or week (units or cost) over working time and resource curves, against the baseline, earned value at the data date | Read |  |
 | `p6_group_summary` | Activities, units and dates grouped by status, type, WBS level or activity code | Read |  |
 | `p6_resource_summary` | Units and costs per resource, and activities per status | Read |  |
+| `p6_resource_loading` | Units per resource and month or week against max units: over-allocated periods and peaks | Read |  |
 | `p6_export_dashboard` | Excel project controls dashboard: one A3 page with charts, plus detail sheets | Writes a file |  |
 | `p6_export_lookahead` | Printable Excel look-ahead: activities by WBS with a day or week bar chart, critical work in red, data date marked | Writes a file |  |
 
@@ -324,7 +325,7 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
 
 ![Settings: tools and safety](docs/images/settings-tools.png)
 
-- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 67).
+- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 68).
 - **Writes are off by default.** With the Full profile and "Allow write operations", every write takes two calls:
   a dry run that shows the plan and returns a single-use confirmation token, then, after your explicit yes, the
   same call with that token. Deleting a project or an activity and restoring a backup also need a confirmation
@@ -549,7 +550,7 @@ working copy (do them in P6 EPPM, then pull again). Tested against P6 EPPM 25.12
 
 **What is an MCP server for Primavera P6?**
 MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant
-67 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
+68 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
 computed from the schedule rather than guessed by the model.
 
 **Can the AI change my schedule?**

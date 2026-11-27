@@ -66,9 +66,10 @@ Facts an assistant should get right:
 
 ### Progress and reporting
 
-- `p6_progress_curve`: S-curve by month or week (units or cost) against the baseline, earned value at the data date (read)
+- `p6_progress_curve`: S-curve by month or week (units or cost) over working time and resource curves, against the baseline, earned value at the data date (read)
 - `p6_group_summary`: Activities, units and dates grouped by status, type, WBS level or activity code (read)
 - `p6_resource_summary`: Units and costs per resource, and activities per status (read)
+- `p6_resource_loading`: Units per resource and month or week against max units: over-allocated periods and peaks (read)
 - `p6_export_dashboard`: Excel project controls dashboard: one A3 page with charts, plus detail sheets (writes a file)
 - `p6_export_lookahead`: Printable Excel look-ahead: activities by WBS with a day or week bar chart, critical work in red, data date marked (writes a file)
 
