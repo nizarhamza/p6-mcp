@@ -169,6 +169,13 @@ def _eppm_refusal(tool: str) -> str:
     if tool == "p6_delete_activity":
         return ("Activities are not deleted through a P6 EPPM working copy in this version: delete it in P6 EPPM, "
                 "then pull again.")
+    if tool in ("p6_update_activity_codes", "p6_move_activities"):
+        what = "Activity code values" if tool == "p6_update_activity_codes" else "WBS moves"
+        return (f"{what} are not sent to the P6 EPPM server by the push in this version ({tool} is not available on a "
+                "P6 EPPM working copy): change them in P6 EPPM, then pull again.")
+    if tool == "p6_add_activities":
+        return ("Activities are not created through a P6 EPPM working copy in this version: add them in P6 EPPM, "
+                "then pull again.")
     return (f"{tool} is not available on a P6 EPPM working copy: the push to the server supports activity, "
             "relationship and assignment edits only. Do it in P6 EPPM, then pull again.")
 
@@ -603,6 +610,44 @@ class ActEdit(_ActEditKeys, total=False):
 ActEdits = Annotated[list[ActEdit], Field(min_length=1, description="Activities to change.")]
 
 
+# ----------------------------------------------------------------- new activities (p6_add_activities)
+
+ActType = Literal["task", "resource_dependent", "start_milestone", "finish_milestone", "level_of_effort",
+                  "wbs_summary"]
+
+
+class _NewLinkKeys(TypedDict):
+    task_code: str
+
+
+class NewLink(_NewLinkKeys, total=False):
+    """A relationship of a new activity: the other activity (of the project, of the same call, or of project=),
+    type (FS default) and lag_days (0 default)."""
+    type: RelType
+    lag_days: float
+    project: str
+
+
+class _NewActKeys(TypedDict):
+    task_code: str
+    task_name: str
+
+
+class NewActivity(_NewActKeys, total=False):
+    """An activity to create (not started) and its relationships."""
+    wbs: str
+    type: ActType
+    original_duration_days: float
+    calendar: str
+    constraint: CstrName
+    constraint_date: str
+    predecessors: list[NewLink]
+    successors: list[NewLink]
+
+
+NewActivities = Annotated[list[NewActivity], Field(min_length=1, description="Activities to create.")]
+
+
 class AsgEdit(TypedDict, total=False):
     """An assignment (taskrsrc_id, or task_code with resource or role) and the units to set."""
     task_code: str
@@ -616,6 +661,31 @@ class AsgEdit(TypedDict, total=False):
 
 
 AsgEdits = Annotated[list[AsgEdit], Field(min_length=1, description="Assignments to change.")]
+
+
+# ----------------------------------------------------------------- activity code values and WBS moves
+
+class _CodeEditKeys(TypedDict):
+    task_code: str
+    code_type: str
+
+
+class CodeEdit(_CodeEditKeys, total=False):
+    """An activity code value to assign (code_value) or remove (clear=True) for one code type."""
+    code_value: str
+    clear: bool
+
+
+CodeEdits = Annotated[list[CodeEdit], Field(min_length=1, description="Activity code values to assign or clear.")]
+
+
+class WbsMove(TypedDict):
+    """An activity and the WBS it moves to (WBS code as p6_list_wbs shows it, or a WBS name unique in the project)."""
+    task_code: str
+    wbs: str
+
+
+WbsMoves = Annotated[list[WbsMove], Field(min_length=1, description="Activities to move to another WBS.")]
 
 
 # ----------------------------------------------------------------- activity UDF values

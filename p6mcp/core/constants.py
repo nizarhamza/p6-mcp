@@ -77,6 +77,9 @@ FLOAT_EDGES = (-20.0, -10.0, -5.0, 0.0, 5.0, 10.0, 20.0, 44.0)  # p6_float_analy
 STATUS_NAMES = {"TK_NotStart": "Not Started", "TK_Active": "In Progress", "TK_Complete": "Completed"}
 TYPE_NAMES = {"TT_Task": "Task Dependent", "TT_Rsrc": "Resource Dependent", "TT_Mile": "Start Milestone",
               "TT_FinMile": "Finish Milestone", "TT_LOE": "Level of Effort", "TT_WBS": "WBS Summary"}
+# p6_add_activities type names -> TASK.task_type (the TT_ codes are accepted too)
+ACT_TYPES = {"task": "TT_Task", "resource_dependent": "TT_Rsrc", "start_milestone": "TT_Mile",
+             "finish_milestone": "TT_FinMile", "level_of_effort": "TT_LOE", "wbs_summary": "TT_WBS"}
 XER_READ_ONLY = ("XER-only mode is read only: the XER files are analysed, never changed. Select a P6 database in "
                  "MCP for Primavera P6 Settings to write.")
 EPPM_TOOLS = ("p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status")

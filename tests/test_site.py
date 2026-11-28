@@ -27,7 +27,8 @@ def test_site_lists_every_tool_and_core_skill():
     files = b.build()
     home = files["index.html"]
     tools = [t["name"] for g in b.read_tools() for t in g["tools"]]
-    assert len(tools) == 69 and len(set(tools)) == len(tools)  # 3.5.0: p6_resource_loading, p6_trend
+    # 3.8.0: p6_update_activity_codes, p6_move_activities, p6_add_activities
+    assert len(tools) == 72 and len(set(tools)) == len(tools)
     assert all(f'id="t-{t}"' in home for t in tools)
     index = json.loads(files["assets/search.json"])
     assert {e["t"] for e in index if e["g"] == "Tools"} == set(tools)

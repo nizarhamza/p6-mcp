@@ -39,7 +39,7 @@ BUILTIN: tuple[Line, ...] = (
               "the user's explicit yes, repeat the call with dry_run=false and that token (and confirmation_text "
               "if asked)."),
     Line("diagnose", "p6_diagnose explains configuration errors."),
-    Line("planned", "Planned dates are never written; new activities only come from p6_import_xer.",
+    Line("planned", "Planned dates are never written; new activities come from p6_add_activities or p6_import_xer.",
          eppm="Planned dates are never written; new activities are added in P6 EPPM, then pulled."),
     Line("paging", "List tools return {total, offset, returned, next_offset, rows}: pass offset=next_offset for the "
                    "next page (null = last). fields= trims activity rows."),

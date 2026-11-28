@@ -72,6 +72,7 @@ from p6mcp.core.constants import (  # noqa: F401  (re-exported)
     MAX_ROWS, REL_TYPES, REL_TYPES_REV, SEVERITY_RANK, SQL_COUNT_CAP, SQL_COUNT_SECONDS, SQL_PAGE_BYTES, SQL_PRAGMAS,
     SQL_QUERY_SECONDS, STATUS_NAMES, SUMMARY_TYPES, TYPE_NAMES, UDF_INDICATOR, UDF_KINDS, UDF_PROJECT_TABLES,
     UDF_TEXT_MAX, UDF_VALUE, XER_READ_ONLY,
+    ACT_TYPES,
 )
 from p6mcp.registry import (  # noqa: F401  (re-exported)
     ACT_FIELDS, ACT_HOURS, ActEdit, _ActEditKeys, ActEdits, ActField, ActFields, ActivityId, ActivityIds, AsgEdit,
@@ -88,6 +89,7 @@ from p6mcp.registry import (  # noqa: F401  (re-exported)
     TOKENS, _tool, TOOL_HINTS, TrendMs, TrendProjects, UdfEdit, _UdfEditKeys, UdfEdits, UdfFilter, _UdfFilterKeys,
     UdfFilters, UdfNames, UdfOp, UdfValue, _version_kw, WhatIfEdit, WhatIfEdits, WhatIfOp, WindowDays, WindowWeeks,
     _wire, WRITE_DOC, XerTable, Year,
+    ActType, NewActivities, NewActivity, _NewActKeys, NewLink, _NewLinkKeys,
 )
 from p6mcp.core.db import (  # noqa: F401  (re-exported)
     _act_from, _act_row, _act_view, _alive, _all_rows, _backup, _backup_dir, _backup_file, BACKUP_NAME,
@@ -159,6 +161,13 @@ from p6mcp.core.writes import (  # noqa: F401  (re-exported)
     _owned_where, _Refused, _rel_add, _rel_delete, _rel_delete_row, _rel_ends, _rel_log, REL_LOG_COLS, _rel_update,
     _release, _side_effects, _single_link, _sum_plan, SUM_TABLES, _summaries_stale, SUMMARIZE_ADVICE, _task_by_id,
     _temp_id_sets, UDF_KEYS, _udf_next, _udf_set, _udf_shown, _udf_store, _write_session,
+    _act_add, _act_add_batch, _act_add_links, _code_ok, COMPUTED_DURATION_TYPES, _new_act_check, NEW_ACT_KEYS,
+    NEW_DATES_NOTE, NEW_LINK_KEYS, _new_link_check, NEW_LINKS_CAP, _new_loops, NEW_TASK_DEFAULTS, NEW_TASK_FIXED,
+    _NewActCtx, NO_DURATION_TYPES, TASK_CODE_MAX, TASK_NAME_MAX,
+)
+from p6mcp.core.writes import (  # noqa: F401  (re-exported: activity code values and WBS moves)
+    _act_move, CODE_KEYS, _code_set, _code_value, _codes_next, CODES_NOTE, MOVE_KEYS, _moves_next, _wbs_find,
+    _wbs_summaries,
 )
 from p6mcp.core.xer import (  # noqa: F401  (re-exported)
     _col_type, _cp1252_ok, _export_target, _export_xer, _has_next_key, IMPORT_ACTIONS, _import_target, _memo_blob,
@@ -195,7 +204,9 @@ from p6mcp.tools.writes import (  # noqa: F401  (re-exported)
     p6_add_relationship, p6_add_relationships, p6_delete_activity, p6_delete_relationship, p6_delete_relationships,
     p6_update_activities, p6_update_activity, p6_update_assignment, p6_update_assignments, p6_update_relationship,
     p6_update_relationships, p6_update_udf, p6_update_udfs,
+    p6_add_activities,
 )
+from p6mcp.tools.writes import p6_move_activities, p6_update_activity_codes  # noqa: F401  (re-exported)
 from p6mcp.tools.admin import (  # noqa: F401  (re-exported)
     p6_backup_database, p6_create_eps, p6_delete_project, p6_edit_log, p6_list_backups, p6_list_eps, p6_restore_backup,
     p6_set_schedule_options,
