@@ -5,6 +5,8 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-11-28
+
 ### Added
 
 - `p6_use_database` (Full profile, app settings kind: dry run, then your confirmation; never offered to remote
@@ -65,7 +67,9 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   until F9 (late dates and float empty). Refused: an Activity ID already used or given twice, an unknown WBS or
   calendar, a relationship P6 would refuse, a logic loop the new relationships close. One edit log entry per
   activity and per relationship; the project is marked stale (F9). Not available on a P6 EPPM working copy (the
-  push does not create activities); offered to remote clients with edits allowed.
+  push does not create activities); offered to remote clients with edits allowed. Checked by an XER export and
+  re-import, the CPM engine and a delete; not yet confirmed by opening the edited database in P6 itself: try it on a
+  copy first.
 - Fragnet what-if (time impact analysis): `p6_schedule_whatif` takes `add_activity` edits that insert new activities
   in memory only (a new Activity ID and name, the original duration in days of a calendar, the project calendar by
   default, task type TT_Task, TT_Mile or TT_FinMile, a WBS code, the project node by default, and an optional
@@ -827,6 +831,7 @@ First public release.
 - Per-user Windows installer, portable zip and MCP bundle (.mcpb) for Claude Desktop; GitHub Actions
   for tests and releases, with optional code signing.
 
+[3.6.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.6.0
 [3.5.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.5.0
 [3.4.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.4.0
 [3.3.0]: https://github.com/nizarhamza/p6-mcp/releases/tag/v3.3.0

@@ -1,4 +1,4 @@
-"""p6_add_activities (3.8.0): new activities with their relationships, all or nothing, checked on the synthetic
+"""p6_add_activities (3.6.0): new activities with their relationships, all or nothing, checked on the synthetic
 database (DEMO-A, data date Monday 2 Mar 2026 08:00, calendar 08:00-12:00 + 13:00-17:00 Monday to Friday)."""
 
 import pytest

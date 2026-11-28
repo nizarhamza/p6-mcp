@@ -1,4 +1,4 @@
-"""Fragnet edits of p6_schedule_whatif (time impact analysis, 3.8.0) on the synthetic project DEMO-A: a chain
+"""Fragnet edits of p6_schedule_whatif (time impact analysis, 3.6.0) on the synthetic project DEMO-A: a chain
 A1000 -> A1010 -> A1020 -> A1030 -> A1040 -> A1050 with A1060 Permits (20 days of float) beside it, calendar
 Monday to Friday 08:00-12:00 and 13:00-17:00 with a holiday on Monday 2026-04-06.
 
