@@ -95,8 +95,38 @@ stay outside this repository.
   running; remote `p6_sql_select` reads password columns as NULL (`_SQL_SECRET_COL`); `confirm.CLIENT` puts the
   remote connection in the edit log; `--remote` needs mcp 2.x. Remote tests set their own LOCALAPPDATA (the audit
   log must never reach the real profile). Remote rules: never
-  `REMOTE_NEVER` (local path tools, destructive, config, shop), writes need `remote_allow_writes` plus scope
-  `p6:write`. A new tool needs a remote decision (`tests/test_remote.py`).
+  `REMOTE_NEVER` (destructive, config, shop; local path tools except `REMOTE_FILE_TOOLS`), writes need
+  `remote_allow_writes` plus scope `p6:write`. A new tool needs a remote decision (`tests/test_remote.py`).
+- Remote file handoff (`p6mcp/remote/files.py`, plan item P4; setting `remote_allow_files`, off by default, Remote
+  access page "Allow file downloads and uploads"; listing fixed at the remote server's start, refusal
+  `REMOTE_FILES_OFF` on every call and the routes answer 404 while it is off): `policy.REMOTE_DOWNLOAD_TOOLS`
+  (`p6_export_xer` .xer, `p6_export_dashboard` / `p6_export_lookahead` .xlsx) and `REMOTE_UPLOAD_TOOLS`
+  (`p6_inspect_xer`, `p6_import_xer`, still a write remotely). `_remote_tool(..., handoff)` replaces the
+  signature remotely (`files.remote_signature`: exports take `file_name` instead of `path` and `overwrite`, the XER
+  tools `upload_id` instead of `path`; a `path` or `overwrite` argument is refused) and the docstring
+  (`remote_doc`); an export runs into `Handoff.new_download` (row state writing, folder
+  `%LOCALAPPDATA%\P6MCP\remote\files\<sha256(grant)[:32]>\<file id>\<safe name>`), then `publish` (only the same
+  grant; `download_url` = `https://<remote_public_host>/files/<token>`, size, expiry), a failed export `discard`s.
+  `p6_remote_upload_link` is built in `remote/server.py` (`_upload_link_tool`, not in `REGISTERED` or `TOOL_KIND`;
+  `remote_tools` adds it after `p6_inspect_xer`; hints `files.UPLOAD_HINTS`; refusal as `p6_inspect_xer`) and gives
+  `upload_url` + `upload_id`; `Handoff.upload_path(grant, upload_id)` maps it to the received file (another grant
+  gets the not-found message). Table `files` of `auth.db` (`store.SCHEMA`: id, grant_id, kind download / upload,
+  ext, name, size, link = SHA-256 of the token, state writing / ready / sending, open / receiving / received,
+  created, exp); `Store.revoke`, `revoke_all` and a reused refresh token delete the grant's rows. Routes
+  (`files.add_routes`, custom routes, no bearer): GET `/files/<token>` = page with a Download button (no side
+  effect), POST = `claim_download` (one winner) then `FileResponse` attachment, `no-store`, background `finish`
+  (file, folder, row); GET `/upload/<token>` = form (`pages.csp(form=True)`: form-action 'self'), POST =
+  `claim_upload`, `_receive_xer` (python_multipart streaming parser, first part named `file` with a file name, to
+  `upload.part`, `UPLOAD_MAX` 50 MB), `_xer_read_meta` check, `complete_upload` (link spent, exp = `UPLOAD_KEEP` 1 h);
+  a refused file `release_upload`s (the page stays usable). Tokens `secrets.token_urlsafe(32)`, `LINK_TTL` 900 s,
+  `MAX_PER_CONNECTION` 10 rows. `RemoteGuard`: `audit_path` masks `/files/<link>` and `/upload/<link>` (audit and
+  rate limiter), body cap `UPLOAD_BODY_CAP` + `BODY_CAP` for POST `/upload/<link>` only; `LIMITS` `/files`
+  (30, 10) and `/upload` (20, 6); `make_server` disables the `uvicorn.access` logger. `Handoff.sweep` (expired rows
+  with their folders, then every folder no live row names; `everything` when the switch is off) at `build_app`,
+  on access (`sweep_soon`, 10 s) and every `SWEEP_SECONDS` (`start_sweeper` in `serve`). Audit events `file`:
+  link_minted, link_used, link_expired, file_expired, file_missing, upload_received, upload_refused (reason). The
+  relay Worker forwards every path (bodies read into memory, 100 MB Cloudflare limit): no Worker change, no Repair.
+  Tests: `tests/test_remote_files.py` (live server, stub grants), the node test of `worker.js`.
 - `p6mcp/schema.py`: schema fingerprint (SHA-256 of table.column names), `KNOWN_SCHEMAS`, P6 version from
   `PREFER.database_version`; unknown schema = read only unless the user trusts it (`trusted_schemas`).
 - `p6mcp/confirm.py`: `TokenStore` (in process, 15 min, single use, bound to tool + canonical arguments +

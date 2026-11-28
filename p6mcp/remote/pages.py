@@ -1,4 +1,5 @@
-"""The browser pages of remote access: the connection page (/authorize/wait) and the error pages.
+"""The browser pages of remote access: the connection page (/authorize/wait), the error pages and the file handoff
+pages (/files/<token>, /upload/<token>: p6mcp.remote.files).
 
 Self-contained HTML (no outside font, image or script: the CSP allows nothing else), in the brand colors, light and
 dark. The connection page offers two ways to approve on the PC:
@@ -72,6 +73,10 @@ margin:0;padding-left:.1em;user-select:all;white-space:nowrap}
 .timer i{display:block;height:100%;background:var(--brand);width:100%;transition:width 1s linear}
 .js-only{display:none}.js .js-only{display:block}.js .js-flex{display:inline-flex}
 .msg{margin:0;color:var(--ink)}
+.file{display:block;width:100%;margin:0 0 16px;padding:10px;font:inherit;color:var(--ink);background:var(--code-bg);
+border:1px solid var(--line);border-radius:10px}
+.file:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+form .step{display:block}
 @media (max-width:420px){.card{padding:22px 18px}.code{font-size:1.7rem}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 """
@@ -114,13 +119,14 @@ say('warn',c.t.failed);});});
 """
 
 
-def csp(nonce: Optional[str] = None, local: Optional[str] = None) -> str:
+def csp(nonce: Optional[str] = None, local: Optional[str] = None, form: bool = False) -> str:
     """The page's Content-Security-Policy: inline styles, the nonce script, fetches to itself and the loopback
-    listener only; no frame, no form, no base."""
+    listener only; no frame, no base; no form, except the file pages' own (form: posts to the page itself)."""
     script = f"script-src 'nonce-{nonce}'; " if nonce else ""
     connect = "connect-src 'self'" + (f" {local}" if local else "") + "; " if nonce else ""
+    action = "'self'" if form else "'none'"
     return (f"default-src 'none'; style-src 'unsafe-inline'; {script}{connect}frame-ancestors 'none'; "
-            "base-uri 'none'; form-action 'none'")
+            f"base-uri 'none'; form-action {action}")
 
 
 def page(lang: str, title: str, body: str, refresh: Optional[str] = None, nonce: Optional[str] = None,

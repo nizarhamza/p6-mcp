@@ -1,7 +1,8 @@
 """Remote access page (3.2): claude.ai and ChatGPT in the browser, through the user's own Cloudflare account.
 
 Sections: what it does and what leaves the PC, the Cloudflare setup (token used once, Set up / Repair, Remove),
-the connector address to paste in the AI app, the switches (on / off, edits from remote clients, keep awake), the
+the connector address to paste in the AI app, the switches (on / off, edits from remote clients, file downloads and
+uploads, keep awake), the
 connected clients with Revoke, and the status of the remote access server and tunnel.
 
 The Cloudflare setup changes things outside this window (the Cloudflare account, the Credential Manager), so its
@@ -124,11 +125,14 @@ class RemotePage(QWidget):
         self.enabled.toggled.connect(self._enabled)
         self.edits = QCheckBox(tr("remote.edits"))
         self.edits.toggled.connect(self._edits)
+        self.files = QCheckBox(tr("remote.files"))
+        self.files.toggled.connect(self._files)
         self.awake = QCheckBox(tr("remote.awake"))
         self.awake.toggled.connect(lambda on: self._set(remote_keep_awake=bool(on)))
-        for w in (self.enabled, self.edits, self.awake):
+        for w in (self.enabled, self.edits, self.files, self.awake):
             wl.addWidget(w)
         wl.addWidget(note(tr("remote.edits.note")))
+        wl.addWidget(note(tr("remote.files.note")))
         lay.addWidget(box)
 
         box, cl = group(tr("remote.clients"))
@@ -192,7 +196,7 @@ class RemotePage(QWidget):
         if d.get("remote_mode") == "domain" and d.get("remote_public_host") and not self.domain_host.text():
             self.domain_host.setText(d["remote_public_host"])
         for box, key, default in ((self.enabled, "remote_enabled", False), (self.edits, "remote_allow_writes", False),
-                                  (self.awake, "remote_keep_awake", True)):
+                                  (self.files, "remote_allow_files", False), (self.awake, "remote_keep_awake", True)):
             box.blockSignals(True)
             box.setChecked(bool(d.get(key, default)))
             box.blockSignals(False)
@@ -211,6 +215,7 @@ class RemotePage(QWidget):
         self.copy_btn.setEnabled(set_up)
         self.enabled.setEnabled(set_up)
         self.edits.setEnabled(set_up)
+        self.files.setEnabled(set_up)
         self.awake.setEnabled(set_up)
         level, text = remote_status(d, self.remote_state if getattr(self.win, "remote", None) is not None else None)
         pill(self.status, level, text)
@@ -243,6 +248,15 @@ class RemotePage(QWidget):
             self.edits.blockSignals(False)
             return
         self._set(remote_allow_writes=bool(on))
+
+    def _files(self, on: bool) -> None:
+        """File downloads and uploads (off by default): turning them on asks first."""
+        if on and not ask(self, tr("remote.files.title"), tr("remote.files.warn")):
+            self.files.blockSignals(True)
+            self.files.setChecked(False)
+            self.files.blockSignals(False)
+            return
+        self._set(remote_allow_files=bool(on))
 
     # ------------------------------------------------------------- Cloudflare
     def _say(self, lines: list[str], level: Optional[str] = None) -> None:

@@ -25,7 +25,9 @@ def fill(cell) -> str:
 def test_policy_and_refusals(p6, tmp_path):
     from p6mcp import policy
     assert policy.TOOL_KIND["p6_export_lookahead"] == policy.FILE
-    assert policy.remote_kind("p6_export_lookahead") == "never"
+    # remote clients: only through the file handoff (remote_allow_files, a one-time download link)
+    assert policy.remote_kind("p6_export_lookahead") == "read" and "p6_export_lookahead" in policy.REMOTE_FILE_TOOLS
+    assert not policy.remote_listed("p6_export_lookahead", "full", True, True)
     assert not policy.listed("p6_export_lookahead", "basic", True)
     out = tmp_path / "out"
     out.mkdir()

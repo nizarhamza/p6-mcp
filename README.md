@@ -380,7 +380,8 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
   running**, and every write goes to the **edit log** with its parameters.
 - Writes are refused on a P6 schema version the server was not tested with, unless you trust it explicitly.
 - **Remote access** (claude.ai, ChatGPT in the browser; off by default): each connection is approved on the PC
-  (Connect with this PC in the browser that started it, or the code typed); remote clients never get delete, restore, file or shop tools, edit only
+  (Connect with this PC in the browser that started it, or the code typed); remote clients never get delete, restore or shop tools,
+  get file exports and XER import only through one-time links with **Allow file downloads and uploads** on, edit only
   with the remote edit switch and a connection approved with edits, and every call is in the audit log. See
   [Remote access](#remote-access-claudeai-and-chatgpt-in-the-browser).
 - These rules are enforced by the server itself on every call, not only by the Settings window.
@@ -403,7 +404,8 @@ confidential schedules, use a local model (for example in LM Studio).
 
 **Remote access** (off by default) adds one path: the tool results of claude.ai and ChatGPT pass through your own
 Cloudflare account (the relay and the tunnel; TLS ends at Cloudflare's edge) on their way to the AI vendor. The
-database and XER files are never uploaded. During the setup the app calls the Cloudflare API with your token;
+database is never uploaded; with **Allow file downloads and uploads** on, an export you download and an XER you
+send from your browser pass through the same relay and tunnel (never through the AI vendor). During the setup the app calls the Cloudflare API with your token;
 when a client connects it reads that client's public metadata document (claude.ai, chatgpt.com); with the IP
 allowlist on it reads OpenAI's published address list once a day.
 
@@ -509,9 +511,25 @@ What a remote client gets:
 - read tools; edits only with **Allow edits from remote clients** on (Settings), **Allow write operations** on
   (Tools and safety) and a connection approved with edits, and every edit still takes the dry run and your
   confirmation in the chat, with a backup first and an edit log entry naming the app;
-- never: deleting, restoring a backup, importing or exporting files, the skill shop; `p6_sql_select` reads P6's
-  password columns as empty;
+- file exports (XER, Excel dashboard, look-ahead) and XER import only with **Allow file downloads and uploads**
+  on (off by default; see below);
+- never: deleting, restoring a backup, the skill shop; `p6_sql_select` reads P6's password columns as empty;
 - local paths shown as file names; results up to 100,000 characters (long lists continue on the next page).
+
+**File downloads and uploads** (off by default; turn on **Allow file downloads and uploads** under Remote access,
+then restart remote access). A remote client cannot name a folder of your PC, so files go through one-time links:
+
+- **Exports**: ask for example "export the dashboard of DEMO-A". The file is written in a private folder of that
+  connection on the PC (`%LOCALAPPDATA%\P6MCP\remote\files`; the client may only choose the file name) and the AI
+  app shows a **download link**. It opens a page with a **Download** button in your browser; the link works once
+  and for 15 minutes, then the file is deleted. Export again for a new link.
+- **XER import**: ask the AI app to read or import an XER. It gives you an **upload link**: the page takes one
+  `.xer` file (up to 50 MB) from your computer or phone, checks that it is an XER and keeps it on the PC for an
+  hour. The AI app then inspects it and imports it with the usual dry run and your confirmation (import also needs
+  **Allow edits from remote clients** and a connection approved with edits).
+- Links carry only a random token, work once, expire after 15 minutes, and stop working when you end the
+  connection; only the connection that asked for an upload can read it. The relay needs no update for this
+  (no Repair).
 
 Connections are OAuth: an access token for an hour, renewed for 30 days of use; **Connected apps** lists them,
 with **End connection**. Every request, sign-in and tool call is written to an audit log

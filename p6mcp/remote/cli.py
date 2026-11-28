@@ -26,8 +26,10 @@ def _when(ts: Optional[int]) -> str:
 
 
 def forget(out) -> int:
-    """Uninstall: the tunnel token, the relay secret and auth.db (every connection) are removed from this PC."""
+    """Uninstall: the tunnel token, the relay secret, auth.db (every connection) and the files waiting for a
+    remote client (file handoff) are removed from this PC."""
     import os
+    import shutil
     from p6mcp import credentials
     from p6mcp.remote import RELAY_SECRET_KEY
     from p6mcp.remote.store import default_path
@@ -45,6 +47,8 @@ def forget(out) -> int:
             pass
         except OSError as e:
             print(f"Not removed: {p}: {e}", file=out)
+    from p6mcp.remote.files import root
+    shutil.rmtree(root(), ignore_errors=True)
     print("Remote access secrets and connections removed from this PC.", file=out)
     return 0
 

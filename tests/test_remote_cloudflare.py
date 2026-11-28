@@ -286,10 +286,13 @@ def test_cli_forget(vault, monkeypatch, tmp_path):
     from p6mcp.remote import cli
     from p6mcp.remote.store import Store, default_path
     Store()  # auth.db exists
+    from p6mcp.remote.files import root
+    os.makedirs(os.path.join(root(), "a" * 32, "f1"))  # a file waiting for a remote client
     vault.update({"remote:tunnel_token": "t", "remote:relay_secret": "s"})
     monkeypatch.setattr("p6mcp.credentials.delete", lambda k: vault.pop(k, None) is not None)
     out = io.StringIO()
     assert cli.main(["forget"], out=out) == 0 and vault == {} and not os.path.exists(default_path())
+    assert not os.path.exists(root())
 
 
 # ----------------------------------------------------------------- supervised server and tunnel
@@ -450,9 +453,22 @@ const gw = await worker.fetch(new Request("https://h/mcp", { method: "POST", bod
   noPort);
 const gwBody = await gw.json();
 const note = await worker.fetch(new Request("https://h/mcp", { method: "POST", body: '{"jsonrpc":"2.0"}' }), off);
+// file handoff pages: path and body forwarded unchanged, the answer's headers kept (download, upload)
+const files = [];
+const fileEnv = { RELAY_SECRET: "s3", P6_PORT: "41234", P6: { fetch: async (url, init) => {
+  files.push({ url, method: init.method, relay: init.headers.get("X-P6MCP-Relay"),
+               body: init.body ? new Uint8Array(init.body).length : 0, type: init.headers.get("content-type") });
+  return new Response("ERMHDR", { status: 200, headers: { "content-disposition": 'attachment; filename="a.xer"' } });
+} } };
+const dl = await worker.fetch(new Request("https://h/files/tok_1", { method: "POST" }), fileEnv);
+const form = new FormData();
+form.append("file", new Blob([new Uint8Array(300000)]), "big.xer");
+const upl = await worker.fetch(new Request("https://h/upload/tok_2", { method: "POST", body: form }), fileEnv);
+const offFile = await worker.fetch(new Request("https://h/files/tok_3", { method: "POST" }), off);
 console.log(JSON.stringify({ seen, status: r.status, up: r.headers.get("x-up"), ver: r.headers.get("x-p6mcp-relay"),
   down: down.status, downVer: down.headers.get("x-p6mcp-relay"), rpcStatus: rpc.status, rpcBody,
-  gwBody, noteStatus: note.status }));
+  gwBody, noteStatus: note.status, files, dlDisp: dl.headers.get("content-disposition"),
+  dlBody: await dl.text(), uplStatus: upl.status, offFile: offFile.status }));
 """, encoding="utf-8")
     # The script makes no network call and has no wait: it runs in well under a second. A busy CI runner once took
     # more than 60 s just to start node (the job ran at half speed), so the limit only guards against a hang.
@@ -471,6 +487,14 @@ console.log(JSON.stringify({ seen, status: r.status, up: r.headers.get("x-up"), 
         res["rpcBody"]["error"]["message"]
     assert res["gwBody"]["id"] == "a" and res["gwBody"]["error"]["code"] == -32000  # tunnel up, nothing listening
     assert res["noteStatus"] == 503  # a notification has no id to answer
+    # file handoff: /files/<token> and /upload/<token> reach the PC unchanged (a 300 KB multipart upload included)
+    dl, up = res["files"]
+    assert dl == {"url": "http://127.0.0.1:41234/files/tok_1", "method": "POST", "relay": "s3", "body": 0,
+                  "type": None}
+    assert up["url"] == "http://127.0.0.1:41234/upload/tok_2" and up["body"] > 300000
+    assert up["type"].startswith("multipart/form-data; boundary=")
+    assert res["dlDisp"].startswith("attachment") and res["dlBody"] == "ERMHDR" and res["uplStatus"] == 200
+    assert res["offFile"] == 503  # PC off: a plain 503 with the reason, not a JSON-RPC answer
 
 
 def test_cloudflared_pin_and_build_wiring():

@@ -12,6 +12,8 @@ Tables
   codes     authorization codes (60 s, single use)
   grants    approved connections: client, scopes, resource, created, last used, revoked
   tokens    access (ACCESS_TTL) and refresh (REFRESH_TTL, rotated, single use) tokens of a grant
+  files     file handoff (p6mcp.remote.files): exports waiting for their one-time download link and XER uploads of a
+            grant; link = hash of the link token. Revoking a grant deletes its rows (the sweep removes the files)
 """
 
 from __future__ import annotations
@@ -54,6 +56,10 @@ CREATE TABLE IF NOT EXISTS grants (id TEXT PRIMARY KEY, client_id TEXT NOT NULL,
 CREATE TABLE IF NOT EXISTS tokens (hash TEXT PRIMARY KEY, grant_id TEXT NOT NULL, kind TEXT NOT NULL,
                                    exp INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS tokens_grant ON tokens (grant_id);
+CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, grant_id TEXT NOT NULL, kind TEXT NOT NULL, ext TEXT NOT NULL,
+                                  name TEXT NOT NULL DEFAULT '', size INTEGER, link TEXT UNIQUE, state TEXT NOT NULL,
+                                  created INTEGER NOT NULL, exp INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS files_grant ON files (grant_id);
 """
 
 
@@ -283,6 +289,7 @@ class Store:
             if r["used"]:
                 con.execute("UPDATE grants SET revoked = ? WHERE id = ?", (_now(), r["grant_id"]))
                 con.execute("DELETE FROM tokens WHERE grant_id = ?", (r["grant_id"],))
+                con.execute("DELETE FROM files WHERE grant_id = ?", (r["grant_id"],))
                 con.execute("COMMIT")
                 return None, "refresh token reused: the connection was revoked"
             con.execute("UPDATE tokens SET used = 1 WHERE hash = ?", (h,))
@@ -324,6 +331,7 @@ class Store:
             n = con.execute("UPDATE grants SET revoked = ? WHERE id = ? AND revoked IS NULL",
                             (_now(), grant_id)).rowcount
             con.execute("DELETE FROM tokens WHERE grant_id = ?", (grant_id,))
+            con.execute("DELETE FROM files WHERE grant_id = ?", (grant_id,))  # its links die with it
         return bool(n)
 
     def revoke_all(self) -> int:
@@ -332,6 +340,7 @@ class Store:
             con.execute("DELETE FROM tokens")
             con.execute("DELETE FROM codes")
             con.execute("DELETE FROM pending")
+            con.execute("DELETE FROM files")
         return n
 
     def revoke_other_resources(self, resource: str) -> int:
