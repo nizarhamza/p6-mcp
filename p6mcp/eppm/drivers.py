@@ -22,6 +22,7 @@ import zipfile
 from typing import Callable, Optional
 
 from p6mcp import config
+from p6mcp.messages import _t
 
 PYPI = "https://pypi.org/pypi/{name}/json"
 # driver -> the distributions to install, dependencies after the driver (oracledb thin mode needs cryptography)
@@ -67,15 +68,15 @@ def _pick(files: list[dict]) -> Optional[dict]:
 
 def _get(opener, url: str, limit: int) -> bytes:
     if not url.startswith("https://"):
-        raise DriverError(f"Refused a download that is not https: {url}")
+        raise DriverError(_t("Refused a download that is not https: {url}", url=url))
     req = urllib.request.Request(url, headers={"User-Agent": "p6mcp-driver-install"})
     try:
         with opener.open(req, timeout=120) as r:
             data = r.read(limit + 1)
     except OSError as e:
-        raise DriverError(f"Download failed ({url}): {e}") from e
+        raise DriverError(_t("Download failed ({url}): {error}", url=url, error=e)) from e
     if len(data) > limit:
-        raise DriverError(f"Download too large: {url}")
+        raise DriverError(_t("Download too large: {url}", url=url))
     return data
 
 
@@ -85,7 +86,7 @@ def install(driver: str, opener: Optional[urllib.request.OpenerDirector] = None,
     The folder is replaced only once every wheel is checked and unpacked (a failed install leaves the old one)."""
     names = PACKAGES.get(driver)
     if not names:
-        raise DriverError(f"Unknown SQL driver {driver!r}")
+        raise DriverError(_t("Unknown SQL driver {driver!r}", driver=driver))
     opener = opener or urllib.request.build_opener()
     dest = folder()
     os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -99,18 +100,20 @@ def install(driver: str, opener: Optional[urllib.request.OpenerDirector] = None,
             version = meta["info"]["version"]
             wheel = _pick(meta.get("urls") or [])
             if wheel is None:
-                raise DriverError(f"{name} {version} has no wheel for this Python ({py_tag()}, 64-bit Windows).")
+                raise DriverError(_t("{name} {version} has no wheel for this Python ({python}, 64-bit Windows).",
+                                     name=name, version=version, python=py_tag()))
             if progress:
                 progress(f"{name} {version}")
             data = _get(opener, wheel["url"], MAX_WHEEL)
             want = (wheel.get("digests") or {}).get("sha256", "")
             got = hashlib.sha256(data).hexdigest()
             if not want or got != want:
-                raise DriverError(f"{wheel['filename']}: checksum mismatch, nothing installed.")
+                raise DriverError(_t("{file}: checksum mismatch, nothing installed.", file=wheel["filename"]))
             with zipfile.ZipFile(io.BytesIO(data)) as z:
                 for m in z.namelist():
                     if m.startswith(("/", "\\")) or ".." in m.replace("\\", "/").split("/"):
-                        raise DriverError(f"{wheel['filename']}: unsafe path {m!r}, nothing installed.")
+                        raise DriverError(_t("{file}: unsafe path {path!r}, nothing installed.", file=wheel["filename"],
+                                             path=m))
                 z.extractall(work)
             done.append({"name": name, "version": version, "sha256": got, "file": wheel["filename"]})
         old = dest + ".old"

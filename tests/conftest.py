@@ -18,6 +18,7 @@ import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # Settings window tests run without a display
+os.environ["P6MCP_TOOL_LANGUAGE"] = "en"  # tool messages in English whatever the Windows language (test_tool_messages)
 for _k in ("CODEX_HOME", "CONTINUE_GLOBAL_DIR"):  # client folders outside the fake profiles of the tests
     os.environ.pop(_k, None)
 sys.path.insert(0, ROOT)

@@ -39,10 +39,12 @@ from p6mcp import __version__ as _pkg_version
 from p6mcp import config as _config
 from p6mcp import confirm as _confirm
 from p6mcp import instructions as _instructions
+from p6mcp import messages as _messages
 from p6mcp import policy as _policy
 from p6mcp import skills as _skills
 
 from p6mcp.core import state as _state
+from p6mcp.messages import _t
 from p6mcp.core.state import _refresh, _ro_cons, _shop_on
 from p6mcp.core.constants import (CAL_CHECK_KINDS, CSTR_TYPES, EPPM_EDIT_TOOLS, MAX_ROWS, PMDB_READ_ONLY, REL_TYPES,
                                   XER_READ_ONLY)
@@ -170,17 +172,19 @@ mcp = FastMCP("primavera-p6", instructions=INSTRUCTIONS, **_version_kw)  # keywo
 
 def _eppm_refusal(tool: str) -> str:
     if tool == "p6_delete_activity":
-        return ("Activities are not deleted through a P6 EPPM working copy in this version: delete it in P6 EPPM, "
-                "then pull again.")
+        return _t("Activities are not deleted through a P6 EPPM working copy in this version: delete it in P6 EPPM, "
+                  "then pull again.")
     if tool in ("p6_update_activity_codes", "p6_move_activities"):
-        what = "Activity code values" if tool == "p6_update_activity_codes" else "WBS moves"
-        return (f"{what} are not sent to the P6 EPPM server by the push in this version ({tool} is not available on a "
-                "P6 EPPM working copy): change them in P6 EPPM, then pull again.")
+        if tool == "p6_update_activity_codes":
+            return _t("Activity code values are not sent to the P6 EPPM server by the push in this version ({tool} is "
+                      "not available on a P6 EPPM working copy): change them in P6 EPPM, then pull again.", tool=tool)
+        return _t("WBS moves are not sent to the P6 EPPM server by the push in this version ({tool} is not available "
+                  "on a P6 EPPM working copy): change them in P6 EPPM, then pull again.", tool=tool)
     if tool == "p6_add_activities":
-        return ("Activities are not created through a P6 EPPM working copy in this version: add them in P6 EPPM, "
-                "then pull again.")
-    return (f"{tool} is not available on a P6 EPPM working copy: the push to the server supports activity, "
-            "relationship and assignment edits only. Do it in P6 EPPM, then pull again.")
+        return _t("Activities are not created through a P6 EPPM working copy in this version: add them in P6 EPPM, "
+                  "then pull again.")
+    return _t("{tool} is not available on a P6 EPPM working copy: the push to the server supports activity, "
+              "relationship and assignment edits only. Do it in P6 EPPM, then pull again.", tool=tool)
 
 
 TOOL_HINTS: dict[str, dict[str, bool]] = {}
@@ -228,8 +232,8 @@ def _plan_gate(plan: Sequence, confirm: bool) -> Optional[str]:
         return None
     if ctx.get("expected_plan") is not None and ctx["expected_plan"] != d:
         ctx["plan_mismatch"] = True
-        return ("The database changed since the dry run: the plan is different now. Nothing was written. Run the "
-                "dry run again, show the new plan to the user and confirm it.")
+        return _t("The database changed since the dry run: the plan is different now. Nothing was written. Run the "
+                  "dry run again, show the new plan to the user and confirm it.")
     return None
 
 
@@ -254,10 +258,22 @@ def _preview(tool: str, params: dict) -> dict:
         why = _write_refusal()
         if why:
             raise RuntimeError(why)
-        plan = [f"Copy {os.path.basename(_state.DB_PATH)} ({os.path.getsize(_state.DB_PATH) / 1048576:.1f} MB) to {_backup_dir()}"]
+        plan = [_t("Copy {database} ({mb:.1f} MB) to {folder}", database=os.path.basename(_state.DB_PATH),
+                   mb=os.path.getsize(_state.DB_PATH) / 1048576, folder=_backup_dir())]
         _plan_gate(plan, False)
         return {"dry_run": True, "would_do": plan}
-    raise ValueError(f"{tool} has no dry run")
+    raise ValueError(_t("{tool} has no dry run", tool=tool))
+
+
+def _in_language(run: Callable, a: tuple, k: dict) -> Any:
+    """run(*a, **k) with the tool messages (p6mcp.messages.Msg) of its result or error rendered in the language of
+    the settings, read after run's _refresh (English: the result as it is)."""
+    try:
+        res = run(*a, **k)
+    except Exception as e:
+        _messages.localize_error(e)  # in place: same exception, same traceback
+        raise
+    return _messages.localize(res)
 
 
 def _gated(fn: Callable) -> Callable:
@@ -266,10 +282,13 @@ def _gated(fn: Callable) -> Callable:
     name = fn.__name__
     kind = _policy.kind(name)
     if kind in (_policy.READ, _policy.FILE):
-        @functools.wraps(fn)
-        def call(*a, **k):
+        def run(*a, **k):
             _before_call(name)
             return fn(*a, **k)
+
+        @functools.wraps(fn)
+        def call(*a, **k):
+            return _in_language(run, a, k)
         return call
 
     sig = inspect.signature(fn)
@@ -280,9 +299,8 @@ def _gated(fn: Callable) -> Callable:
     def scope() -> str:
         return (_state.SETTINGS.config_path or _config.config_path()) if settings_only else _state.DB_PATH
 
-    @functools.wraps(fn)
-    def call(*a, dry_run: bool = True, confirmation_token: Optional[str] = None,
-             confirmation_text: Optional[str] = None, **k):
+    def run(*a, dry_run: bool = True, confirmation_token: Optional[str] = None,
+            confirmation_text: Optional[str] = None, **k):
         _before_call(name)
         ba = sig.bind(*a, **k)
         ba.apply_defaults()
@@ -300,21 +318,31 @@ def _gated(fn: Callable) -> Callable:
                                  owner=_confirm.OWNER.get())
                 res["confirmation_token"] = g.token
                 res["token_expires_in_s"] = int(TOKENS.ttl)
-                extra = ""
-                if destructive:
-                    res["confirmation_text_required"] = _confirm_text(name, params)
-                    extra = f", confirmation_text=\"{res['confirmation_text_required']}\""
-                res["next"] = (f"Show this plan to the user. Only after their explicit yes, call {name} again with the "
-                               f"same arguments plus dry_run=false, confirmation_token=\"{g.token}\"{extra}."
-                               + ("" if settings_only or _state.SETTINGS.eppm else " P6 must be closed."))
+                closed = not (settings_only or _state.SETTINGS.eppm)
+                if destructive:  # the text to type stays English: it is compared literally
+                    res["confirmation_text_required"] = want = _confirm_text(name, params)
+                    res["next"] = (_t("Show this plan to the user. Only after their explicit yes, call {name} again "
+                                      "with the same arguments plus dry_run=false, confirmation_token=\"{token}\", "
+                                      "confirmation_text=\"{text}\". P6 must be closed.", name=name, token=g.token,
+                                      text=want) if closed else
+                                   _t("Show this plan to the user. Only after their explicit yes, call {name} again "
+                                      "with the same arguments plus dry_run=false, confirmation_token=\"{token}\", "
+                                      "confirmation_text=\"{text}\".", name=name, token=g.token, text=want))
+                else:
+                    res["next"] = (_t("Show this plan to the user. Only after their explicit yes, call {name} again "
+                                      "with the same arguments plus dry_run=false, confirmation_token=\"{token}\". "
+                                      "P6 must be closed.", name=name, token=g.token) if closed else
+                                   _t("Show this plan to the user. Only after their explicit yes, call {name} again "
+                                      "with the same arguments plus dry_run=false, confirmation_token=\"{token}\".",
+                                      name=name, token=g.token))
             return res
         if name in LIST_WITHOUT and params.get(LIST_WITHOUT[name]) is None:  # nothing to apply: the listing
             return fn(**params, confirm=False)
         if destructive:
             want = _confirm_text(name, params)
             if (confirmation_text or "").strip() != want:
-                raise ValueError(f"{name} deletes or replaces data: pass confirmation_text=\"{want}\" exactly, as the "
-                                 "dry run asks.")
+                raise ValueError(_t("{name} deletes or replaces data: pass confirmation_text=\"{want}\" exactly, as "
+                                    "the dry run asks.", name=name, want=want))
         g = TOKENS.check(name, params, scope(), confirmation_token, owner=_confirm.OWNER.get())
         ctx.update(token=g.token, expected_plan=g.plan)
         tok = _CALL.set(ctx)
@@ -325,6 +353,10 @@ def _gated(fn: Callable) -> Callable:
         if ctx.get("plan_mismatch") or not (isinstance(res, dict) and res.get("applied") is False):
             TOKENS.consume(g.token)
         return res
+
+    @functools.wraps(fn)
+    def call(*a, **k):
+        return _in_language(run, a, k)
 
     # The SDK reads __signature__ as it is (no string evaluation): give it evaluated annotations.
     ev = inspect.signature(fn, eval_str=True)

@@ -21,6 +21,7 @@ from p6mcp.core.analysis import (
     _cmp_acts, _cmp_links, _crit_named, _integrity, INTEGRITY_CAVEAT, INTEGRITY_DEFS, INTEGRITY_FLAGS, LINK_KEY, _slip,
     SLIP_CAUSES, _tf_change,
 )
+from p6mcp.messages import _t
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
@@ -50,12 +51,12 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
     definition, as p6_critical_path); explain=True adds float_definition, the same in words with both
     definitions, and the schedule_state note."""
     if section not in get_args(CompareSection):
-        raise ValueError(f"section must be one of {list(get_args(CompareSection))}")
+        raise ValueError(_t("section must be one of {values}", values=list(get_args(CompareSection))))
     if dates not in get_args(BaselineDates):
-        raise ValueError(f"dates must be one of {list(get_args(BaselineDates))}")
+        raise ValueError(_t("dates must be one of {values}", values=list(get_args(BaselineDates))))
     minv = _num(min_variance_days)
     if minv is None or minv < 0:
-        raise ValueError("min_variance_days must be 0 or more")
+        raise ValueError(_t("min_variance_days must be 0 or more"))
     con = _connect()
     pid = _project_id(con, project)
     oid = _baseline_pid(con, pid, other)
@@ -64,8 +65,8 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
         if "orig_proj_id" in _cols(con, "PROJECT"):
             bls = [r[0] for r in con.execute("SELECT proj_short_name FROM PROJECT WHERE orig_proj_id = ?"
                                              + _alive(con, "PROJECT") + " ORDER BY proj_short_name, proj_id", (pid,))]
-        raise ValueError(f"{project} has no project baseline: pass other= (a Project ID or baseline). "
-                         f"Baselines of {project}: {bls or 'none'}")
+        raise ValueError(_t("{project} has no project baseline: pass other= (a Project ID or baseline). Baselines of "
+                            "{project}: {baselines}", project=project, baselines=bls or _t("none")))
     args = {"pid": pid, "oid": oid, "minv": minv}
     pcols = _cols(con, "PROJECT")
     pf = ("last_recalc_date", "scd_end_date", "plan_end_date")
@@ -153,7 +154,7 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
         con.rollback()
     r2 = lambda v: None if v is None else round(v, 2)  # noqa: E731
     pa, pb = prj[pid], prj[oid]
-    res = {"project": project, "other": pb[0], "other_source": "other=" if other else "project baseline",
+    res = {"project": project, "other": pb[0], "other_source": "other=" if other else _t("project baseline"),
            "dates": dates, "section": section, **res,
            "summary": {"activities": {"matched": s[0], "added": s[1] or 0, "removed": removed, "later": s[2] or 0,
                                       "earlier": s[3] or 0, "same_finish": s[4] or 0, "later_avg_cd": r2(s[5]),
@@ -162,16 +163,19 @@ def p6_compare_projects(project: ProjectId, other: Optional[ProjectId] = None, s
                                       "slip_causes": {k: causes.get(k, 0) for k in SLIP_CAUSES},
                                       "slip_cause_unknown": causes.get(None, 0), "float_eroded": fl[0] or 0,
                                       "became_critical": fl[1] or 0, "no_longer_critical": fl[2] or 0,
-                                      **({"float_definition": (
+                                      **({"float_definition": _t(
                                           "over the matched activities open in the project (LOE and WBS summary left "
                                           "out): float_eroded = total float lower than in the other one by more than "
-                                          f"{CPM_TF_TOL_H * 60:g} minutes; critical = open and critical under each "
-                                          f"project's own definition (project: {cdef_a}; other: {cdef_b})")}
+                                          "{minutes:g} minutes; critical = open and critical under each project's own "
+                                          "definition (project: {project}; other: {other})",
+                                          minutes=CPM_TF_TOL_H * 60, project=cdef_a, other=cdef_b)}
                                          if explain else {})},
                        "relationships": {"matched": lsum[0], "added": lsum[1], "removed": lsum[2], "lag_changed": lsum[3]}},
            "projects": {k: {"project": pa[k], "other": pb[k]} for k in pf},
-           "basis": ("finish = actual, else early finish; other: " + ("same" if dates == "current" else "planned finish")
-                     + "; variance = finish - other finish (positive = later)"),
+           "basis": (_t("finish = actual, else early finish; other: same; variance = finish - other finish (positive "
+                        "= later)") if dates == "current" else
+                     _t("finish = actual, else early finish; other: planned finish; variance = finish - other finish "
+                        "(positive = later)")),
            "schedule_state": _schedule_state(con, pid, explain)}
     return res
 
@@ -197,18 +201,18 @@ def p6_update_integrity(project: ProjectId, other: ProjectId, flag: Optional[Int
     p6_health_check_compare(project, before=<snapshot id of other>, after=<snapshot id of project>). Values of
     each project's last F9; read only."""
     if flag is not None and flag not in INTEGRITY_FLAGS:
-        raise ValueError(f"flag must be one of {list(INTEGRITY_FLAGS)}")
+        raise ValueError(_t("flag must be one of {INTEGRITY_FLAGS}", INTEGRITY_FLAGS=list(INTEGRITY_FLAGS)))
     near = _num(near_critical_days)
     if near is None or near < 0:
-        raise ValueError("near_critical_days must be 0 or more")
+        raise ValueError(_t("near_critical_days must be 0 or more"))
     size = int(sample_size)
     if not 0 <= size <= 50:
-        raise ValueError("sample_size must be 0 to 50")
+        raise ValueError(_t("sample_size must be 0 to 50"))
     offset, limit = _check_page(offset, limit)
     con = _connect()
     pid, oid = _project_id(con, project), _project_id(con, other)
     if pid == oid:
-        raise ValueError("other must be another project: the previous update of this one")
+        raise ValueError(_t("other must be another project: the previous update of this one"))
     con.execute("BEGIN")  # both projects from one snapshot
     try:
         rows, facts = _integrity(con, pid, oid, near)

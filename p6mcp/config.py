@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from p6mcp import instructions, skills
+from p6mcp.messages import _join, _t
 
 CONFIG_VERSION = 4
 APP_DIR_NAME = "P6MCP"
@@ -178,10 +179,11 @@ def migrate(d: dict) -> tuple[dict, list[str]]:
     """Bring a raw config dict to CONFIG_VERSION. Returns (dict, steps applied)."""
     v = d.get("schema_version", 0)
     if not isinstance(v, int) or v < 0:
-        raise ConfigError(f"schema_version must be a whole number, got {v!r}")
+        raise ConfigError(_t("schema_version must be a whole number, got {value!r}", value=v))
     if v > CONFIG_VERSION:
-        raise ConfigError(f"config.json was written by a newer MCP for Primavera P6 (schema_version {v}, this "
-                          f"version reads {CONFIG_VERSION}). Update MCP for Primavera P6.")
+        raise ConfigError(_t("config.json was written by a newer MCP for Primavera P6 (schema_version {version}, "
+                             "this version reads {reads}). Update MCP for Primavera P6.", version=v,
+                             reads=CONFIG_VERSION))
     steps = []
     while v < CONFIG_VERSION:
         d = MIGRATIONS[v](d)
@@ -473,7 +475,7 @@ def source_selection(source: str, profile: Optional[str]) -> dict:
     """The config keys that select this data source and profile: what p6_use_database layers over the file for one
     server process (load(override=...)), never saved."""
     if source not in SOURCE_KEYS:
-        raise ValueError(f"source must be one of {list(SOURCE_KEYS)}")
+        raise ValueError(_t("source must be one of {allowed}", allowed=list(SOURCE_KEYS)))
     key = SOURCE_KEYS[source]
     return {"data_source": source, **({key: profile} if key else {})}
 
@@ -500,9 +502,9 @@ def read_file(path: Optional[str] = None) -> tuple[Optional[dict], list[str]]:
         with open(path, encoding="utf-8-sig") as fh:
             raw = json.load(fh)
     except (OSError, ValueError) as e:
-        raise ConfigError(f"config.json is unreadable ({path}): {e}") from e
+        raise ConfigError(_t("config.json is unreadable ({path}): {error}", path=path, error=e)) from e
     if not isinstance(raw, dict):
-        raise ConfigError(f"config.json must hold a JSON object ({path})")
+        raise ConfigError(_t("config.json must hold a JSON object ({path})", path=path))
     data, steps = migrate(raw)
     data = validate(data)
     _cache[path] = (key, data, steps)
@@ -542,7 +544,7 @@ def save(data: dict, path: Optional[str] = None) -> str:
 
 # ----------------------------------------------------------------- effective settings
 
-NO_DB_MESSAGE = "No database configured. Open MCP for Primavera P6 Settings to select one."
+NO_DB_MESSAGE = _t("No database configured. Open MCP for Primavera P6 Settings to select one.")
 
 
 @dataclass(frozen=True)
@@ -589,8 +591,8 @@ def _env_flag(name: str) -> Optional[bool]:
     return v.strip().lower() in ("1", "true", "yes", "on")
 
 
-SWITCHED_NOTE = (" (This server process was switched to another data source with p6_use_database; "
-                 "p6_use_database(source=\"saved\") returns to the saved choice.)")
+SWITCHED_NOTE = _t(" (This server process was switched to another data source with p6_use_database; "
+                   "p6_use_database(source=\"saved\") returns to the saved choice.)")
 
 
 def load(override: Optional[dict] = None) -> Settings:
@@ -617,7 +619,7 @@ def load(override: Optional[dict] = None) -> Settings:
 
     db_path, db_name, problem = "", None, None
     if err:
-        problem = f"{err} Open MCP for Primavera P6 Settings to fix it."
+        problem = _t("{error} Open MCP for Primavera P6 Settings to fix it.", error=err)
     xer_files: tuple[str, ...] = ()
     eppm: Optional[str] = None
     pmdb: Optional[str] = None
@@ -626,54 +628,56 @@ def load(override: Optional[dict] = None) -> Settings:
     elif not err and cfg.get("data_source") == "xer":
         files = [os.path.abspath(f) for f in cfg.get("xer_files", [])]
         if not files:
-            problem = "XER-only mode: no XER file selected. Open MCP for Primavera P6 Settings (Database) to add one."
+            problem = _t("XER-only mode: no XER file selected. Open MCP for Primavera P6 Settings (Database) to add "
+                         "one.")
         elif not cfg.get("xer_confirmed"):
-            problem = ("XER-only mode: the XER files were selected but not loaded and checked. Open MCP for "
-                       "Primavera P6 Settings (Database) and click Load.")
+            problem = _t("XER-only mode: the XER files were selected but not loaded and checked. Open MCP for "
+                         "Primavera P6 Settings (Database) and click Load.")
         elif any(not os.path.isfile(f) for f in files):
-            problem = (f"XER file not found: {next(f for f in files if not os.path.isfile(f))}. Open MCP for "
-                       "Primavera P6 Settings to fix the list.")
+            problem = _t("XER file not found: {file}. Open MCP for Primavera P6 Settings to fix the list.",
+                         file=next(f for f in files if not os.path.isfile(f)))
         else:
             xer_files, db_name = tuple(files), "XER files"
     elif not err and cfg.get("data_source") == "eppm":
         prof = eppm_profile(cfg)
         if prof is None:
-            problem = "P6 EPPM mode: no server selected. Open MCP for Primavera P6 Settings (Database) to add one."
+            problem = _t("P6 EPPM mode: no server selected. Open MCP for Primavera P6 Settings (Database) to add "
+                         "one.")
         elif not prof.get("confirmed"):
-            problem = (f"P6 EPPM server {prof['name']!r} was added but its connection was not tested and confirmed. "
-                       "Open MCP for Primavera P6 Settings (Database) and click Test connection.")
+            problem = _t("P6 EPPM server {name!r} was added but its connection was not tested and confirmed. Open "
+                         "MCP for Primavera P6 Settings (Database) and click Test connection.", name=prof["name"])
         else:  # the working copy of a pulled project becomes db_path (p6mcp.eppm, milestone 2)
             eppm, db_name = prof["name"], prof["name"]
-            problem = (f"P6 EPPM server {prof['name']!r}: no project pulled yet. Pull one with p6_eppm_pull "
-                       "(p6_eppm_projects lists the projects you can read).")
+            problem = _t("P6 EPPM server {name!r}: no project pulled yet. Pull one with p6_eppm_pull "
+                         "(p6_eppm_projects lists the projects you can read).", name=prof["name"])
     elif not err and cfg.get("data_source") == "pmdb":
         prof = pmdb_profile(cfg)
         if prof is None:
-            problem = ("P6 Professional on SQL Server or Oracle: no database selected. Open MCP for Primavera P6 "
-                       "Settings (Database) to add one.")
+            problem = _t("P6 Professional on SQL Server or Oracle: no database selected. Open MCP for Primavera P6 "
+                         "Settings (Database) to add one.")
         elif not prof.get("confirmed"):
-            problem = (f"Database server {prof['name']!r} was added but its connection was not tested and confirmed. "
-                       "Open MCP for Primavera P6 Settings (Database) and click Test connection.")
+            problem = _t("Database server {name!r} was added but its connection was not tested and confirmed. Open "
+                         "MCP for Primavera P6 Settings (Database) and click Test connection.", name=prof["name"])
         else:  # the local copy becomes db_path once it exists (core/state.py _refresh)
             pmdb, db_name = prof["name"], prof["name"]
-            problem = (f"Database server {prof['name']!r}: no local copy yet. Copy the projects with p6_pmdb_refresh, "
-                       "or with Copy now in MCP for Primavera P6 Settings (Database).")
+            problem = _t("Database server {name!r}: no local copy yet. Copy the projects with p6_pmdb_refresh, or "
+                         "with Copy now in MCP for Primavera P6 Settings (Database).", name=prof["name"])
     elif not err:
         active = cfg.get("active_database")
         entry = next((d for d in cfg["databases"] if d.get("name") == active), None)
         if entry is None:
             problem = NO_DB_MESSAGE
         elif not entry.get("confirmed"):
-            problem = (f"Database {active!r} was selected but not tested and confirmed. Open MCP for Primavera P6 "
-                       "Settings, click Test connection, then confirm it.")
+            problem = _t("Database {name!r} was selected but not tested and confirmed. Open MCP for Primavera P6 "
+                         "Settings, click Test connection, then confirm it.", name=active)
         else:
             db_path, db_name = os.path.abspath(entry["path"]), active
     if db_path and not os.path.isfile(db_path):
-        problem = (f"The configured database was not found: {db_path}. Open MCP for Primavera P6 Settings to "
-                   "select another one.")
+        problem = _t("The configured database was not found: {path}. Open MCP for Primavera P6 Settings to select "
+                     "another one.", path=db_path)
         db_path = ""
     if switched and problem:
-        problem += SWITCHED_NOTE
+        problem = _join("", (problem, SWITCHED_NOTE))
 
     legacy = source == "env"  # v2 layout: files beside the database, one backup per process
     db_dir = os.path.dirname(db_path) if db_path else ""

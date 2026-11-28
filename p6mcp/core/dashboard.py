@@ -19,6 +19,7 @@ from p6mcp.core.calendar import _Cal, _calendars
 from p6mcp.core.wbs_codes import _act_agg_sql, _merge_agg, _name_sep, _rollup, _wbs_tree
 from p6mcp.core.analysis import DCMA_CHECKS, HC_UNSCORED
 from p6mcp.core.reporting import _bl_planned_by_wbs
+from p6mcp.messages import _t
 
 
 # ----------------------------------------------------------------- dashboard export (Excel)
@@ -64,10 +65,10 @@ def _openpyxl():
         import openpyxl
     except ImportError:
         if getattr(sys, "frozen", False):
-            raise ValueError("p6_export_dashboard needs the openpyxl package, missing from this MCP for Primavera P6 build: "
-                             "reinstall MCP for Primavera P6") from None
-        raise ValueError(f"p6_export_dashboard needs the openpyxl package: run '\"{sys.executable}\" -m pip install "
-                         "openpyxl', then restart the server") from None
+            raise ValueError(_t("p6_export_dashboard needs the openpyxl package, missing from this MCP for Primavera "
+                                "P6 build: reinstall MCP for Primavera P6")) from None
+        raise ValueError(_t("p6_export_dashboard needs the openpyxl package: run '\"{python}\" -m pip install "
+                            "openpyxl', then restart the server", python=sys.executable)) from None
     return openpyxl
 
 
@@ -84,14 +85,14 @@ def _dash_brand(company: Optional[str] = None, colors: Optional[str] = None) -> 
     written when a value cannot be used."""
     name = (str(company).strip() or None) if company is not None else None
     if name and len(name) > 120:
-        raise ValueError("company: at most 120 characters")
+        raise ValueError(_t("company: at most 120 characters"))
     out: dict[str, Any] = {"company": name, "primary": DASH_HEAD, "accent": "0072B2"}
     cols = [c.strip().lstrip("#") for c in str(colors or "").split(",") if c.strip()]
     if len(cols) > 2:
-        raise ValueError("colors: at most two hex colors, 'primary,accent' (e.g. '1F3A5F,0072B2')")
+        raise ValueError(_t("colors: at most two hex colors, 'primary,accent' (e.g. '1F3A5F,0072B2')"))
     for key, c in zip(("primary", "accent"), cols, strict=False):
         if not re.fullmatch(r"[0-9A-Fa-f]{6}", c):
-            raise ValueError(f"colors: {c!r} is not a hex color such as 1F3A5F")
+            raise ValueError(_t("colors: {color!r} is not a hex color such as 1F3A5F", color=c))
         out[key] = c.upper()
     return out
 
@@ -133,13 +134,13 @@ def _dash_read(con, pid: int, bid: Optional[int], codes: Optional[Sequence[str]]
         if a is None or b is None:
             return None
         if cal is None or cal.error:
-            wd_notes.add("a calendar is missing or unreadable: calendar days used instead of working days there")
+            wd_notes.add(_t("a calendar is missing or unreadable: calendar days used instead of working days there"))
             return round((b - a).total_seconds() / 86400, 1)
         return round(cal.work_days(a, b), 1) + 0.0  # + 0.0: -0.0 becomes 0.0
     sep = _name_sep(con, pid)
     nodes = _wbs_tree(con, pid, sep)
     if not nodes:
-        raise ValueError(f"Project {prj['proj_short_name']} has no project WBS node.")
+        raise ValueError(_t("Project {project} has no project WBS node.", project=prj['proj_short_name']))
     own = {r["wbs_id"]: {k: r[k] for k in r.keys() if k != "wbs_id"} for r in con.execute(
         f"SELECT t.wbs_id AS wbs_id, {_act_agg_sql(con)} FROM TASK t LEFT JOIN CALENDAR c ON c.clndr_id = t.clndr_id "
         "WHERE t.proj_id = ?" + al("TASK", "t") + " GROUP BY t.wbs_id", (pid,))}
@@ -254,7 +255,8 @@ def _dash_read(con, pid: int, bid: Optional[int], codes: Optional[Sequence[str]]
     for r in con.execute(q + " ORDER BY t.task_code, t.task_id", args):
         found.setdefault(r["task_code"], _dict(r))
     if codes and set(codes) - set(found):
-        raise ValueError(f"Activity IDs not found in {prj['proj_short_name']}: {sorted(set(codes) - set(found))}")
+        raise ValueError(_t("Activity IDs not found in {project}: {codes}", project=prj['proj_short_name'],
+                            codes=sorted(set(codes) - set(found))))
 
     def mdate(m: Mapping, planned: bool = False) -> Optional[datetime]:  # the milestone's one date
         kind = "start" if m["task_type"] == "TT_Mile" else "end"
@@ -262,7 +264,8 @@ def _dash_read(con, pid: int, bid: Optional[int], codes: Optional[Sequence[str]]
     ms = sorted(found.values(), key=lambda m: (mdate(m) or datetime.max, m["task_code"]))
     ms_note = None
     if not codes and len(ms) > DASH_MILESTONES:
-        ms_note = f"{len(ms)} milestones: the first {DASH_MILESTONES} by date are shown (pass milestones= to choose)."
+        ms_note = _t("{n} milestones: the first {cap} by date are shown (pass milestones= to choose).", n=len(ms),
+                     cap=DASH_MILESTONES)
         ms = ms[:DASH_MILESTONES]
     bl: dict[str, dict] = {}
     if bid is not None and ms:

@@ -37,6 +37,7 @@ from typing import Any, Callable, Optional
 from p6mcp import config
 from p6mcp.eppm import sql as _sql
 from p6mcp.eppm import store as _store
+from p6mcp.messages import _join, _t
 
 MANIFEST_FILE = "copy.json"
 STORE_VERSION = 1
@@ -91,9 +92,9 @@ TABLES: tuple[tuple[str, str, bool], ...] = (
     ("PREFER", "", True),
     ("NEXTKEY", "", True),
 )
-READ_ONLY = ("P6 Professional on SQL Server or Oracle is read only here: the tools read a local copy and the database "
-             "server is never written. Make the change in P6, then refresh the copy (p6_pmdb_refresh, or Copy now in "
-             "MCP for Primavera P6 Settings, Database).")
+READ_ONLY = _t("P6 Professional on SQL Server or Oracle is read only here: the tools read a local copy and the "
+               "database server is never written. Make the change in P6, then refresh the copy (p6_pmdb_refresh, or "
+               "Copy now in MCP for Primavera P6 Settings, Database).")
 
 
 class CopyError(ValueError):
@@ -182,15 +183,15 @@ def _alive(row: dict) -> bool:
 def _module(profile: dict, module_factory: Optional[Callable[[str], Any]]) -> Any:
     mod = module_factory(profile["driver"]) if module_factory else _sql.driver_module(profile["driver"])
     if mod is None:
-        raise CopyError(f"The {_sql.DRIVERS[profile['driver']]} driver is not installed: install it from MCP for "
-                        "Primavera P6 Settings (Database, Install the driver).")
+        raise CopyError(_t("The {driver} driver is not installed: install it from MCP for Primavera P6 Settings "
+                           "(Database, Install the driver).", driver=_sql.DRIVERS[profile["driver"]]))
     return mod
 
 
 def _connect(profile: dict, password: str, mod: Any):
     if not password:
-        raise CopyError("No password for the database login: enter it in MCP for Primavera P6 Settings (Database) "
-                        "and click Test connection.")
+        raise CopyError(_t("No password for the database login: enter it in MCP for Primavera P6 Settings (Database) "
+                           "and click Test connection."))
     try:
         con = _sql.connect(profile, password, mod)
     except _sql.SqlError as e:
@@ -301,10 +302,10 @@ def resolve(cur, profile: dict) -> dict:
 def _selection_text(sel: dict) -> str:
     bits = []
     if sel["missing"]["projects"]:
-        bits.append("Project ID(s) not found: " + ", ".join(sel["missing"]["projects"]))
+        bits.append(_t("Project ID(s) not found: {ids}", ids=", ".join(sel["missing"]["projects"])))
     if sel["missing"]["eps"]:
-        bits.append("EPS ID(s) not found: " + ", ".join(sel["missing"]["eps"]))
-    return "; ".join(bits)
+        bits.append(_t("EPS ID(s) not found: {ids}", ids=", ".join(sel["missing"]["eps"])))
+    return _join("; ", bits) if bits else ""
 
 
 # ----------------------------------------------------------------- test connection
@@ -320,7 +321,7 @@ def test_profile(profile: dict, password: Optional[str],
     pw = password or ""
     try:
         if profile.get("driver") not in _sql.DRIVERS:
-            raise CopyError(f"Choose SQL Server or Oracle (driver {profile.get('driver')!r}).")
+            raise CopyError(_t("Choose SQL Server or Oracle (driver {driver!r}).", driver=profile.get("driver")))
         try:
             mod = _module(profile, module_factory)
         except CopyError as e:
@@ -337,8 +338,9 @@ def test_profile(profile: dict, password: Optional[str],
                 except Exception:  # noqa: BLE001
                     missing.append(t)
             if missing:
-                raise CopyError("These P6 tables cannot be read with this login: " + ", ".join(missing)
-                                + ". Check the database or service name, the schema (owner) and the login's rights.")
+                raise CopyError(_t("These P6 tables cannot be read with this login: {missing}. Check the database or "
+                                   "service name, the schema (owner) and the login's rights.",
+                                   missing=", ".join(missing)))
             res["p6_version"] = _p6_version(cur, profile)
             cur.execute(f"SELECT COUNT(*) FROM {_sql.table(profile, 'PROJECT')} "
                         "WHERE project_flag = 'Y' AND orig_proj_id IS NULL")
@@ -366,10 +368,10 @@ def copy(profile: dict, password: str, module_factory: Optional[Callable[[str], 
     """Copy the profile's projects, their baselines and the global tables into the local copy. Returns the manifest
     written to copy.json. Raises CopyError (the previous copy is kept)."""
     if not _names(profile.get("projects")) and not _names(profile.get("eps")):
-        raise CopyError("Nothing to copy: name the projects (Project IDs) or an EPS in MCP for Primavera P6 Settings "
-                        "(Database).")
+        raise CopyError(_t("Nothing to copy: name the projects (Project IDs) or an EPS in MCP for Primavera P6 "
+                           "Settings (Database)."))
     if (profile.get("baselines") or "current") not in BASELINES:
-        raise CopyError(f"baselines must be one of {list(BASELINES)}")
+        raise CopyError(_t("baselines must be one of {allowed}", allowed=list(BASELINES)))
     started = datetime.now()
     mod = _module(profile, module_factory)
     folder = store_dir(profile["name"])
@@ -390,12 +392,12 @@ def copy(profile: dict, password: str, module_factory: Optional[Callable[[str], 
             except CopyError:
                 raise
             except Exception as e:  # noqa: BLE001
-                raise CopyError(f"The project list cannot be read: {_clean(e, pw)}") from None
+                raise CopyError(_t("The project list cannot be read: {error}", error=_clean(e, pw))) from None
             why = _selection_text(sel)
             if why:
-                raise CopyError(why + ". Fix the list in MCP for Primavera P6 Settings (Database).")
+                raise CopyError(_t("{why}. Fix the list in MCP for Primavera P6 Settings (Database).", why=why))
             if not sel["projects"]:
-                raise CopyError("The EPS selection holds no project.")
+                raise CopyError(_t("The EPS selection holds no project."))
             ids = sorted({int(r["proj_id"]) for r in sel["projects"] + sel["baselines"]})
             out = sqlite3.connect(tmp)
             for table, where, optional in TABLES:
@@ -408,9 +410,10 @@ def copy(profile: dict, password: str, module_factory: Optional[Callable[[str], 
                         except Exception:  # noqa: BLE001
                             pass
                     if optional:
-                        warnings.append(f"{table} not copied: {_clean(e, pw)[:160]}")
+                        warnings.append(_t("{table} not copied: {error}", table=table, error=_clean(e, pw)[:160]))
                         continue
-                    raise CopyError(f"{table} cannot be read: {_clean(e, pw)[:200]}") from None
+                    raise CopyError(_t("{table} cannot be read: {error}",
+                                       table=table, error=_clean(e, pw)[:200])) from None
                 if n is not None:
                     counts[table] = n
             t_pred = _sql.table(profile, "TASKPRED")
@@ -422,9 +425,11 @@ def copy(profile: dict, password: str, module_factory: Optional[Callable[[str], 
             except Exception:  # noqa: BLE001
                 cross = 0
             if cross:
-                warnings.append(f"{cross} relationship(s) to or from projects that were not copied are left out")
+                warnings.append(_t("{n} relationship(s) to or from projects that were not copied are left out",
+                                   n=cross))
             if sel["templates_skipped"]:
-                warnings.append("template projects of the EPS left out: " + ", ".join(sel["templates_skipped"]))
+                warnings.append(_t("template projects of the EPS left out: {projects}",
+                                   projects=", ".join(sel["templates_skipped"])))
         finally:
             con.close()
         _finish(out)
@@ -435,7 +440,8 @@ def copy(profile: dict, password: str, module_factory: Optional[Callable[[str], 
         try:
             os.replace(tmp, dest)
         except OSError as e:
-            raise CopyError(f"The local copy could not be replaced (is another tool reading it?): {e}") from None
+            raise CopyError(_t("The local copy could not be replaced (is another tool reading it?): {error}",
+                               error=e)) from None
     except BaseException:
         if out is not None:
             try:

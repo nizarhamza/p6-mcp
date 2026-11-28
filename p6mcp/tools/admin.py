@@ -31,6 +31,7 @@ from p6mcp.core.writes import (
 )
 from p6mcp.core.xer import _xer_read
 from p6mcp.tools.database import p6_schedule_options
+from p6mcp.messages import _join, _t
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
@@ -135,11 +136,15 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
     if os.path.splitext(name)[0].lower().startswith(os.path.splitext(os.path.basename(_state.DB_PATH))[0].lower() + "_"):
         warn = []
     else:
-        warn = [f"{name} is not named after {os.path.basename(_state.DB_PATH)}: it may come from another database"]
-    plan = [f"Restore {name} (taken {taken}, {os.path.getsize(path) / 1048576:.1f} MB) over {_state.DB_PATH}",
-            f"Projects: {diff['counts']['only_in_backup']} only in the backup, {diff['counts']['only_in_database']} only "
-            f"in the database (lost), {diff['counts']['changed']} with another data date or last schedule date",
-            "A safety backup of the current database is taken first."]
+        warn = [_t("{name} is not named after {database}: it may come from another database", name=name,
+                   database=os.path.basename(_state.DB_PATH))]
+    plan = [_t("Restore {name} (taken {taken}, {mb:.1f} MB) over {database}",
+               name=name, taken=taken, mb=os.path.getsize(path) / 1048576, database=_state.DB_PATH),
+            _t("Projects: {only_in_backup} only in the backup, {only_in_database} only in the database (lost), "
+               "{changed} with another data date or last schedule date",
+               only_in_backup=diff['counts']['only_in_backup'], only_in_database=diff['counts']['only_in_database'],
+               changed=diff['counts']['changed']),
+            _t("A safety backup of the current database is taken first.")]
     base = {"backup": {"name": name, "taken_at": taken, "size_bytes": os.path.getsize(path)}, "projects": diff,
             "warnings": warn}
     mismatch = _plan_gate(plan, confirm)
@@ -147,8 +152,8 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
         return {"applied": False, "error": mismatch, **base}
     if not confirm:
         return {"dry_run": True, "would_do": plan, **base,
-                "next": "Call again with confirm=True to restore"
-                        + (" (the local working copy only)." if _state.SETTINGS.eppm else " (P6 must be closed).")}
+                "next": _t("Call again with confirm=True to restore (the local working copy only).")
+                if _state.SETTINGS.eppm else _t("Call again with confirm=True to restore (P6 must be closed).")}
     err = _guard_write()
     if err:
         raise RuntimeError(err)
@@ -156,11 +161,12 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
     try:
         bad = src.execute("PRAGMA quick_check(5)").fetchall()
         if [r[0] for r in bad] != ["ok"]:
-            raise ValueError(f"Backup {name} fails PRAGMA quick_check: {[r[0] for r in bad]} (nothing restored)")
+            raise ValueError(_t("Backup {name} fails PRAGMA quick_check: {errors} (nothing restored)", name=name,
+                                errors=[r[0] for r in bad]))
         safety = _backup("pre_restore")
         err = _guard_write()  # P6 may have been opened during the safety copy
         if err:
-            raise RuntimeError(err + f" Nothing restored (safety backup {safety} kept).")
+            raise RuntimeError(_t("{err} Nothing restored (safety backup {safety} kept).", err=err, safety=safety))
         dst = sqlite3.connect(_state.DB_PATH, timeout=30)
         try:
             src.backup(dst)
@@ -177,12 +183,12 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
              "table": None, "keys": {"backup": name}, "before": None, "after": None, "backup_taken_at": taken,
              "backup_copied_at": copied,
              "summary": plan[0], "change": plan[0][:160], "backup": safety, "stale": {}, "stale_projects": []}
-    res = {"applied": True, "done": plan + [f"Safety backup: {safety}"], **base, "safety_backup": safety,
-           "next": "Open P6 and check the projects (press F9 where the data needs it)."}
+    res = {"applied": True, "done": plan + [_t("Safety backup: {path}", path=safety)], **base, "safety_backup": safety,
+           "next": _t("Open P6 and check the projects (press F9 where the data needs it).")}
     try:
         res["edit_log"] = {"file": _log_write([entry]), "entries": 1}
     except OSError as e:
-        res["edit_log"] = {"error": f"edit log not written: {e}"}
+        res["edit_log"] = {"error": _t("edit log not written: {e}", e=e)}
     return res
 
 
@@ -195,7 +201,7 @@ def p6_list_eps(order: EpsOrder = "seq", offset: Offset = 0, limit: Limit = 200)
     (status WS_Template) are not counted. order: 'seq' (P6 sequence, then EPS ID) or 'tree' (each node
     before its children, siblings in 'seq' order)."""
     if order not in get_args(EpsOrder):
-        raise ValueError(f"order must be one of {list(get_args(EpsOrder))}")
+        raise ValueError(_t("order must be one of {allowed}", allowed=list(get_args(EpsOrder))))
     con = _connect()
     con.execute("BEGIN")  # nodes, tree and counts from one snapshot
     try:
@@ -225,14 +231,17 @@ def p6_create_eps(eps_id: str, eps_name: str, parent_eps: Optional[str] = None,
     Check the result in P6 (Enterprise > EPS) after the first use."""
     with _write_session(confirm) as (con, backup):
         if any(n["eps_id"] == eps_id for n in _eps_nodes(con)):
-            return {"applied": False, "error": f"EPS {eps_id!r} already exists."}
+            return {"applied": False, "error": _t("EPS {eps_id!r} already exists.", eps_id=eps_id)}
         if con.execute("SELECT 1 FROM PROJECT WHERE proj_short_name = ?" + _alive(con, "PROJECT"), (eps_id,)).fetchone():
-            return {"applied": False, "error": f"{eps_id!r} is already a Project ID: choose another EPS ID."}
+            return {"applied": False, "error": _t("{eps_id!r} is already a Project ID: choose another EPS ID.",
+                                                  eps_id=eps_id)}
         parent = _eps_wbs_id(con, parent_eps) if parent_eps else None
         _create_eps(con, eps_id, eps_name, parent, _now_str(con))
-        plan = [f"Create EPS {eps_id} '{eps_name}'" + (f" under {parent_eps}" if parent_eps else " (top level)")]
+        plan = [_t("Create EPS {eps_id} '{eps_name}' under {parent}",
+                   eps_id=eps_id, eps_name=eps_name, parent=parent_eps)
+                if parent_eps else _t("Create EPS {eps_id} '{eps_name}' (top level)", eps_id=eps_id, eps_name=eps_name)]
         if backup:
-            plan.append(f"Backup: {backup}")
+            plan.append(_t("Backup: {path}", path=backup))
         return _commit(con, plan, confirm, log=[{"operation": "create_eps", "table": "PROJECT", "keys": {"eps_id": eps_id},
                                                  "after": {"eps_name": eps_name, "parent_eps": parent_eps},
                                                  "summary": plan[0]}])
@@ -258,12 +267,13 @@ def p6_set_schedule_options(project: ProjectId, options: Optional[SchedValues] =
     server does not know are kept. With from_xer, a confirmed run returns verify (the
     p6_schedule_options summary, 0 different expected). Open P6, check the options, then press F9."""
     if all(v is None for v in (options, from_xer, key_activity, level_priority_list, check_options)):
-        raise ValueError("give options, from_xer, key_activity, level_priority_list or check_options")
+        raise ValueError(_t("give options, from_xer, key_activity, level_priority_list or check_options"))
     opts = {str(k).strip().lower(): v for k, v in (options or {}).items()}
     lpl = _lpl_arg(level_priority_list)
     if "levelprioritylist" in opts:
         if lpl is not None:
-            raise ValueError("give the level priority list once: level_priority_list or options['levelprioritylist']")
+            raise ValueError(_t("give the level priority list once: level_priority_list or "
+                                "options['levelprioritylist']"))
         lpl = _lpl_arg(str(opts.pop("levelprioritylist")).split(";"))
     chk_in = {str(k).strip().lower(): v for k, v in (check_options or {}).items()}
     xer = None
@@ -271,7 +281,8 @@ def p6_set_schedule_options(project: ProjectId, options: Optional[SchedValues] =
         _, x = _xer_read(from_xer)
         xp = _xer_project(x, xer_project)
         if not _xer_sched(x, xp):
-            raise ValueError(f"{from_xer} has no SCHEDOPTIONS row for project {xp['proj_short_name']}")
+            raise ValueError(_t("{file} has no SCHEDOPTIONS row for project {project}",
+                                file=from_xer, project=xp['proj_short_name']))
         xer = (x, xp)
     with _write_session(confirm) as (con, backup):
         pid = _project_row(con, project)["proj_id"]
@@ -286,7 +297,7 @@ def p6_set_schedule_options(project: ProjectId, options: Optional[SchedValues] =
             stored = (_props(con, pid, "schedule_check") or {}).get("attrs", {})
             bad = [k for k in chk_in if k not in CHECK_SPEC and k not in stored]
             if bad:
-                raise ValueError(f"Unknown check_options {bad}: {sorted(CHECK_SPEC)}")
+                raise ValueError(_t("Unknown check_options {bad}: {allowed}", bad=bad, allowed=sorted(CHECK_SPEC)))
             chk = _set_props(con, pid, "schedule_check", {k: _norm_opt("schedule_check", k, v)[0]
                                                           for k, v in chk_in.items()}, None, now)
         plan, counts, shown = [], Counter(), {}
@@ -297,14 +308,17 @@ def p6_set_schedule_options(project: ProjectId, options: Optional[SchedValues] =
             counts[r["action"]] += 1
             shown[prop] = _opt_rows(con, r["options"])
             ch = [o for o in shown[prop] if o["changed"]]
-            plan.append(f"{label} of {project} (PROJPROP {prop}): {len(ch)} of {len(r['options'])} values change, "
-                        f"row {r['action']}")
+            what = dict(project=project, prop=prop, changed=len(ch), n=len(r['options']), action=r['action'])
+            plan.append(_t("Schedule options of {project} (PROJPROP {prop}): {changed} of {n} values change, row "
+                           "{action}", **what) if label == "Schedule options" else
+                        _t("Check Schedule thresholds of {project} (PROJPROP {prop}): {changed} of {n} values change, "
+                           "row {action}", **what))
             plan += [f"  {o['option']}: {o['old']} -> {o['new']}" for o in ch]
         if xer:
-            plan.append(f"Source: {os.path.basename(from_xer)} (project {xer[1]['proj_short_name']}), then the "
-                        "options given")
+            plan.append(_t("Source: {file} (project {project}), then the options given",
+                           file=os.path.basename(from_xer), project=xer[1]['proj_short_name']))
         if backup:
-            plan.append(f"Backup: {backup}")
+            plan.append(_t("Backup: {path}", path=backup))
         log = [{"operation": "set_schedule_options", "proj_id": pid, "table": "PROJPROP",
                 "keys": {"proj_id": pid, "prop_name": prop},
                 "before": {o["option"]: o["old"] for o in rows if o["changed"]},
@@ -318,7 +332,7 @@ def p6_set_schedule_options(project: ProjectId, options: Optional[SchedValues] =
         if res.get("applied"):
             if xer:
                 res["verify"] = p6_schedule_options(project, from_xer, xer_project)["summary"]
-            res["next"] = "Open P6, check Tools > Schedule > Options, then press F9."
+            res["next"] = _t("Open P6, check Tools > Schedule > Options, then press F9.")
         return res
 
 
@@ -342,7 +356,7 @@ def p6_delete_project(project: ProjectList, include_baselines: bool = True, allo
     confirmed run. Close P6 first; activities of other projects linked to these need F9."""
     names = [project] if isinstance(project, str) else list(dict.fromkeys(project or []))
     if not names or not all(isinstance(n, str) and n for n in names):
-        raise ValueError("project: a Project ID or a list of Project IDs")
+        raise ValueError(_t("project: a Project ID or a list of Project IDs"))
     con = _connect()
     try:  # names checked before any lock or backup
         _delete_targets(con, names, include_baselines, allow_templates)
@@ -357,11 +371,14 @@ def p6_delete_project(project: ProjectList, include_baselines: bool = True, allo
         eps_cand = _eps_ancestors(con, pids) if delete_empty_eps else []
         _del_sets(con, pids)
         cross = _cross_links(con)
-        plan = [f"Delete {len(named)} project(s): " + ", ".join(f"{p['project']} ({p['activities']} activities)"
-                                                             for p in named)]
+        plan = [_t("Delete {n} project(s): {projects}", n=len(named),
+                   projects=_join(", ", [_t("{project} ({n} activities)", project=p['project'], n=p['activities'])
+                                         for p in named]))]
         cleared, warnings = Counter(), []
         if bls and include_baselines:
-            plan.append(f"Delete {len(bls)} baseline(s): " + ", ".join(f"{b['project']} of {b['of']}" for b in bls))
+            plan.append(_t("Delete {n} baseline(s): {baselines}", n=len(bls),
+                           baselines=_join(", ", [_t("{baseline} of {project}", baseline=b['project'], project=b['of'])
+                                                  for b in bls])))
         elif bls:
             now = _now_str(con)
             for b in bls:
@@ -376,8 +393,8 @@ def p6_delete_project(project: ProjectList, include_baselines: bool = True, allo
                                                                        (node[1],)).fetchone()):
                     _update(con, "PROJWBS", {"wbs_id": node[0]}, {"parent_wbs_id": node[2]})
                 cleared["PROJECT.orig_proj_id"] += 1
-            plan.append(f"Keep {len(bls)} baseline(s) as ordinary projects (include_baselines=False): "
-                        + ", ".join(b["project"] for b in bls))
+            plan.append(_t("Keep {n} baseline(s) as ordinary projects (include_baselines=False): {baselines}",
+                           n=len(bls), baselines=", ".join(b["project"] for b in bls)))
         for t, c in DEL_CLEAR:
             if c in _cols(con, t):
                 where = f"{c} IN (SELECT id FROM temp._dp)" + (" AND proj_id NOT IN (SELECT id FROM temp._dp)"
@@ -387,7 +404,7 @@ def p6_delete_project(project: ProjectList, include_baselines: bool = True, allo
                     cleared[f"{t}.{c}"] += n
         counts, foreign = _delete_rows(con, pids)
         if cross["count"]:
-            plan.append(f"Delete {cross['count']} relationship(s) with activities of other projects")
+            plan.append(_t("Delete {n} relationship(s) with activities of other projects", n=cross['count']))
         eps_rows, eps_left = [], None
         if delete_empty_eps:
             empty = _empty_eps(con, eps_cand)
@@ -398,36 +415,37 @@ def p6_delete_project(project: ProjectList, include_baselines: bool = True, allo
                 for t, n in more_foreign.items():
                     foreign[t] = foreign.get(t, 0) + n
                 eps_rows = [n["eps_id"] for n in empty]
-                plan.append(f"Delete {len(empty)} EPS node(s) left empty: {', '.join(eps_rows)}")
+                plan.append(_t("Delete {n} EPS node(s) left empty: {nodes}", n=len(empty), nodes=", ".join(eps_rows)))
             eps_left = len(_eps_nodes(con))
             if not eps_left:
-                warnings.append("No EPS node is left: p6_import_xer needs create_eps= for a new project, and P6 "
-                                "asks for an EPS before creating one.")
+                warnings.append(_t("No EPS node is left: p6_import_xer needs create_eps= for a new project, and P6 "
+                                   "asks for an EPS before creating one."))
         after = _orphans(con)
         new = {k: n - before.get(k, 0) for k, n in after.items() if n > before.get(k, 0)}
         foreign_bad = {t: n for t, n in foreign.items() if t != "TASKPRED"}
         reasons = []
         if new:
-            reasons.append(f"The delete would leave rows pointing to deleted rows: {new}")
+            reasons.append(_t("The delete would leave rows pointing to deleted rows: {new}", new=new))
         if foreign_bad:
-            reasons.append(f"The delete would remove rows of other projects: {foreign_bad} (for example project "
-                           "calendars or code types used elsewhere): fix them in P6 first")
-        plan.append("Rows deleted: " + ", ".join(f"{t} {n}" for t, n in sorted(counts.items(), key=lambda kv: -kv[1])))
+            reasons.append(_t("The delete would remove rows of other projects: {rows} (for example project "
+                              "calendars or code types used elsewhere): fix them in P6 first", rows=foreign_bad))
+        plan.append(_t("Rows deleted: {rows}",
+                       rows=", ".join(f"{t} {n}" for t, n in sorted(counts.items(), key=lambda kv: -kv[1]))))
         if cleared:
-            plan.append("References cleared: " + ", ".join(f"{k} {n}" for k, n in cleared.items()))
+            plan.append(_t("References cleared: {rows}", rows=", ".join(f"{k} {n}" for k, n in cleared.items())))
         if backup:
-            plan.append(f"Backup: {backup}")
+            plan.append(_t("Backup: {path}", path=backup))
         extra = {"projects": named, "baselines": {"included": include_baselines, "rows": bls},
                  "counts": {t: {"deleted": n} for t, n in counts.items()}, "cleared": dict(cleared),
                  "cross_project_links": cross,
                  "eps": {"would_delete" if not confirm else "deleted": eps_rows, "eps_nodes_left": eps_left}
                  if delete_empty_eps else None,
                  "orphan_check": {"new": new, "total_new": sum(new.values()), "existing_before": before,
-                                  "note": "rows whose proj_id, task_id, wbs_id, assignment, code, calendar or UDF "
-                                          "fk_id names a missing row; existing_before were there already"},
+                                  "note": _t("rows whose proj_id, task_id, wbs_id, assignment, code, calendar or UDF "
+                                             "fk_id names a missing row; existing_before were there already")},
                  "warnings": warnings, "seconds": round(monotonic() - t0, 1)}
         if reasons and confirm:
-            raise ValueError("Delete refused (nothing written). " + " ".join(reasons))
+            raise ValueError(_t("Delete refused (nothing written). {reasons}", reasons=_join(" ", reasons)))
         log = [{"operation": "delete_project", "proj_id": p["proj_id"], "project": p["project"], "table": "PROJECT",
                 "keys": {"proj_id": p["proj_id"]}, "before": {"activities": p.get("activities")}, "after": None,
                 "summary": plan[0][:300]} for p in targets]
@@ -436,7 +454,8 @@ def p6_delete_project(project: ProjectList, include_baselines: bool = True, allo
         if not confirm:
             res.update(would_refuse=bool(reasons), refuse_reasons=reasons)
             if reasons:
-                res["next"] = "confirm=True would be refused: " + " ".join(reasons)
+                res["next"] = _t("confirm=True would be refused: {reasons}", reasons=_join(" ", reasons))
         elif res.get("applied"):
-            res["next"] = "Open P6: the projects are gone. Reschedule (F9) the projects listed in cross_project_links."
+            res["next"] = _t("Open P6: the projects are gone. Reschedule (F9) the projects listed in "
+                             "cross_project_links.")
         return res

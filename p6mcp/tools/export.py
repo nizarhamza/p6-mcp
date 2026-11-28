@@ -25,6 +25,7 @@ from p6mcp.core.dashboard import (
 from p6mcp.tools.read import p6_critical_path
 from p6mcp.tools.analysis import p6_health_check
 from p6mcp.tools.reporting import p6_progress_curve, p6_project_summary, _trend_names
+from p6mcp.messages import _t
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
@@ -60,35 +61,37 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
     the 7 card values as written (cards), the DCMA checks that fail (dcma_failed) and, with trend=,
     trend {updates, projects}."""
     if baseline_dates not in get_args(BaselineDates):
-        raise ValueError(f"baseline_dates must be one of {list(get_args(BaselineDates))}")
+        raise ValueError(_t("baseline_dates must be one of {choices}", choices=list(get_args(BaselineDates))))
     if period not in get_args(Period):
-        raise ValueError(f"period must be one of {list(get_args(Period))}")
+        raise ValueError(_t("period must be one of {periods}", periods=list(get_args(Period))))
     near = float(near_critical_days)
     if not math.isfinite(near) or near < 0:
-        raise ValueError("near_critical_days must be 0 or more")
+        raise ValueError(_t("near_critical_days must be 0 or more"))
     codes = None
     if milestones is not None:
         codes = list(dict.fromkeys(str(c).strip() for c in ([milestones] if isinstance(milestones, str) else milestones)))
         if not codes or not all(codes):
-            raise ValueError("milestones must list Activity IDs")
+            raise ValueError(_t("milestones must list Activity IDs"))
         if len(codes) > DASH_MILESTONES_MAX:
-            raise ValueError(f"milestones: at most {DASH_MILESTONES_MAX} Activity IDs")
+            raise ValueError(_t("milestones: at most {n} Activity IDs", n=DASH_MILESTONES_MAX))
     texts = {k: (str(v).strip() or None) if v is not None else None
              for k, v in (("prepared_by", prepared_by), ("revision", revision))}
     for k, v in texts.items():
         if v and len(v) > 100:
-            raise ValueError(f"{k}: at most 100 characters")
+            raise ValueError(_t("{k}: at most 100 characters", k=k))
     brand = _dash_brand(company, colors)
     series = None
     if trend is not None:
         names = _trend_names(trend, None)
         series = _trend_series(names + ([] if project in names else [project]))
         if series[-1]["project"] != project:
-            raise ValueError(f"trend=: {project} must be the latest update by data date; the latest is "
-                             f"{series[-1]['project']} ({series[-1]['data_date']})")
+            raise ValueError(_t("trend=: {project} must be the latest update by data date; the latest is {latest} "
+                                "({data_date})",
+                                project=project, latest=series[-1]['project'], data_date=series[-1]['data_date']))
     path = _export_target(path, ".xlsx")
     if os.path.exists(path) and not overwrite:
-        raise ValueError(f"{path} already exists: pass overwrite=True to replace it, or choose another path.")
+        raise ValueError(_t("{path} already exists: pass overwrite=True to replace it, or choose another path.",
+                            path=path))
     _openpyxl()
     con = _connect()
     pid = _project_id(con, project)
@@ -100,13 +103,14 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
                            + _alive(con, "PROJWBS"), (pid,)).fetchone()
     finally:
         con.rollback()
-    warnings: list[str] = [f"Working days: {n}." for n in rd["wd_notes"]]
+    warnings: list[str] = [_t("Working days: {note}.", note=n) for n in rd["wd_notes"]]
     if rd["rows_cut"]:
-        warnings.append(f"More than {DASH_WBS_ROWS} WBS nodes: the first {DASH_WBS_ROWS} are shown.")
+        warnings.append(_t("More than {n} WBS nodes: the first {n} are shown.", n=DASH_WBS_ROWS))
     if rd["ms_note"]:
         warnings.append(rd["ms_note"])
     if len(rd["acts"]) > DASH_ACT_CAP:
-        warnings.append(f"{len(rd['acts']):,} activities: the Schedule Overview shows the first {DASH_ACT_CAP:,}.")
+        warnings.append(_t("{n:,} activities: the Schedule Overview shows the first {cap:,}.",
+                           n=len(rd['acts']), cap=DASH_ACT_CAP))
     summary = p6_project_summary(project, baseline)
     curve, curve_error = None, None
     for measure in ("units", "cost"):
@@ -116,9 +120,9 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
         except ValueError as e:
             curve_error = str(e)
     if curve is None:
-        warnings.append(f"S-curve not drawn: {curve_error}")
+        warnings.append(_t("S-curve not drawn: {error}", error=curve_error))
     elif curve["measure"]["kind"] == "cost":
-        warnings.append("No planned units on labor or nonlabor assignments: the S-curve uses cost.")
+        warnings.append(_t("No planned units on labor or nonlabor assignments: the S-curve uses cost."))
     crit = {r["task_code"] for r in _all_rows(p6_critical_path, 10 ** 7, project=project, fields=["task_code"])[1]}
     hc = p6_health_check(project, baseline=baseline, baseline_dates=baseline_dates, save_snapshot=False)
     state = hc["schedule_state"]
@@ -129,11 +133,12 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
     if series:  # every update of the series, the exported project last
         tr = _trend(series, baseline, codes, "matched", near, True, range(len(series)))
         seen.add((tr["rows"][-1]["data_date"], tr["rows"][-1]["last_schedule_date"]))
-        warnings += [f"Trend: {n}" for n in tr["notes"]]
-        warnings += [f"Trend: {u['project']} was changed by this server after its last F9: its values are those of "
-                     "that F9." for u in tr["rows"] if u["stale"]]
+        warnings += [_t("Trend: {note}", note=n) for n in tr["notes"]]
+        warnings += [_t("Trend: {project} was changed by this server after its last F9: its values are those of that "
+                        "F9.", project=u["project"]) for u in tr["rows"] if u["stale"]]
     if len(seen) > 1:
-        raise ValueError(f"The schedule of {project} changed during the export (data date or last F9): run it again.")
+        raise ValueError(_t("The schedule of {project} changed during the export (data date or last F9): run it again.",
+                            project=project))
     source = (", ".join(os.path.basename(f) for f in _state.SETTINGS.xer_files) if _state.SETTINGS.xer_files  # XER-only mode
               else os.path.basename(_state.DB_PATH))
     data = {"project": project, "name": name and name[0], "db": source, "now": datetime.now(),
@@ -146,7 +151,8 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
         wb.save(tmp)
         os.replace(tmp, path)
     except PermissionError as e:
-        raise ValueError(f"Cannot write {path}: close it in Excel, then export again ({e.strerror})") from None
+        raise ValueError(_t("Cannot write {path}: close it in Excel, then export again ({strerror})",
+                            path=path, strerror=e.strerror)) from None
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
@@ -158,8 +164,8 @@ def p6_export_dashboard(project: ProjectId, path: str, baseline: Optional[Projec
                                             if c.get("pass") is False and k not in HC_UNSCORED],
             **({"trend": {"updates": len(tr["rows"]), "projects": [u["project"] for u in tr["rows"]]}} if tr else {}),
             "warnings": warnings, "schedule_state": state,
-            "note": "Values of the last F9 in P6. The Dashboard sheet is protected (no password) and prints on one A3 "
-                    "landscape page."}
+            "note": _t("Values of the last F9 in P6. The Dashboard sheet is protected (no password) and prints on one "
+                       "A3 landscape page.")}
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
@@ -180,19 +186,20 @@ def p6_export_lookahead(project: ProjectId, path: str, weeks: WindowWeeks = 3, f
     (activities, wbs_bands, grid_columns, bars), counts per category (as p6_lookahead), window, warnings."""
     weeks = int(weeks)
     if not 1 <= weeks <= 52:
-        raise ValueError("weeks must be 1 to 52")
+        raise ValueError(_t("weeks must be 1 to 52"))
     if grid not in get_args(LaGrid):
-        raise ValueError(f"grid must be one of {list(get_args(LaGrid))}")
+        raise ValueError(_t("grid must be one of {grids}", grids=list(get_args(LaGrid))))
     days = 7 * weeks
     use = grid if grid != "auto" else "day" if days <= LA_AUTO_DAYS else "week"
     if use == "day" and days > LA_DAY_GRID_MAX:
-        raise ValueError(f"grid='day' covers at most {LA_DAY_GRID_MAX} days ({LA_DAY_GRID_MAX // 7} weeks): "
-                         "use grid='week' or fewer weeks")
+        raise ValueError(_t("grid='day' covers at most {days} days ({weeks} weeks): use grid='week' or fewer weeks",
+                            days=LA_DAY_GRID_MAX, weeks=LA_DAY_GRID_MAX // 7))
     if from_date:
         _parse_dt(from_date, "from_date")
     path = _export_target(path, ".xlsx")
     if os.path.exists(path) and not overwrite:
-        raise ValueError(f"{path} already exists: pass overwrite=True to replace it, or choose another path.")
+        raise ValueError(_t("{path} already exists: pass overwrite=True to replace it, or choose another path.",
+                            path=path))
     _openpyxl()
     con = _connect()
     pid = _project_id(con, project)
@@ -214,19 +221,21 @@ def p6_export_lookahead(project: ProjectId, path: str, weeks: WindowWeeks = 3, f
     cut = len(rows) > LA_EXPORT_CAP
     if cut:
         rows = rows[:LA_EXPORT_CAP]
-        warnings.append(f"More than {LA_EXPORT_CAP:,} activities: the first {LA_EXPORT_CAP:,} in look-ahead order are "
-                        "written; narrow with wbs_name_contains, code_type / code_value or critical_only.")
+        warnings.append(_t("More than {cap:,} activities: the first {cap:,} in look-ahead order are written; narrow "
+                           "with wbs_name_contains, code_type / code_value or critical_only.", cap=LA_EXPORT_CAP))
     if cal is None or cal.error:
-        warnings.append("The project calendar is missing or unreadable: non-work days are not shaded.")
+        warnings.append(_t("The project calendar is missing or unreadable: non-work days are not shaded."))
         cal = None
     if state["stale"]:
-        warnings.append("This server changed the schedule after the last F9: open P6 and press F9, then export again.")
+        warnings.append(_t("This server changed the schedule after the last F9: open P6 and press F9, then export "
+                           "again."))
     order = {n["wbs_id"]: i for i, n in enumerate(tree)}
     node = {n["wbs_id"]: n for n in tree}
     acts = [{**_act_view(r), **la["extra"](r), "wbs_id": r["wbs_id"]} for r in rows]
     nodates = sum(1 for a in acts if not a["fcst_start"] or not a["fcst_finish"])
     if nodates:
-        warnings.append(f"{nodates} activities have no start or finish date: no bar is drawn for them.")
+        warnings.append(_t("{nodates} activities have no start or finish date: no bar is drawn for them.",
+                           nodates=nodates))
     groups: dict = {}
     for a in acts:  # look-ahead order kept inside each WBS
         groups.setdefault(a["wbs_id"] if a["wbs_id"] in order else None, []).append(a)
@@ -241,20 +250,21 @@ def p6_export_lookahead(project: ProjectId, path: str, weeks: WindowWeeks = 3, f
             "last_schedule_date": prj["last_schedule_date"], "groups": bands}
     wb, written = _la_book(data)
     if written["data_date_column"] is None:
-        warnings.append("The data date is outside the window: no data date line.")
+        warnings.append(_t("The data date is outside the window: no data date line."))
     tmp = path + ".tmp"
     try:  # written beside the target, then swapped in: a failed export leaves the old file intact
         wb.save(tmp)
         os.replace(tmp, path)
     except PermissionError as e:
-        raise ValueError(f"Cannot write {path}: close it in Excel, then export again ({e.strerror})") from None
+        raise ValueError(_t("Cannot write {path}: close it in Excel, then export again ({strerror})",
+                            path=path, strerror=e.strerror)) from None
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
     res = {"path": path, "project": project, "data_date": la["data_date"], "window": la["window"],
            "weeks": la["weeks"], "grid": use, "rows": written, "counts": counts, "truncated": cut,
            "critical_definition": la["critical_definition"], "warnings": warnings, "schedule_state": state,
-           "note": "Values of the last F9 in P6. One sheet, landscape A3 fit to width, header rows repeated."}
+           "note": _t("Values of the last F9 in P6. One sheet, landscape A3 fit to width, header rows repeated.")}
     if la["code_filter"]:
         res["code_filter"] = la["code_filter"]
     return res

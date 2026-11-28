@@ -12,6 +12,8 @@ import time
 import urllib.parse
 from typing import Callable, Optional
 
+from p6mcp.messages import _t
+
 POLL_S = 3.0          # between two status reads (tests lower it)
 TIMEOUT_S = 900       # a schedule job that runs longer is reported, not waited for
 TERMINAL = re.compile(r"(?i)complet|fail|error|cancel|abort")
@@ -42,7 +44,7 @@ def schedule(sess, project_oids: list[int], new_data_date: Optional[str] = None,
     first = res[0] if isinstance(res, list) and res else res
     job = (first or {}).get("JobId") if isinstance(first, dict) else None
     if not job:
-        raise JobError(f"The server did not return a job id for the schedule: {res!r}")
+        raise JobError(_t("The server did not return a job id for the schedule: {answer!r}", answer=res))
     status = _status(first)
     while not TERMINAL.search(status) and time.perf_counter() - started < timeout_s:
         sleep(POLL_S)
@@ -57,9 +59,9 @@ def schedule(sess, project_oids: list[int], new_data_date: Optional[str] = None,
         entry = got[0] if isinstance(got, list) and got else got
         log = str((entry or {}).get("JobLog") or "") if isinstance(entry, dict) else str(entry or "")
     except ValueError as e:
-        log = f"(the scheduling log could not be read: {e})"
+        log = _t("(the scheduling log could not be read: {error})", error=e)
     return {"job_id": str(job), "status": status, "finished": finished,
-            "seconds": round(time.perf_counter() - started, 1), "log": log[:LOG_MAX],
+            "seconds": round(time.perf_counter() - started, 1), "log": log if len(log) <= LOG_MAX else log[:LOG_MAX],
             "log_truncated": len(log) > LOG_MAX}
 
 

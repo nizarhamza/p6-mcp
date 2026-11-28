@@ -11,6 +11,7 @@ from typing import Optional
 
 from p6mcp.core.db import _alive, _fmt_dt, _parse_dt
 from p6mcp.core.props import _blob_text, _p6_find, _p6_tree
+from p6mcp.messages import _t
 
 
 CAL_EPOCH = date(1899, 12, 30)  # P6 calendar exception dates are day serials from this date
@@ -24,7 +25,7 @@ CAL_WINDOW_DAYS = 3660
 def _hm(v: Optional[str]) -> int:
     m = re.fullmatch(r"(\d{1,2}):(\d\d)", (v or "").strip())
     if not m:
-        raise ValueError(f"bad shift time {v!r}")
+        raise ValueError(_t("bad shift time {value!r}", value=v))
     return int(m[1]) * 60 + int(m[2])
 
 
@@ -35,7 +36,7 @@ def _shifts_of(node: dict) -> tuple:
         s, f = _hm(k["attrs"].get("s")), _hm(k["attrs"].get("f"))
         f = 1440 if f == 0 else f  # f|00:00 is 24:00
         if f <= s:
-            raise ValueError(f"shift ends before it starts: {k['attrs']}")
+            raise ValueError(_t("shift ends before it starts: {attrs}", attrs=k['attrs']))
         out.append((s, f))
     return tuple(sorted(out))
 
@@ -60,7 +61,7 @@ def _cal_parse(data: str) -> tuple[Optional[tuple], tuple]:
         exc = tuple((CAL_EPOCH + timedelta(days=int(float(e["attrs"]["d"]))), _shifts_of(e))
                     for e in (node["kids"] if node else ()))
     except (KeyError, TypeError, ValueError, OverflowError) as e:
-        raise ValueError(f"unreadable calendar data: {e}") from None
+        raise ValueError(_t("unreadable calendar data: {e}", e=e)) from None
     return week, exc
 
 
@@ -142,7 +143,7 @@ class _Cal:
         is walked shift by shift from start, the following whole days are skipped through the cumulative index
         (_cum_index: same result as walking them), the last day is walked shift by shift."""
         if hours < 0:
-            raise ValueError("hours must be 0 or more")
+            raise ValueError(_t("hours must be 0 or more"))
         left = round(hours * 60)
         if not left:
             return start
@@ -160,7 +161,8 @@ class _Cal:
             if cum[o + span - c0] - base >= need:
                 break
             if span >= CAL_SCAN_DAYS:
-                raise ValueError(f"calendar {self.name!r} has no working time within {CAL_SCAN_DAYS} days")
+                raise ValueError(_t("calendar {name!r} has no working time within {days} days", name=self.name,
+                               days=CAL_SCAN_DAYS))
             span = min(span * 4, CAL_SCAN_DAYS)
         i = bisect.bisect_left(cum, base + need, o - c0 + 1, o + span - c0 + 1)  # the day that fills it
         day, left = date.fromordinal(c0 + i - 1), (base + need - cum[i - 1]) / 60
@@ -174,7 +176,7 @@ class _Cal:
         """Start of `hours` of work that finish at end; lands on a shift start when it fills it
         (backward pass mirror of add_work_hours)."""
         if hours < 0:
-            raise ValueError("hours must be 0 or more")
+            raise ValueError(_t("hours must be 0 or more"))
         left = round(hours * 60)
         if not left:
             return end
@@ -187,7 +189,8 @@ class _Cal:
                         return datetime.combine(d, time()) + timedelta(minutes=hi - left)
                     left -= hi - s
             d, t1 = d - timedelta(days=1), 1440
-        raise ValueError(f"calendar {self.name!r} has no working time within {CAL_SCAN_DAYS} days")
+        raise ValueError(_t("calendar {name!r} has no working time within {days} days", name=self.name,
+                               days=CAL_SCAN_DAYS))
 
     def work_hours_between(self, a: datetime, b: datetime) -> float:
         """Working hours from a to b (negative when b is before a); same as work_hours."""
@@ -206,7 +209,8 @@ class _Cal:
                 if m < f:
                     return dt if s <= m else datetime.combine(d, time()) + timedelta(minutes=s)
             d, m = d + timedelta(days=1), -1
-        raise ValueError(f"calendar {self.name!r} has no working time within {CAL_SCAN_DAYS} days")
+        raise ValueError(_t("calendar {name!r} has no working time within {days} days", name=self.name,
+                               days=CAL_SCAN_DAYS))
 
     def prev_work_end(self, dt: datetime) -> datetime:
         """dt when work runs just before it (inside a shift, or at its finish), else the last shift
@@ -217,7 +221,8 @@ class _Cal:
                 if m > s:
                     return dt if m <= f else datetime.combine(d, time()) + timedelta(minutes=f)
             d, m = d - timedelta(days=1), 1441
-        raise ValueError(f"calendar {self.name!r} has no working time within {CAL_SCAN_DAYS} days")
+        raise ValueError(_t("calendar {name!r} has no working time within {days} days", name=self.name,
+                               days=CAL_SCAN_DAYS))
 
 
 DEFAULT_WEEK = (((480, 960),),) * 5 + ((),) * 2  # Monday to Friday 08:00 to 16:00 (Python weekday order)
@@ -272,7 +277,7 @@ def _calendars(con, only: Optional[int] = None) -> dict[int, _Cal]:
 def _calendar(con, clndr_id: int) -> _Cal:
     cal = _calendars(con, int(clndr_id)).get(int(clndr_id))
     if cal is None:
-        raise ValueError(f"Calendar not found: {clndr_id}")
+        raise ValueError(_t("Calendar not found: {clndr_id}", clndr_id=clndr_id))
     return cal
 
 
@@ -285,17 +290,23 @@ def _resolve_dt(cal: Optional[_Cal], value: str, field: str, edge: str) -> tuple
     d = dt.date()
     if has_time:
         if cal is not None and not cal.is_workday(d):
-            return _fmt_dt(dt), [f"{field} {_fmt_dt(dt)} is on a non-work day of calendar {cal.name!r} (kept)"]
+            return _fmt_dt(dt), [_t("{field} {date} is on a non-work day of calendar {name!r} (kept)", field=field,
+                                    date=_fmt_dt(dt), name=cal.name)]
         return _fmt_dt(dt), []
     if cal is None:
         if edge == "finish":
-            raise ValueError(f"{field}: give the time ('YYYY-MM-DD HH:MM'): the activity has no readable calendar")
-        return _fmt_dt(dt.replace(hour=8)), [f"{field}: date only and no readable calendar, 08:00 used"]
+            raise ValueError(_t("{field}: give the time ('YYYY-MM-DD HH:MM'): the activity has no readable calendar",
+                                field=field))
+        return _fmt_dt(dt.replace(hour=8)), [_t("{field}: date only and no readable calendar, 08:00 used", field=field)]
     if not cal.is_workday(d):
-        raise ValueError(f"{field}: {d} is not a work day on calendar {cal.name!r}: give the time ('YYYY-MM-DD HH:MM')")
+        raise ValueError(_t("{field}: {d} is not a work day on calendar {name!r}: give the time ('YYYY-MM-DD HH:MM')",
+                            field=field, d=d, name=cal.name))
     v = cal.first_start(d) if edge == "start" else cal.last_end(d)
-    return _fmt_dt(v), [f"{field}: date only, {'first shift start' if edge == 'start' else 'last shift end'} "
-                        f"of calendar {cal.name!r} used ({_fmt_dt(v)})"]
+    if edge == "start":
+        return _fmt_dt(v), [_t("{field}: date only, first shift start of calendar {name!r} used ({date})",
+                               field=field, name=cal.name, date=_fmt_dt(v))]
+    return _fmt_dt(v), [_t("{field}: date only, last shift end of calendar {name!r} used ({date})",
+                           field=field, name=cal.name, date=_fmt_dt(v))]
 
 
 def _shift_txt(shifts: tuple) -> list[str]:
@@ -308,14 +319,16 @@ def _cal_row(r: sqlite3.Row, cal: _Cal, win: Optional[tuple], span: Optional[tup
     hpd = float(r["day_hr_cnt"] or 8)
     hours = [sum(f - s for s, f in sh) / 60 for sh in cal.week]
     week_h = sum(hours)
-    warn = [] if r["day_hr_cnt"] else ["day_hr_cnt is empty, 8 h per day used"]
+    warn = [] if r["day_hr_cnt"] else [_t("day_hr_cnt is empty, 8 h per day used")]
     if r["base_clndr_id"] is not None and r["base_name"] is None:
-        warn.append(f"base calendar {r['base_clndr_id']} not found")
+        warn.append(_t("base calendar {id} not found", id=r['base_clndr_id']))
     if not week_h:
-        warn.append("no working time in the work week")
+        warn.append(_t("no working time in the work week"))
     if r["week_hr_cnt"] is not None and abs(float(r["week_hr_cnt"]) - week_h) > 1e-6:
-        warn.append(f"stored week_hr_cnt {float(r['week_hr_cnt']):g} differs from the work week {week_h:g} h")
-    warn += [f"a work day has {h:g} h, hours_per_day is {hpd:g}" for h in sorted({h for h in hours if h})
+        warn.append(_t("stored week_hr_cnt {stored:g} differs from the work week {week:g} h",
+                       stored=float(r['week_hr_cnt']), week=week_h))
+    warn += [_t("a work day has {h:g} h, hours_per_day is {hpd:g}",
+                h=h, hpd=hpd) for h in sorted({h for h in hours if h})
              if abs(h - hpd) > 1e-6]
     non_work = sum(1 for v in cal.exc.values() if not v)
     row = {"clndr_id": r["clndr_id"], "name": r["clndr_name"], "type": r["clndr_type"],

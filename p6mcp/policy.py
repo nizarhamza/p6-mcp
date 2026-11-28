@@ -18,6 +18,7 @@ effect at once, while turning a tool on needs a restart of the server (reported 
 from __future__ import annotations
 
 from typing import Iterable, Optional
+from p6mcp.messages import _t
 
 READ, FILE, WRITE, DESTRUCTIVE, CONFIG = "read", "file", "write", "destructive", "config"
 KINDS = (READ, FILE, WRITE, DESTRUCTIVE, CONFIG)
@@ -70,8 +71,8 @@ NO_DB_TOOLS = frozenset({"p6_diagnose", "p6_inspect_xer", "p6_shop_search", "p6_
                          "p6_use_database"})
 # The skill shop (p6mcp.shop): GitHub reads, offered only while the setting shop_enabled is on
 SHOP_TOOLS = frozenset({"p6_shop_search", "p6_shop_get", "p6_shop_install"})
-SHOP_OFF = ("The skill shop is turned off. Turn on 'Allow the skill shop' in MCP for Primavera P6 Settings "
-            "(Tools and safety), then restart your MCP client.")
+SHOP_OFF = (_t("The skill shop is turned off. Turn on 'Allow the skill shop' in MCP for Primavera P6 Settings (Tools "
+               "and safety), then restart your MCP client."))
 
 assert BASIC_TOOLS <= {t for t, k in TOOL_KIND.items() if k == READ}
 assert set(TOOL_KIND.values()) <= set(KINDS)
@@ -100,15 +101,15 @@ def listed(tool: str, profile: str, allow_writes: bool, shop: bool = True) -> bo
     return True
 
 
-WRITES_OFF = ("Write operations are disabled. Turn on 'Allow write operations' in MCP for Primavera P6 Settings "
-              "(Tools and safety) to use this tool.")
+WRITES_OFF = (_t("Write operations are disabled. Turn on 'Allow write operations' in MCP for Primavera P6 Settings "
+                 "(Tools and safety) to use this tool."))
 
 
 def write_refusal(profile: str, allow_writes: bool) -> Optional[str]:
     """Why no database write may run under these settings (None = writes allowed)."""
     if profile != "full":
-        return ("Writes need the Full tool profile. Switch the tool profile to Full in MCP for Primavera P6 Settings, "
-                "then restart your MCP client.")
+        return (_t("Writes need the Full tool profile. Switch the tool profile to Full in MCP for Primavera P6 "
+                   "Settings, then restart your MCP client."))
     if not allow_writes:
         return WRITES_OFF
     return None
@@ -120,8 +121,8 @@ def refusal(tool: str, profile: str, allow_writes: bool, shop: bool = True) -> O
     if tool in SHOP_TOOLS and not shop:
         return SHOP_OFF
     if profile != "full" and tool not in BASIC_TOOLS:
-        return (f"{tool} is not available in the Basic tool profile. Switch the tool profile to Full in "
-                "MCP for Primavera P6 Settings, then restart your MCP client.")
+        return (_t("{tool} is not available in the Basic tool profile. Switch the tool profile to Full in MCP for "
+                   "Primavera P6 Settings, then restart your MCP client.", tool=tool))
     if k in (WRITE, DESTRUCTIVE):
         return write_refusal(profile, allow_writes)
     return None
@@ -154,14 +155,14 @@ REMOTE_OFF = ("{tool} is not available to remote clients (claude.ai, ChatGPT): i
               "the PC, or deletes data. Use it from a local client on the PC.")
 REMOTE_PATH_ARG = ("{arg} is not available to remote clients: it names a file on the PC. Use this tool from a local "
                    "client on the PC for that.")
-REMOTE_NO_GRANT = "This connection has no access to P6 data. Connect again and approve it on the PC."
-REMOTE_WRITES_OFF = ("Edits from remote clients are off. Turn on 'Allow edits from remote clients' in MCP for "
-                     "Primavera P6 Settings (Remote access) on the PC.")
+REMOTE_NO_GRANT = _t("This connection has no access to P6 data. Connect again and approve it on the PC.")
+REMOTE_WRITES_OFF = (_t("Edits from remote clients are off. Turn on 'Allow edits from remote clients' in MCP for "
+                        "Primavera P6 Settings (Remote access) on the PC."))
 REMOTE_FILES_OFF = ("{tool} needs file downloads and uploads, which are off for remote clients. Turn on 'Allow file "
                     "downloads and uploads' in MCP for Primavera P6 Settings (Remote access) on the PC, then restart "
                     "remote access.")
-REMOTE_SCOPE_OFF = ("This connection was approved read only. To edit, remove the connector in your AI app, connect "
-                    "again and approve it on the PC with 'Allow edits' ticked.")
+REMOTE_SCOPE_OFF = (_t("This connection was approved read only. To edit, remove the connector in your AI app, connect "
+                       "again and approve it on the PC with 'Allow edits' ticked."))
 
 
 def remote_kind(tool: str) -> str:
@@ -191,15 +192,15 @@ def remote_refusal(tool: str, profile: str, allow_writes: bool, remote_writes: b
     switch remote_allow_files."""
     rk = remote_kind(tool)
     if rk == "never":
-        return REMOTE_OFF.format(tool=tool)
+        return _t(REMOTE_OFF, tool=tool)
     scopes = set(scopes or ())
     if REMOTE_READ_SCOPE not in scopes:
         return REMOTE_NO_GRANT
     if tool in REMOTE_FILE_TOOLS and not files:
-        return REMOTE_FILES_OFF.format(tool=tool)
+        return _t(REMOTE_FILES_OFF, tool=tool)
     for arg in REMOTE_NO_PATH_ARGS.get(tool, ()):
         if (args or {}).get(arg) not in (None, ""):
-            return REMOTE_PATH_ARG.format(arg=arg)
+            return _t(REMOTE_PATH_ARG, arg=arg)
     if rk == "write":
         if not remote_writes:
             return REMOTE_WRITES_OFF

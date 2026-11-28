@@ -25,6 +25,7 @@ from p6mcp.core.read import _critical_clause
 from p6mcp.core.engine import CPM_TF_TOL_H
 from p6mcp.core.analysis import _cmp_acts, _cmp_links, _dcma, _dcma_settings, HC_UNSCORED, LINK_KEY, _weighted_score
 from p6mcp.core.explain import _cpt
+from p6mcp.messages import _join, _t
 
 
 # ----------------------------------------------------------------- reporting: groups, look-ahead, S-curve, summary
@@ -45,13 +46,13 @@ def _la_query(con, pid: int, project: str, n: int, from_date: Optional[str], inc
     fcst_finish, start_week, finish_week), counts() over every row, window, weeks, data_date (stored text), frm / to
     (datetimes), critical_definition, code_filter."""
     if not 1 <= n <= 366:
-        raise ValueError("the window must be 1 to 366 days (days=, or weeks= up to 52)")
+        raise ValueError(_t("the window must be 1 to 366 days (days=, or weeks= up to 52)"))
     frm = _parse_dt(from_date, "from_date")[0] if from_date else None
     dd = (con.execute("SELECT last_recalc_date FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()[0]
           if "last_recalc_date" in _cols(con, "PROJECT") else None)
     frm = frm or _db_dt(dd)
     if frm is None:
-        raise ValueError(f"{project} has no data date: pass from_date")
+        raise ValueError(_t("{project} has no data date: pass from_date", project=project))
     to = frm + timedelta(days=n)
     cflt, cargs, cinfo = _code_filter(con, pid, code_type, code_value, include_child_codes)
     crit, crit_args, crit_def = _critical_clause(con, pid, "project", None)[:3]
@@ -90,8 +91,11 @@ def _la_query(con, pid: int, project: str, n: int, from_date: Optional[str], inc
              for k in range((n + 6) // 7)]
     return {"sql": q, "args": [*crit_args, *args], "extra": extra, "counts": counts, "frm": frm, "to": to,
             "window": {"from": _fmt_dt(frm), "to": _fmt_dt(to), "days": n,
-                       "basis": "calendar days, half-open [from, to), from " + ("from_date" if from_date else "the data date")},
-            "weeks": weeks, "data_date": dd, "critical_definition": crit_def + "; open activities", "code_filter": cinfo}
+                       "basis": _t("calendar days, half-open [from, to), from from_date") if from_date else
+                       _t("calendar days, half-open [from, to), from the data date")},
+            "weeks": weeks, "data_date": dd, "critical_definition": _t("{definition}; open activities",
+                                                                       definition=crit_def),
+            "code_filter": cinfo}
 
 
 CURVE_POINTS = 21  # P6 resource curve: PctUsage points 0 to 20, one per 5 % of the duration
@@ -109,12 +113,12 @@ def _curve_shape(data) -> tuple[float, ...]:
         kids = _p6_tree(_blob_text(data))["kids"]
         pts = {int(k["name"]): float(k["attrs"]["PctUsage"]) for k in kids}
     except (KeyError, TypeError, ValueError, IndexError) as e:
-        raise ValueError(f"unreadable curve data: {e}") from None
+        raise ValueError(_t("unreadable curve data: {e}", e=e)) from None
     if sorted(pts) != list(range(CURVE_POINTS)) or min(pts.values()) < 0 or not math.isfinite(sum(pts.values())):
-        raise ValueError(f"a curve needs the {CURVE_POINTS} points 0 to 20 with values of 0 or more")
+        raise ValueError(_t("a curve needs the {n} points 0 to 20 with values of 0 or more", n=CURVE_POINTS))
     total, acc, out = sum(pts.values()), 0.0, []
     if total <= 0:
-        raise ValueError("the curve points add up to 0")
+        raise ValueError(_t("the curve points add up to 0"))
     for k in range(CURVE_POINTS):
         acc += pts[k]
         out.append(acc / total)
@@ -374,29 +378,46 @@ def _ev_pct(r: Mapping, ev: Optional[Mapping]) -> float:
     return _perf_pct(r)
 
 
-SPREAD_RULES = ("Periods: each assignment's quantities are spread over the working time of its calendar (the "
-                "resource's calendar for a resource dependent activity, else the activity's), on its resource curve "
-                "when it has one (21 points, one per 5 % of the duration), planned over the planned dates, remaining "
-                "over the remaining dates from the data date and actual from the actual start to the actual finish "
-                "or the data date.")
+SPREAD_RULES = (_t("Periods: each assignment's quantities are spread over the working time of its calendar (the "
+                   "resource's calendar for a resource dependent activity, else the activity's), on its resource "
+                   "curve when it has one (21 points, one per 5 % of the duration), planned over the planned dates, "
+                   "remaining over the remaining dates from the data date and actual from the actual start to the "
+                   "actual finish or the data date."))
 
 
 def _spread_note(counts: Mapping) -> str:
     """Note text of a working time spread (p6_progress_curve, p6_resource_loading) from _Spread.counts plus
     trsrcfin (TRSRCFIN rows of the project)."""
-    fin = ("Stored period actuals (TRSRCFIN) place the actual of their financial periods; the rest of an "
-           "assignment's actual runs from the end of its last stored period to the data date."
-           if counts.get("period_actuals") else
-           "The database holds no period actuals for these assignments (TRSRCFIN), so the actual curve is rebuilt "
-           "from the actual dates." if not counts.get("trsrcfin") else
-           "Period actuals (TRSRCFIN) exist but none for these assignments: the actual curve is rebuilt from the actual dates.")
-    return (SPREAD_RULES + " " + fin + " Still approximate per period: an in-progress assignment takes its whole curve "
-            "over its remaining dates, units per time that vary inside an assignment and the activity level TASKFIN "
-            "rows are not read"
-            + (f"; {counts['calendar_time']} spans without working time on their calendar run over calendar time"
-               if counts.get("calendar_time") else "")
-            + (f"; {counts['unknown_curve']} assignments name a curve that is missing or unreadable (spread linearly)"
-               if counts.get("unknown_curve") else "") + ".")
+    if counts.get("period_actuals"):
+        fin = _t("Stored period actuals (TRSRCFIN) place the actual of their financial periods; the rest of an "
+                 "assignment's actual runs from the end of its last stored period to the data date.")
+    elif not counts.get("trsrcfin"):
+        fin = _t("The database holds no period actuals for these assignments (TRSRCFIN), so the actual curve is "
+                 "rebuilt from the actual dates.")
+    else:
+        fin = _t("Period actuals (TRSRCFIN) exist but none for these assignments: the actual curve is rebuilt from "
+                 "the actual dates.")
+    cal_n, curve_n = counts.get("calendar_time"), counts.get("unknown_curve")
+    if cal_n and curve_n:
+        rest = _t("Still approximate per period: an in-progress assignment takes its whole curve over its remaining "
+                  "dates, units per time that vary inside an assignment and the activity level TASKFIN rows are not "
+                  "read; {spans} spans without working time on their calendar run over calendar time; {curves} "
+                  "assignments name a curve that is missing or unreadable (spread linearly).",
+                  spans=cal_n, curves=curve_n)
+    elif cal_n:
+        rest = _t("Still approximate per period: an in-progress assignment takes its whole curve over its remaining "
+                  "dates, units per time that vary inside an assignment and the activity level TASKFIN rows are not "
+                  "read; {spans} spans without working time on their calendar run over calendar time.", spans=cal_n)
+    elif curve_n:
+        rest = _t("Still approximate per period: an in-progress assignment takes its whole curve over its remaining "
+                  "dates, units per time that vary inside an assignment and the activity level TASKFIN rows are not "
+                  "read; {curves} assignments name a curve that is missing or unreadable (spread linearly).",
+                  curves=curve_n)
+    else:
+        rest = _t("Still approximate per period: an in-progress assignment takes its whole curve over its remaining "
+                  "dates, units per time that vary inside an assignment and the activity level TASKFIN rows are not "
+                  "read.")
+    return _join(" ", (SPREAD_RULES, fin, rest))
 
 
 def _curve_items(rows: Sequence, dd: datetime, ev: Optional[Mapping] = None, sp: Optional[_Spread] = None) -> dict:
@@ -453,7 +474,7 @@ def _period_edges(lo: datetime, hi: datetime, period: str, week_day: int = 1) ->
     out = [d]
     while out[-1] <= hi:
         if len(out) > MAX_ROWS:
-            raise ValueError(f"more than {MAX_ROWS} periods: use period='month' or narrow from_date / to_date")
+            raise ValueError(_t("more than {n} periods: use period='month' or narrow from_date / to_date", n=MAX_ROWS))
         out.append(nxt(out[-1]))
     return out
 
@@ -465,10 +486,10 @@ def _code_list(codes, name: str) -> list[str]:
     """Activity IDs of a list or of a text separated by commas (blanks dropped, first occurrence kept)."""
     items = codes.split(",") if isinstance(codes, str) else codes
     if not isinstance(items, (list, tuple)) or not all(isinstance(c, str) for c in items):
-        raise ValueError(f"{name}: a list of Activity IDs, or one text with the IDs separated by commas")
+        raise ValueError(_t("{name}: a list of Activity IDs, or one text with the IDs separated by commas", name=name))
     out = list(dict.fromkeys(c.strip() for c in items if c.strip()))
     if not out:
-        raise ValueError(f"{name}: give at least one Activity ID")
+        raise ValueError(_t("{name}: give at least one Activity ID", name=name))
     return out
 
 
@@ -613,8 +634,9 @@ def _cost_ev(con, pid: int, bid: Optional[int], dd: Optional[datetime], resource
                                           "source": etc["source"], "formula": ETC_FORMULAS[etc["technique"]],
                                           "wbs_nodes_other_technique": etc["other_nodes"]},
                            "eac_variants": {k: r2(v) if has else None for k, v in variants.items()},
-                           "by_source": by, "scope": f"resource {resource}, expenses left out" if resource else
-                           "every assignment (labor, nonlabor, material) plus expenses (PROJCOST)",
+                           "by_source": by,
+                           "scope": _t("resource {resource}, expenses left out", resource=resource) if resource else
+                           _t("every assignment (labor, nonlabor, material) plus expenses (PROJCOST)"),
                            "formulas": {"bac": "budgeted cost of the assignments + budgeted expense cost",
                                         "pv": "baseline budgeted costs spread linearly over the baseline planned dates, "
                                               "at the data date", "ev": "sum(budgeted cost x earned % of the activity's "
@@ -625,22 +647,24 @@ def _cost_ev(con, pid: int, bid: Optional[int], dd: Optional[datetime], resource
                                         "tcpi": "(BAC - EV) / (EAC - AC)", "tcpi_bac": "(BAC - EV) / (BAC - AC)"}}
     notes = []
     if not has:
-        notes.append("No costs: the assignments and expenses of this project carry no budgeted, actual or "
-                     "remaining cost, so every cost figure is null.")
+        notes.append(_t("No costs: the assignments and expenses of this project carry no budgeted, actual or "
+                        "remaining cost, so every cost figure is null."))
     if bid is None:
-        notes.append("No baseline: PV, SV and SPI are null.")
+        notes.append(_t("No baseline: PV, SV and SPI are null."))
     elif dd is None:
-        notes.append("No data date: PV, SV and SPI are null.")
+        notes.append(_t("No data date: PV, SV and SPI are null."))
     if etc["unknown"]:
-        notes.append(f"Unknown estimate to complete technique {etc['unknown']}: EAC uses AC + remaining cost.")
+        notes.append(_t("Unknown estimate to complete technique {unknown}: EAC uses AC + remaining cost.",
+                        unknown=etc['unknown']))
     if eac is None and has:
-        notes.append("EAC is null: its technique needs " + ("a CPI (no actual or earned cost)"
-                                                             if etc["technique"] != "pf_custom" else "a PF value")
-                     + ("" if etc["technique"] != "pf_cpi_spi" else " and an SPI (baseline planned cost)") + ".")
+        notes.append(_t("EAC is null: its technique needs a PF value.") if etc["technique"] == "pf_custom" else
+                     _t("EAC is null: its technique needs a CPI (no actual or earned cost) and an SPI (baseline "
+                        "planned cost).") if etc["technique"] == "pf_cpi_spi" else
+                     _t("EAC is null: its technique needs a CPI (no actual or earned cost)."))
     if etc["other_nodes"]:
-        notes.append(f"{etc['other_nodes']} WBS nodes store another estimate to complete technique than the project: "
-                     "EAC applies the project's at project level.")
-    out["note"] = " ".join(notes) or None
+        notes.append(_t("{n} WBS nodes store another estimate to complete technique than the project: EAC "
+                        "applies the project's at project level.", n=etc['other_nodes']))
+    out["note"] = _join(" ", notes) if notes else None
     return out
 
 
@@ -730,9 +754,9 @@ def _summary(con, pid: int, project: str, baseline: Optional[str]) -> dict:
         base.update(finish_variance_cd=cd(sf, bl["finish"]), finish_variance_wd=wd(sf, bl["finish"]),
                     planned_units_pct_at_data_date=r4(100 * bp / bb) if bp is not None and bb else None,
                     spi_units=round(bl["cur"]["earned"] / bp, 4) if bp else None)
-    notes = ["Values of the last F9 and of the last progress update."]
+    notes = [_t("Values of the last F9 and of the last progress update.")]
     if bid is None:
-        notes.append("No baseline: pass baseline= or set a project baseline in P6.")
+        notes.append(_t("No baseline: pass baseline= or set a project baseline in P6."))
     return {"project": {"project_id": project, "name": node and node[0], "calendar": cal and cal[0],
                         "hours_per_day": cal and float(cal[1])},
             "dates": {"data_date": p["last_recalc_date"], "planned_start": p["plan_start_date"],
@@ -775,11 +799,11 @@ def _trend_series(names: Sequence[str]) -> list[dict]:
     given twice, an update without a data date, fewer than two updates or more than TREND_MAX."""
     twice = sorted({n for i, n in enumerate(names) if n in names[:i]})
     if twice:
-        raise ValueError(f"Project IDs given twice: {twice}")
+        raise ValueError(_t("Project IDs given twice: {twice}", twice=twice))
     if len(names) < 2:
-        raise ValueError(f"A trend needs at least two updates; got {len(names)}: {list(names)}")
+        raise ValueError(_t("A trend needs at least two updates; got {n}: {names}", n=len(names), names=list(names)))
     if len(names) > TREND_MAX:
-        raise ValueError(f"A trend holds at most {TREND_MAX} updates; got {len(names)}")
+        raise ValueError(_t("A trend holds at most {cap} updates; got {n}", cap=TREND_MAX, n=len(names)))
     con = _connect()
     con.execute("BEGIN")
     try:
@@ -788,9 +812,9 @@ def _trend_series(names: Sequence[str]) -> list[dict]:
             pid = _project_id(con, n)
             h = _trend_head(con, pid)
             if h["project_flag"] == "N":
-                raise ValueError(f"{n} is an EPS node: pass eps={n!r} for the projects below it")
+                raise ValueError(_t("{n} is an EPS node: pass eps={n!r} for the projects below it", n=n))
             if _db_dt(h["last_recalc_date"]) is None:
-                raise ValueError(f"{n} has no data date (PROJECT.last_recalc_date): schedule it in P6 first")
+                raise ValueError(_t("{n} has no data date (PROJECT.last_recalc_date): schedule it in P6 first", n=n))
             out.append({"pid": pid, "project": n, "data_date": h["last_recalc_date"],
                         "last_schedule_date": h["last_schedule_date"]})
     finally:
@@ -804,7 +828,8 @@ def _trend_check(con, u: Mapping) -> dict:
     the series was read."""
     h = _trend_head(con, u["pid"])
     if (h["last_recalc_date"], h["last_schedule_date"]) != (u["data_date"], u["last_schedule_date"]):
-        raise ValueError(f"The schedule of {u['project']} changed during the call (data date or last F9): run it again.")
+        raise ValueError(_t("The schedule of {project} changed during the call (data date or last F9): run it again.",
+                             project=u['project']))
     return h
 
 
@@ -908,7 +933,7 @@ def _trend(series: list[dict], baseline: Optional[str], codes: Optional[list[str
         keys = [c for c in codes if any(c in p for p in present)]
         missing = [c for c in codes if c not in keys]
         if missing:
-            notes.append(f"Activity IDs in none of the updates: {missing}.")
+            notes.append(_t("Activity IDs in none of the updates: {missing}.", missing=missing))
     elif ms_mode == "none":
         keys = []
     else:
@@ -919,9 +944,11 @@ def _trend(series: list[dict], baseline: Optional[str], codes: Optional[list[str
             return (_db_dt(m["date"]) or datetime.max, c)
         keys = sorted(pool, key=last_date)
         if len(keys) > TREND_MS_CAP:
-            notes.append(f"{len(keys)} milestones {'in every update' if ms_mode == 'matched' else 'in the updates'}: "
-                         f"the first {TREND_MS_CAP} by date in the latest update holding them are followed (pass "
-                         "codes= to choose).")
+            notes.append(_t("{n} milestones in every update: the first {cap} by date in the latest update holding "
+                            "them are followed (pass codes= to choose).", n=len(keys), cap=TREND_MS_CAP)
+                         if ms_mode == "matched" else
+                         _t("{n} milestones in the updates: the first {cap} by date in the latest update holding "
+                            "them are followed (pass codes= to choose).", n=len(keys), cap=TREND_MS_CAP))
             keys = keys[:TREND_MS_CAP]
     followed = []
     for c in keys:
@@ -991,10 +1018,10 @@ def _float_edges(edges_days: Optional[Sequence[float]]) -> tuple[list[float], li
     """Bucket edges in days (default FLOAT_EDGES), finite and increasing, with 0 added when missing."""
     e = [float(x) + 0.0 for x in (FLOAT_EDGES if edges_days is None else edges_days)]  # + 0.0: -0.0 becomes 0.0
     if not e or not all(math.isfinite(x) for x in e) or any(b <= a for a, b in zip(e, e[1:], strict=False)):
-        raise ValueError("edges_days must be finite numbers in increasing order, e.g. [-10, -5, 0, 5, 10, 20, 44]")
+        raise ValueError(_t("edges_days must be finite numbers in increasing order, e.g. [-10, -5, 0, 5, 10, 20, 44]"))
     if 0.0 in e:
         return e, []
-    return sorted(e + [0.0]), ["0 added to edges_days: zero float has its own bucket"]
+    return sorted(e + [0.0]), [_t("0 added to edges_days: zero float has its own bucket")]
 
 
 def _float_labels(edges: Sequence[float]) -> list[tuple[str, Optional[float], Optional[float]]]:
@@ -1023,7 +1050,7 @@ def _float_bucket(hours: Optional[float], hpd: float, edges: Sequence[float]) ->
             return f"[{a:g}, {b:g})"
         if a >= 0 and a * hpd < h <= b * hpd:
             return f"({a:g}, {b:g}]"
-    raise ValueError(f"edges {list(edges)} do not hold 0")
+    raise ValueError(_t("edges {edges} do not hold 0", edges=list(edges)))
 
 
 RSRC_KINDS = {"RT_Labor": "labor", "RT_Equip": "nonlabor", "RT_Mat": "material"}  # P6 resource types
@@ -1121,11 +1148,12 @@ def _diag_schema(info: dict) -> dict:
                                 "missing", "tables")}
     if _state.SETTINGS.eppm:
         out.update(label="P6 EPPM working copy", writable=not info["missing"],
-                   note="Built by p6_eppm_pull from the server, not by P6 Professional: no known P6 fingerprint, "
-                        "and the P6 Professional schema check does not apply (writes: see writes).")
+                   note=_t("Built by p6_eppm_pull from the server, not by P6 Professional: no known P6 fingerprint, "
+                           "and the P6 Professional schema check does not apply (writes: see writes)."))
     elif _state.SETTINGS.pmdb:
         out.update(label="Local copy of a P6 Professional database on SQL Server or Oracle", writable=False,
-                   note="Built by p6_pmdb_refresh from the database server: read only, the server is never written.")
+                   note=_t("Built by p6_pmdb_refresh from the database server: read only, the server is never "
+                           "written."))
     return out
 
 

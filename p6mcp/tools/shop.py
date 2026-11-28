@@ -14,6 +14,7 @@ from p6mcp.core import state as _state
 from p6mcp.core.constants import MAX_ROWS
 from p6mcp.registry import _plan_gate, _tool
 from p6mcp.core.db import _check_page, _slice
+from p6mcp.messages import _t
 
 
 # ----------------------------------------------------------------- skill shop (p6mcp.shop)
@@ -27,19 +28,23 @@ def _shop_settings() -> tuple[str, dict]:
     try:
         data = _config.read_file(path)[0]
     except _config.ConfigError as e:
-        raise ValueError(f"The MCP for Primavera P6 settings cannot be read ({e}): fix them in MCP for Primavera P6 Settings first.") from e
+        raise ValueError(_t("The MCP for Primavera P6 settings cannot be read ({error}): fix them in MCP for "
+                            "Primavera P6 Settings first.", error=e)) from e
     return path, data if data is not None else _config.validate({})
 
 
 def _shop_entry(name: str) -> dict:
     idx = _shop.fetch_index()
     if idx["error"]:
-        raise ValueError(f"The skill shop cannot be read ({idx['error']}). Check the internet connection.")
+        raise ValueError(_t("The skill shop cannot be read ({error}). Check the internet connection.",
+                            error=idx["error"]))
     entry = next((e for e in idx["skills"] if e["name"] == name), None)
     if entry is None:
         close = difflib.get_close_matches(name, [e["name"] for e in idx["skills"]], n=3)
-        raise ValueError(f"No skill {name!r} in the shop" + (f"; close names: {', '.join(close)}" if close else "")
-                         + ". Use p6_shop_search.")
+        if close:
+            raise ValueError(_t("No skill {name!r} in the shop; close names: {close}. Use p6_shop_search.",
+                                name=name, close=", ".join(close)))
+        raise ValueError(_t("No skill {name!r} in the shop. Use p6_shop_search.", name=name))
     return entry
 
 
@@ -66,7 +71,8 @@ def p6_shop_search(query: str = "", offset: int = 0, limit: int = 50) -> dict:
     _check_page(offset, limit)
     idx = _shop.fetch_index()
     if idx["error"]:
-        raise ValueError(f"The skill shop cannot be read ({idx['error']}). Check the internet connection.")
+        raise ValueError(_t("The skill shop cannot be read ({error}). Check the internet connection.",
+                            error=idx["error"]))
     _path, data = _shop_settings()
     rows = [dict({k: e.get(k) for k in SHOP_ROW}, status=_shop.status(data, e))
             for e in _shop.search(idx["skills"], query)]
@@ -81,7 +87,8 @@ def p6_shop_get(name: str) -> dict:
     entry = _shop_entry(name)
     _path, data = _shop_settings()
     if entry.get("builtin"):  # an entry of a catalog older than P6 MCP 1.9 (built-in skills of 1.8)
-        raise ValueError(f"{name} is a built-in skill of P6 MCP 1.8 in an older catalog: nothing to read here.")
+        raise ValueError(_t("{name} is a built-in skill of P6 MCP 1.8 in an older catalog: nothing to read here.",
+                            name=name))
     item = _shop.fetch_skill(entry)
     skill = _skills.from_config(_shop.to_stored(item))
     mine = _shop.installed_as(data, name)
@@ -100,25 +107,38 @@ def p6_shop_install(name: str, install_as: Optional[str] = None, confirm: bool =
     is taken here. Changes MCP for Primavera P6's settings only, never the P6 database."""
     entry = _shop_entry(name)
     if entry.get("builtin"):  # an entry of a catalog older than P6 MCP 1.9 (built-in skills of 1.8)
-        raise ValueError(f"{name} is a built-in skill of P6 MCP 1.8 in an older catalog: nothing to install.")
+        raise ValueError(_t("{name} is a built-in skill of P6 MCP 1.8 in an older catalog: nothing to install.",
+                            name=name))
     item = _shop.fetch_skill(entry)
     path, data = _shop_settings()
     if _shop.status(data, entry) == _shop.NEWER_APP:
-        raise ValueError(f"{name} needs MCP for Primavera P6 {entry.get('min_app_version')} or later: update MCP for Primavera P6 first.")
+        raise ValueError(_t("{name} needs MCP for Primavera P6 {version} or later: update MCP for Primavera P6 first.",
+                            name=name, version=entry.get("min_app_version")))
     old = _shop.installed_as(data, name) if install_as is None else None
     new = _shop.install(data, item, as_name=install_as)  # refuses a name taken by another skill
     target = install_as or (old["name"] if old else name)
     ads = _skill_clients()
     tools = _skills.from_config(_shop.to_stored(item)).tools()
-    plan = [f"{'Update' if old else 'Install'} the skill {target} (version {item.get('version') or 1} by "
-            f"{item.get('author') or 'unknown'}) from the MCP for Primavera P6 skill shop into {path}",
-            "Tools it calls: " + (", ".join(tools) or "none") + (" (write tools included)" if item.get("writes")
-                                                                  else ""),
-            "Refresh the P6 skills in: " + (", ".join(f"{ad.skills_dir()} ({ad.name})" for ad in ads) or
-                                            "no client yet (Install skills on the Clients page of MCP for Primavera P6 Settings)")]
+    who = {"target": target, "version": item.get("version") or 1, "author": item.get("author") or _t("unknown"),
+           "path": path}
+    names = ", ".join(tools)
+    folders = ", ".join(f"{ad.skills_dir()} ({ad.name})" for ad in ads)
+    plan = [_t("Update the skill {target} (version {version} by {author}) from the MCP for Primavera P6 skill shop "
+               "into {path}", **who) if old else
+            _t("Install the skill {target} (version {version} by {author}) from the MCP for Primavera P6 skill shop "
+               "into {path}", **who),
+            (_t("Tools it calls: {tools} (write tools included)", tools=names) if item.get("writes") else
+             _t("Tools it calls: {tools}", tools=names)) if names else
+            (_t("Tools it calls: none (write tools included)") if item.get("writes") else _t("Tools it calls: none")),
+            _t("Refresh the P6 skills in: {folders}", folders=folders) if folders else
+            _t("Refresh the P6 skills in: no client yet (Install skills on the Clients page of MCP for Primavera P6 "
+               "Settings)")]
     gate = _plan_gate(plan, confirm)
     if gate:
-        return {"applied": False, "error": gate.replace("The database changed", "The shop or the settings changed")}
+        if gate.startswith("The database changed"):
+            gate = _t("The shop or the settings changed since the dry run: the plan is different now. Nothing was "
+                      "written. Run the dry run again, show the new plan to the user and confirm it.")
+        return {"applied": False, "error": gate}
     if not confirm:
         return {"dry_run": True, "would_do": plan,
                 "skill": {k: item.get(k) for k in ("title", "description", "args", "template", "files")}}
@@ -129,11 +149,11 @@ def p6_shop_install(name: str, install_as: Optional[str] = None, confirm: bool =
             ad.install_skills(*_skills.tool_settings(new))
             refreshed.append(ad.skills_dir())
         except (OSError, ValueError, RuntimeError) as e:
-            errors.append(f"{ad.name}: {e}")
+            errors.append(_t("{client}: {error}", client=ad.name, error=e))
     out = {"applied": True, "skill": target, "version": item.get("version"), "settings_file": path,
            "skills_folders_refreshed": refreshed,
-           "next": "Restart the MCP client to get the skill as a prompt; clients reading a skills folder pick it "
-                   "up in a new chat."}
+           "next": _t("Restart the MCP client to get the skill as a prompt; clients reading a skills folder pick it "
+                      "up in a new chat.")}
     if errors:
         out["errors"] = errors
     return out

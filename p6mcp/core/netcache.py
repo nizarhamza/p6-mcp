@@ -22,6 +22,7 @@ from typing import Callable, Optional
 
 from p6mcp.core import state as _state
 from p6mcp.core.db import _cols, _file_sig
+from p6mcp.messages import _t
 
 
 ENGINE_CACHE_SIZE = 4  # projects kept, least recently used dropped first
@@ -146,4 +147,5 @@ def _engine_cache_info() -> dict:
         n = len(_state._engine_cache)
     return {"enabled": _engine_cache_on(), "max_projects": ENGINE_CACHE_SIZE, "projects_cached": n,
             **{k: st.get(k, 0) for k in ("hits", "misses", "bypassed", "evicted", "clears")},
-            "note": f"Network cache of the CPM engine and link analysis ({ENGINE_CACHE_ENV}=0 turns it off)."}
+            "note": _t("Network cache of the CPM engine and link analysis ({env}=0 turns it off).",
+                       env=ENGINE_CACHE_ENV)}

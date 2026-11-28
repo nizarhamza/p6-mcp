@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Iterable, Optional, Sequence
 
 from p6mcp import config
+from p6mcp.messages import _t
 
 ID_STEP = 1_000_000_000
 STORE_VERSION = 3  # bump when the store layout changes: older stores are rebuilt
@@ -107,7 +108,7 @@ def build(paths: Sequence[str], dest: str) -> dict:
     from p6mcp.core import xer  # here, not at the top: p6mcp.core.state imports this module
 
     if not paths:
-        raise XerStoreError("No XER file selected.")
+        raise XerStoreError(_t("No XER file selected."))
     if os.path.exists(dest):
         os.remove(dest)
     con = sqlite3.connect(dest)
@@ -120,9 +121,9 @@ def build(paths: Sequence[str], dest: str) -> dict:
             try:
                 header, tables, meta = xer._xer_read_meta(path)
             except (OSError, ValueError) as e:
-                raise XerStoreError(f"{os.path.basename(path)}: {e}") from e
+                raise XerStoreError(_t("{file}: {error}", file=os.path.basename(path), error=e)) from e
             if "PROJECT" not in tables or not tables["PROJECT"]:
-                raise XerStoreError(f"{os.path.basename(path)} holds no project.")
+                raise XerStoreError(_t("{file} holds no project.", file=os.path.basename(path)))
             offset = k * ID_STEP
             info = {"path": os.path.abspath(path), "xer_version": header[1] if len(header) > 1 else None,
                     "id_offset": offset, "projects": [], "rows": {}, "warnings": []}
@@ -164,7 +165,7 @@ def build(paths: Sequence[str], dest: str) -> dict:
                                     [tuple(d[c] for c in cols) for d in data])
                 info["rows"][t] = len(rows)
             if meta.get("bad_rows"):
-                info["warnings"].append(f"rows with a wrong field count: {meta['bad_rows']}")
+                info["warnings"].append(_t("rows with a wrong field count: {rows}", rows=meta["bad_rows"]))
             info["_tables"] = tables
             manifest["files"].append(info)
         _support_tables(con, None)
@@ -235,7 +236,8 @@ def _schedule_options(con: sqlite3.Connection, manifest: dict) -> None:
                     _res, warn = props._sched_write(con, p["proj_id"], (x, xp, key_map), {}, None, None, now)
                     f["warnings"] += warn
                 except (ValueError, sqlite3.Error) as e:
-                    f["warnings"].append(f"schedule options of {p['project_id']} not loaded: {e}")
+                    f["warnings"].append(_t("schedule options of {project} not loaded: {error}",
+                                            project=p["project_id"], error=e))
     finally:
         state._cols_cache.clear()  # the cache describes the active database, not this store
 
@@ -244,7 +246,7 @@ def ensure(paths: Sequence[str]) -> tuple[str, dict]:
     """(store path, manifest), building the store when it is missing or a source changed."""
     missing = [p for p in paths if not os.path.isfile(p)]
     if missing:
-        raise XerStoreError(f"XER file not found: {missing[0]}")
+        raise XerStoreError(_t("XER file not found: {file}", file=missing[0]))
     folder = store_dir()
     os.makedirs(folder, exist_ok=True)
     key = _key(paths)

@@ -7,6 +7,7 @@ import sqlite3
 from typing import Optional
 
 from p6mcp.pmdb import READ_ONLY as PMDB_READ_ONLY  # noqa: F401  (P6 Professional on SQL Server / Oracle)
+from p6mcp.messages import _t
 
 
 MAX_ROWS = 200
@@ -82,8 +83,8 @@ TYPE_NAMES = {"TT_Task": "Task Dependent", "TT_Rsrc": "Resource Dependent", "TT_
 # p6_add_activities type names -> TASK.task_type (the TT_ codes are accepted too)
 ACT_TYPES = {"task": "TT_Task", "resource_dependent": "TT_Rsrc", "start_milestone": "TT_Mile",
              "finish_milestone": "TT_FinMile", "level_of_effort": "TT_LOE", "wbs_summary": "TT_WBS"}
-XER_READ_ONLY = ("XER-only mode is read only: the XER files are analysed, never changed. Select a P6 database in "
-                 "MCP for Primavera P6 Settings to write.")
+XER_READ_ONLY = (_t("XER-only mode is read only: the XER files are analysed, never changed. Select a P6 database in "
+                    "MCP for Primavera P6 Settings to write."))
 EPPM_TOOLS = ("p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status")
 # Edits allowed on a P6 EPPM working copy: the ones the push can send (docs/EPPM_PLAN.md 4.1), plus the local backups
 EPPM_EDIT_TOOLS = frozenset({
@@ -91,5 +92,5 @@ EPPM_EDIT_TOOLS = frozenset({
     "p6_add_relationship", "p6_add_relationships", "p6_update_relationship", "p6_update_relationships",
     "p6_delete_relationship", "p6_delete_relationships", "p6_backup_database", "p6_restore_backup",
     "p6_eppm_push", "p6_eppm_schedule", "p6_eppm_discard"})
-EPPM_NEXT = ("Changed in the local working copy only: nothing is sent to the P6 EPPM server until p6_eppm_push "
-             "(dry run first, then the user's yes). p6_eppm_status lists the pending changes.")
+EPPM_NEXT = (_t("Changed in the local working copy only: nothing is sent to the P6 EPPM server until p6_eppm_push "
+                "(dry run first, then the user's yes). p6_eppm_status lists the pending changes."))

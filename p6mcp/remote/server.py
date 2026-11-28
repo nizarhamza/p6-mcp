@@ -28,11 +28,13 @@ from typing import Any, Callable, Optional
 
 from p6mcp import config, credentials, policy, runtime
 from p6mcp import confirm as _confirm
+from p6mcp import messages as _messages
 from p6mcp.remote import (CLIENT_IP_HEADER, PATH, READ_SCOPE, RELAY_HEADER, RELAY_SECRET_KEY, public_url,
                           resource_url, shaping)
 from p6mcp.remote import audit
 from p6mcp.remote import auth as _auth
 from p6mcp.remote import files as _files
+from p6mcp.messages import _t
 from p6mcp.remote.auth import grant_of
 from p6mcp.remote.limits import FILTERED, Allowlist, RateLimiter
 from p6mcp.remote.store import Store
@@ -64,8 +66,8 @@ def _remote_tool(name: str, gated: Callable, tool_error: Optional[type],
     from mcp.server.auth.middleware.auth_context import get_access_token
     from p6mcp import server as S
 
-    def fail(msg: str):
-        raise (tool_error or ValueError)(msg)
+    def fail(msg: str):  # a tool message (Msg) in the language of the settings
+        raise (tool_error or ValueError)(_messages.render(msg, _messages.language()))
 
     writes = policy.remote_kind(name) == "write"
 
@@ -89,11 +91,11 @@ def _remote_tool(name: str, gated: Callable, tool_error: Optional[type],
             fid = upload = None
             if name in policy.REMOTE_FILE_TOOLS:
                 if handoff is None or not grant:
-                    fail("File handoff is not available on this server.")
+                    fail(_t("File handoff is not available on this server."))
                 for local_only in ("path", "overwrite"):
                     if local_only in k:
                         state["result"] = "refused"
-                        fail(policy.REMOTE_PATH_ARG.format(arg=local_only))
+                        fail(_t(policy.REMOTE_PATH_ARG, arg=local_only))
                 try:
                     if name in policy.REMOTE_UPLOAD_TOOLS:
                         upload = str(k.pop("upload_id", None) or "")
@@ -130,7 +132,7 @@ def _remote_tool(name: str, gated: Callable, tool_error: Optional[type],
             if name == "p6_diagnose" and isinstance(res, dict):
                 res = _remote_diagnose(res, st, tok, listed)
             try:
-                out = shaping.shape(res, roots=roots())
+                out = _messages.localize(shaping.shape(_messages.localize(res), roots=roots()))
             except shaping.TooLarge as e:
                 state["result"] = "too_large"
                 fail(str(e))
@@ -151,8 +153,8 @@ def _upload_link_tool(handoff: _files.Handoff, tool_error: Optional[type]) -> Ca
     from mcp.server.auth.middleware.auth_context import get_access_token
     from p6mcp import server as S
 
-    def fail(msg: str):
-        raise (tool_error or ValueError)(msg)
+    def fail(msg: str):  # a tool message (Msg) in the language of the settings
+        raise (tool_error or ValueError)(_messages.render(msg, _messages.language()))
 
     def p6_remote_upload_link() -> dict:
         tok = get_access_token()
@@ -165,7 +167,8 @@ def _upload_link_tool(handoff: _files.Handoff, tool_error: Optional[type]) -> Ca
                                         tok.scopes if tok else None, S._shop_on(st), files=st.remote_allow_files)
             if why or not grant:
                 state["result"] = "refused"
-                fail((why or policy.REMOTE_NO_GRANT).replace("p6_inspect_xer", _files.UPLOAD_TOOL))
+                fail(_messages.render(why or policy.REMOTE_NO_GRANT, _messages.language()).replace(
+                    "p6_inspect_xer", _files.UPLOAD_TOOL))
             try:
                 out = handoff.new_upload(grant, st.remote_public_host)
             except ValueError as e:
@@ -199,16 +202,16 @@ def _remote_diagnose(res: dict, st: config.Settings, tok: Any, listed: Optional[
         res["restart_required"] = set(now) != set(listed)
         res.pop("restart_note", None)
         if res["restart_required"]:
-            res["restart_note"] = ("Settings changed since the remote access server started: restart remote access "
-                                   "in MCP for Primavera P6 on the PC, then reconnect.")
+            res["restart_note"] = _t("Settings changed since the remote access server started: restart remote "
+                                     "access in MCP for Primavera P6 on the PC, then reconnect.")
     claims = getattr(tok, "claims", None) or {}
     res["remote"] = {"public_url": resource_url(st.remote_public_host) if st.remote_public_host else None,
                      "mode": st.remote_mode, "allow_edits_from_remote": st.remote_allow_writes,
                      "allow_files_from_remote": st.remote_allow_files,
                      "connection": {"client": claims.get("client_name") or (tok.client_id if tok else None),
                                     "scopes": list(tok.scopes) if tok else []},
-                     "note": "Edits from a remote client need 'Allow write operations' and 'Allow edits from remote "
-                             "clients' on the PC, and a connection approved with edits."}
+                     "note": _t("Edits from a remote client need 'Allow write operations' and 'Allow edits from "
+                                "remote clients' on the PC, and a connection approved with edits.")}
     return res
 
 

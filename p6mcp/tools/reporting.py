@@ -31,6 +31,7 @@ from p6mcp.core.reporting import (
     _spread_note, _summary, _trend, TREND_MAX, _trend_series, _value_at,
 )
 from p6mcp.tools.read import p6_list_projects
+from p6mcp.messages import _join, _t
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
@@ -50,12 +51,12 @@ def p6_group_summary(project: ProjectId, by: GroupBy = "status", code_type: Opti
     completion). totals: the same over every activity, so the groups always add up to it.
     include_completed=False leaves completed activities out."""
     if by not in get_args(GroupBy):
-        raise ValueError(f"by must be one of {list(get_args(GroupBy))}")
+        raise ValueError(_t("by must be one of {choices}", choices=list(get_args(GroupBy))))
     if by == "code" and not code_type:
-        raise ValueError("by='code' needs code_type (the activity code type, e.g. 'Discipline')")
+        raise ValueError(_t("by='code' needs code_type (the activity code type, e.g. 'Discipline')"))
     for name, v in (("wbs_level", wbs_level), ("code_level", code_level)):
         if v is not None and int(v) < 1:
-            raise ValueError(f"{name} must be 1 or more")
+            raise ValueError(_t("{name} must be 1 or more", name=name))
     con = _connect()
     pid = _project_id(con, project)
     con.execute("BEGIN")  # settings, aggregates and the WBS or code tree from one snapshot
@@ -111,11 +112,13 @@ def p6_group_summary(project: ProjectId, by: GroupBy = "status", code_type: Opti
     rows = [{**head, **_group_row(agg)} for _, head, agg in sorted(groups.values(), key=lambda g: g[0])]
     res = _slice(rows, offset, limit)
     res.update(by=by, level=level, code_type=info, totals=_group_row(functools.reduce(_merge_agg, raw.values(), {})),
-               critical_definition=definition + "; open activities, LOE and WBS summary left out",
+               critical_definition=_t("{definition}; open activities, LOE and WBS summary left out",
+                                      definition=definition),
                schedule_state=_schedule_state(con, pid),
-               note="Values of the last F9. Float of open activities in days of each calendar; units are labor plus "
-                    "nonlabor. totals cover every activity grouped"
-                    + ("" if include_completed else " (completed left out)") + ".")
+               note=_t("Values of the last F9. Float of open activities in days of each calendar; units are labor "
+                       "plus nonlabor. totals cover every activity grouped.") if include_completed else
+               _t("Values of the last F9. Float of open activities in days of each calendar; units are labor plus "
+                  "nonlabor. totals cover every activity grouped (completed left out)."))
     return res
 
 
@@ -142,10 +145,10 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
     ones only. counts gives the categories and critical over all pages. wbs_name_contains, code_type / code_value / include_child_codes, fields=
     and detail= as in p6_query_activities. Order: start, finish, Activity ID."""
     if days is not None and weeks is not None:
-        raise ValueError("give days or weeks, not both")
+        raise ValueError(_t("give days or weeks, not both"))
     n = int(days) if days is not None else 7 * int(weeks) if weeks is not None else LOOKAHEAD_DAYS
     if not 1 <= n <= 366:
-        raise ValueError("the window must be 1 to 366 days (days=, or weeks= up to 52)")
+        raise ValueError(_t("the window must be 1 to 366 days (days=, or weeks= up to 52)"))
     if from_date:
         _parse_dt(from_date, "from_date")
     row_fn, brief = _act_row(fields), _brief_on(detail)
@@ -168,7 +171,7 @@ def p6_lookahead(project: ProjectId, days: Optional[WindowDays] = None, weeks: O
     if la["code_filter"]:
         res["code_filter"] = la["code_filter"]
     res.update(schedule_state=_schedule_state(con, pid),
-               note="Dates of the last F9. The data date has a time (e.g. 18:00): pass from_date for whole days.")
+               note=_t("Dates of the last F9. The data date has a time (e.g. 18:00): pass from_date for whole days."))
     return res
 
 
@@ -196,18 +199,18 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
     over calendar time, resource curves applied or unknown, period actuals used). Periods spread
     each assignment over the working time of its calendar and on its resource curve; see note."""
     if period not in get_args(Period):
-        raise ValueError(f"period must be one of {list(get_args(Period))}")
+        raise ValueError(_t("period must be one of {periods}", periods=list(get_args(Period))))
     if measure not in get_args(Measure):
-        raise ValueError(f"measure must be one of {list(get_args(Measure))}")
+        raise ValueError(_t("measure must be one of {measures}", measures=list(get_args(Measure))))
     lo = _parse_dt(from_date, "from_date")[0] if from_date else None
     hi = _parse_dt(to_date, "to_date")[0] if to_date else None
     if lo and hi and hi < lo:
-        raise ValueError("to_date is before from_date")
+        raise ValueError(_t("to_date is before from_date"))
     con = _connect()
     pid = _project_id(con, project)
     if resource and not con.execute("SELECT 1 FROM RSRC WHERE rsrc_short_name = ?" + _alive(con, "RSRC"),
                                     (resource,)).fetchone():
-        raise ValueError(f"Resource not found: {resource}")
+        raise ValueError(_t("Resource not found: {resource}", resource=resource))
     upd = [(u, _project_id(con, u)) for u in (updates or [])]
     bid = _baseline_pid(con, pid, baseline)
     has_dd = "last_recalc_date" in _cols(con, "PROJECT")
@@ -220,7 +223,7 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
     try:
         dd = dd_of(pid)
         if dd is None:
-            raise ValueError(f"{project} has no data date (PROJECT.last_recalc_date)")
+            raise ValueError(_t("{project} has no data date (PROJECT.last_recalc_date)", project=project))
         evm = _ev_map(con, pid)
         sp = _Spread(con, [pid] + ([bid] if bid is not None else []), measure)
         cur = _curve_items(_measure_rows(con, pid, measure, resource), dd, evm, sp)
@@ -242,15 +245,16 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
                                    + _alive(con, "PROJWBS"), (pid,)).fetchone()[0]
     finally:
         con.rollback()
-    what = (f"resource {resource}" if resource else "labor and nonlabor assignments" if measure == "units"
-            else "every assignment")
+    what = (_t("resource {resource}", resource=resource) if resource else
+            _t("labor and nonlabor assignments") if measure == "units" else _t("every assignment"))
     if not cur["budget"]:
-        raise ValueError(f"{project} has no planned {measure} on {what}: use measure='cost' or resource=")
+        raise ValueError(_t("{project} has no planned {measure} on {what}: use measure='cost' or resource=",
+                            project=project, measure=measure, what=what))
     curves = {**({"baseline": base["planned"]} if base else {}), "planned": cur["planned"], "actual": cur["actual"],
               "forecast": cur["actual"] + cur["remaining"]}
     dates = [d for v in curves.values() for it in v for d in it[1:3]]
     if not dates:
-        raise ValueError(f"no assignment of {project} has dates")
+        raise ValueError(_t("no assignment of {project} has dates", project=project))
     edges = _period_edges(lo or min(dates), hi or max(dates), period, week_day)
     cums = {k: _cum(v, edges) for k, v in curves.items()}
     budget = {k: base["budget"] if k == "baseline" else cur["budget"] for k in curves}
@@ -273,18 +277,23 @@ def p6_progress_curve(project: ProjectId, period: Period = "month", baseline: Op
     point = lambda u, d, c: {"project": u, "data_date": d and _fmt_dt(d), "earned": r2(c["earned"]),  # noqa: E731
                              "actual": r2(c["actual_qty"]), "budget": r2(c["budget"]),
                              "pct": r2(100 * c["earned"] / c["budget"]) if c["budget"] else None}
-    note = (_spread_note(spread) + " Exact: the totals and every value at the data date; to_date keeps the planned value "
-            "of the planned dates linear over calendar time (baseline_planned, planned, variance, spi: the definition used "
-            "before 3.5.0), so it can differ a little from the period curve at the data date. Earned value (budget x "
-            "activity % complete) exists at a data date only: to_date, and earned_points of earlier updates (updates=). "
-            "Planned uses the current "
-            "project planned dates, which move with the schedule for unstarted work; use a baseline for a true plan."
-            + ("" if base else " No baseline: pass baseline= or set a project baseline in P6.")
-            + (f" {ev_other} WBS nodes use another earned value technique than activity percent complete: earned "
-               "applies each node's technique (rules of the P6 documentation, not checked against P6's own numbers)."
-               if ev_other else "")
-            + (f" Unknown earned value technique(s) {evm['unknown']}: counted as activity percent complete."
-               if evm["unknown"] else ""))
+    parts = [_spread_note(spread),
+             _t("Exact: the totals and every value at the data date; to_date keeps the planned value of the planned "
+                "dates linear over calendar time (baseline_planned, planned, variance, spi: the definition used before "
+                "3.5.0), so it can differ a little from the period curve at the data date. Earned value (budget x "
+                "activity % complete) exists at a data date only: to_date, and earned_points of earlier updates "
+                "(updates=). Planned uses the current project planned dates, which move with the schedule for "
+                "unstarted work; use a baseline for a true plan.")]
+    if not base:
+        parts.append(_t("No baseline: pass baseline= or set a project baseline in P6."))
+    if ev_other:
+        parts.append(_t("{n} WBS nodes use another earned value technique than activity percent complete: earned "
+                        "applies each node's technique (rules of the P6 documentation, not checked against P6's own "
+                        "numbers).", n=ev_other))
+    if evm["unknown"]:
+        parts.append(_t("Unknown earned value technique(s) {unknown}: counted as activity percent complete.",
+                        unknown=evm["unknown"]))
+    note = _join(" ", parts)
     return {"project": project, "data_date": _fmt_dt(dd), "period": period,
             "measure": {"kind": measure, "resources": what, "budget": r2(cur["budget"]), "actual": r2(act),
                         "remaining": r2(cur["remain_qty"]), "at_completion": r2(act + cur["remain_qty"])},
@@ -332,9 +341,9 @@ def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, base
     detail='brief' leaves the null values out of the rows."""
     brief = _brief_on(detail)
     if baseline_dates not in get_args(BaselineDates):
-        raise ValueError(f"baseline_dates must be one of {list(get_args(BaselineDates))}")
+        raise ValueError(_t("baseline_dates must be one of {choices}", choices=list(get_args(BaselineDates))))
     if order not in get_args(MsOrder):
-        raise ValueError(f"order must be one of {list(get_args(MsOrder))}")
+        raise ValueError(_t("order must be one of {orders}", orders=list(get_args(MsOrder))))
     wanted = None if codes is None else _code_list(codes, "codes")
     con = _connect()
     pid = _project_id(con, project)
@@ -417,9 +426,12 @@ def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, base
                                                     "source": "baseline=" if baseline else
                                                     "project baseline (PROJECT.sum_base_proj_id)"},
                not_found=[] if wanted is None else [c for c in wanted if c not in found],
-               must_finish=must, critical_definition=cdef + "; open activities", schedule_state=_schedule_state(con, pid),
-               note="Dates of the last F9 (actual, else early). Variance = date - baseline date: positive = later."
-                    + ("" if bid is not None else " No baseline: pass baseline= or set a project baseline in P6."))
+               must_finish=must, critical_definition=_t("{definition}; open activities", definition=cdef),
+               schedule_state=_schedule_state(con, pid),
+               note=_t("Dates of the last F9 (actual, else early). Variance = date - baseline date: positive = "
+                       "later.") if bid is not None else
+               _t("Dates of the last F9 (actual, else early). Variance = date - baseline date: positive = later. No "
+                  "baseline: pass baseline= or set a project baseline in P6."))
     return res
 
 
@@ -460,16 +472,16 @@ def _trend_names(projects, eps: Optional[str]) -> list[str]:
     """Project IDs of a trend: projects= as given, or the projects of the EPS node eps and of the EPS below it
     (baselines and templates left out, as p6_list_projects)."""
     if (projects is None) == (eps is None):
-        raise ValueError("Give projects= (the Project IDs of the updates) or eps= (an EPS ID), one of them")
+        raise ValueError(_t("Give projects= (the Project IDs of the updates) or eps= (an EPS ID), one of them"))
     if eps is not None:
         names = [r["proj_short_name"] for r in _all_rows(p6_list_projects, TREND_MAX + 1, eps=eps,
                                                          exclude_templates=True)[1]]
         if len(names) < 2:
-            raise ValueError(f"EPS {eps} holds {len(names)} project(s) (baselines and templates left out): a trend "
-                             "needs at least two updates")
+            raise ValueError(_t("EPS {eps} holds {n} project(s) (baselines and templates left out): a trend "
+                                "needs at least two updates", eps=eps, n=len(names)))
         return names
     if isinstance(projects, str) or not isinstance(projects, (list, tuple)):
-        raise ValueError("projects must be a list of Project IDs")
+        raise ValueError(_t("projects must be a list of Project IDs"))
     return [str(p).strip() for p in projects]
 
 
@@ -504,10 +516,10 @@ def p6_trend(projects: Optional[TrendProjects] = None, eps: Optional[str] = None
     and TT_FinMile in every update), 'any' (in at least one) or 'none'; at most 20 without codes=, by date in
     the latest update."""
     if milestones not in get_args(TrendMs):
-        raise ValueError(f"milestones must be one of {list(get_args(TrendMs))}")
+        raise ValueError(_t("milestones must be one of {choices}", choices=list(get_args(TrendMs))))
     near = _num(near_critical_days)
     if near is None or not math.isfinite(near) or near < 0:
-        raise ValueError("near_critical_days must be 0 or more")
+        raise ValueError(_t("near_critical_days must be 0 or more"))
     offset, limit = _check_page(offset, limit)
     wanted = None if codes is None else _code_list(codes, "codes")
     series = _trend_series(_trend_names(projects, eps))
@@ -537,7 +549,7 @@ def p6_float_analysis(project: ProjectId, edges_days: Optional[FloatEdges] = Non
     wbs_name_contains and code_type / code_value / include_child_codes filter as in
     p6_query_activities (code_filter in the result, as there)."""
     if not 0 <= int(sample_size) <= 50:
-        raise ValueError("sample_size must be 0 to 50")
+        raise ValueError(_t("sample_size must be 0 to 50"))
     k = int(sample_size)
     edges, notes = _float_edges(edges_days)
     con = _connect()
@@ -579,8 +591,11 @@ def p6_float_analysis(project: ProjectId, edges_days: Optional[FloatEdges] = Non
                for lab, lo, hi in labels]
     no_value = {"total_float": n - len(days["tf"]), "free_float": n - len(days["ff"])}
     return {"project": project,
-            "scope": {"activities": n, "definition": "open activities (not completed), LOE and WBS summary left out"
-                      + ("" if include_milestones else ", milestones left out"), "wbs_name_contains": wbs_name_contains},
+            "scope": {"activities": n,
+                      "definition": _t("open activities (not completed), LOE and WBS summary left out")
+                      if include_milestones else
+                      _t("open activities (not completed), LOE and WBS summary left out, milestones left out"),
+                      "wbs_name_contains": wbs_name_contains},
             **({"code_filter": cinfo} if cinfo else {}), "edges_days": edges, "buckets": buckets, "no_value": no_value,
             "stats": {**stat("tf"), **stat("ff"), "tf_not_whole_days": whole,
                       "negative_tf": sum(1 for v in days["tf"] if v < 0), "zero_tf": count["tf"]["= 0"],
@@ -588,7 +603,7 @@ def p6_float_analysis(project: ProjectId, edges_days: Optional[FloatEdges] = Non
             "all_ranges_covered": all(sum(count[x].values()) + no_value[y] == n
                                       for x, y in (("tf", "total_float"), ("ff", "free_float"))),
             "notes": notes, "schedule_state": _schedule_state(con, pid),
-            "note": "Float of the last F9 in days of each activity's calendar (hours / hours per day)."}
+            "note": _t("Float of the last F9 in days of each activity's calendar (hours / hours per day).")}
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
@@ -608,7 +623,7 @@ def p6_resource_summary(project: ProjectId, resource: Optional[str] = None, offs
     pid = _project_id(con, project)
     if resource and not con.execute("SELECT 1 FROM RSRC WHERE rsrc_short_name = ?" + _alive(con, "RSRC"),
                                     (resource,)).fetchone():
-        raise ValueError(f"Resource not found: {resource}")
+        raise ValueError(_t("Resource not found: {resource}", resource=resource))
     cols = _cols(con, "TASKRSRC")
     act = lambda k: " + ".join(f"COALESCE(tr.{c}, 0)" for c in (f"act_reg_{k}", f"act_ot_{k}") if c in cols) or "0"  # noqa: E731
     lab = ("COALESCE(tr.rsrc_type, r.rsrc_type)" if "rsrc_type" in cols else "r.rsrc_type") + " IN ('RT_Labor', 'RT_Equip')"
@@ -652,10 +667,10 @@ def p6_resource_summary(project: ProjectId, resource: Optional[str] = None, offs
     finally:
         con.rollback()
     res.update(totals={"resources": tot["resources"], **figures(tot), "other_type_assignments": tot["other"] or 0},
-               note="Quantities and costs as stored on the assignments (resource units: hours for labor and nonlabor), "
-                    "not time-phased (p6_resource_loading spreads them per period against max units). Quantity totals "
-                    "cover labor and nonlabor only: material quantities stay in their own rows and unit. Values of the "
-                    "last F9 and progress update.")
+               note=_t("Quantities and costs as stored on the assignments (resource units: hours for labor and "
+                       "nonlabor), not time-phased (p6_resource_loading spreads them per period against max units). "
+                       "Quantity totals cover labor and nonlabor only: material quantities stay in their own rows and "
+                       "unit. Values of the last F9 and progress update."))
     return res
 
 
@@ -678,26 +693,26 @@ def p6_resource_loading(project: ProjectId, resource: Optional[str] = None, role
     the periods. counts: over-allocated periods and resources over (labor and nonlabor), resources without
     a max units limit."""
     if period not in get_args(Period):
-        raise ValueError(f"period must be one of {list(get_args(Period))}")
+        raise ValueError(_t("period must be one of {periods}", periods=list(get_args(Period))))
     lo = _parse_dt(from_date, "from_date")[0] if from_date else None
     hi = _parse_dt(to_date, "to_date")[0] if to_date else None
     if lo and hi and hi < lo:
-        raise ValueError("to_date is before from_date")
+        raise ValueError(_t("to_date is before from_date"))
     offset, limit = _check_page(offset, limit)
     con = _connect()
     pid = _project_id(con, project)
     if resource and not con.execute("SELECT 1 FROM RSRC WHERE rsrc_short_name = ?" + _alive(con, "RSRC"),
                                     (resource,)).fetchone():
-        raise ValueError(f"Resource not found: {resource}")
+        raise ValueError(_t("Resource not found: {resource}", resource=resource))
     if role is not None and not (_cols(con, "ROLES") and con.execute(
             "SELECT 1 FROM ROLES WHERE role_short_name = ?" + _alive(con, "ROLES"), (role,)).fetchone()):
-        raise ValueError(f"Role not found: {role}")
+        raise ValueError(_t("Role not found: {role}", role=role))
     con.execute("BEGIN")  # assignments, calendars, curves, period actuals and limits from one snapshot
     try:
         dd = (_db_dt(con.execute("SELECT last_recalc_date FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()[0])
               if "last_recalc_date" in _cols(con, "PROJECT") else None)
         if dd is None:
-            raise ValueError(f"{project} has no data date (PROJECT.last_recalc_date)")
+            raise ValueError(_t("{project} has no data date (PROJECT.last_recalc_date)", project=project))
         rows = _measure_rows(con, pid, "units", resource, every_type=True, role=role)
         sp = _Spread(con, [pid], "units")
         rcols = _cols(con, "RSRC")
@@ -781,10 +796,12 @@ def p6_resource_loading(project: ProjectId, resource: Optional[str] = None, role
                 "material_resources": sum(m["kind"] == "material" for m in res), "no_limit": no_limit,
                 "spread": {**sp.counts, "trsrcfin": fin_rows}},
         schedule_state=_schedule_state(con, pid),
-        note=_spread_note({**sp.counts, "trsrcfin": fin_rows}) + " Available = working hours of the resource's calendar in "
-        "the period x its max units per hour (RSRCRATE by effective date, the first rate also before its date); shift "
-        "calendars and leveling are not applied. Over-allocated = actual + remaining above available, both rounded to "
-        "2 decimals. Labor and nonlabor quantities are hours; material quantities are in their own unit and have no "
-        "limit here. Totals per resource are the stored assignment quantities (p6_resource_summary); with "
-        "from_date / to_date the rows cover only those periods. Values of the last F9 and progress update.")
+        note=_join(" ", (_spread_note({**sp.counts, "trsrcfin": fin_rows}),
+                         _t("Available = working hours of the resource's calendar in the period x its max units per "
+                            "hour (RSRCRATE by effective date, the first rate also before its date); shift calendars "
+                            "and leveling are not applied. Over-allocated = actual + remaining above available, both "
+                            "rounded to 2 decimals. Labor and nonlabor quantities are hours; material quantities are "
+                            "in their own unit and have no limit here. Totals per resource are the stored assignment "
+                            "quantities (p6_resource_summary); with from_date / to_date the rows cover only those "
+                            "periods. Values of the last F9 and progress update."))))
     return page

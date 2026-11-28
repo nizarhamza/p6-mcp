@@ -8,6 +8,7 @@ import os
 import re
 from datetime import datetime
 from typing import Annotated, Any, Optional, get_args
+from p6mcp.messages import _t
 
 try:  # always installed with mcp
     from pydantic import Field
@@ -75,13 +76,13 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
     evaluated checks x 100; grade A >= 90, B >= 80, C >= 70, D >= 55, else F. engine_version: the CPM
     engine of the critical path test."""
     if baseline_dates not in get_args(BaselineDates):
-        raise ValueError(f"baseline_dates must be one of {list(get_args(BaselineDates))}")
+        raise ValueError(_t("baseline_dates must be one of {values}", values=list(get_args(BaselineDates))))
     if duration_basis not in get_args(DurationBasis):
-        raise ValueError(f"duration_basis must be one of {list(get_args(DurationBasis))}")
+        raise ValueError(_t("duration_basis must be one of {values}", values=list(get_args(DurationBasis))))
     if check is not None and check not in get_args(HcCheck):
-        raise ValueError(f"check must be one of {list(get_args(HcCheck))}")
+        raise ValueError(_t("check must be one of {values}", values=list(get_args(HcCheck))))
     if check in HC_NO_ITEMS:
-        raise ValueError(f"{check} is a project-level value without an item list")
+        raise ValueError(_t("{check} is a project-level value without an item list", check=check))
     offset, limit = _check_page(offset, limit)
     con = _connect()
     pid = _project_id(con, project)
@@ -101,7 +102,8 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
             page = _slice(kd_rows, offset, limit)
         elif check:
             if check not in items:
-                raise ValueError(f"{check}: no item list here ({checks[check].get('note') or 'not evaluated'})")
+                raise ValueError(_t("{check}: no item list here ({why})", check=check,
+                                    why=checks[check].get("note") or _t("not evaluated")))
             sql, args, row_fn, _ = items[check]
             page = _page(con, sql, args, offset, limit, row_fn)
         else:
@@ -114,7 +116,7 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
     if check:
         return {"project": project, "check": check, "result": {k: v for k, v in checks[check].items() if k != "sample"},
                 **page, "threshold_source": cfg["source"], "schedule_state": state,
-                "note": "Items of the last F9 in P6. Open = not completed, LOE and WBS summary left out."}
+                "note": _t("Items of the last F9 in P6. Open = not completed, LOE and WBS summary left out.")}
     fs = checks["fs_links"]
     res = {"project": project, "open_incomplete_activities": n_open, "relationships": n_links, **ends,
            "leads_negative_lag": checks["leads"]["count"], "positive_lags": checks["lags"]["count"],
@@ -136,9 +138,10 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
         res["threshold_notes"] = cfg["notes"]
     res.update(duration_basis=duration_basis,
                baseline=bl and {"project": bl[0], "data_date": bl[1], "dates": baseline_dates,
-                                "source": "baseline=" if baseline else "project baseline (PROJECT.sum_base_proj_id)"},
+                                "source": "baseline=" if baseline else _t("project baseline (PROJECT.sum_base_proj_id)")},
                schedule_state=state,
-               note="Values of the last F9 in P6: reschedule first. Open = not completed, LOE and WBS summary left out.")
+               note=_t("Values of the last F9 in P6: reschedule first. Open = not completed, LOE and WBS summary left "
+                       "out."))
     if save_snapshot:
         now = datetime.now()
         snap = {"id": f"{re.sub(r'[^A-Za-z0-9_.-]', '_', project)}_{now:%Y%m%d_%H%M%S}_{now.microsecond // 1000:03d}",
@@ -157,7 +160,7 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
             _hc_snapshot_save(snap)
             res["snapshot"] = {"id": snap["id"]}
         except OSError as e:
-            res["snapshot"] = {"error": f"snapshot not saved: {e}"}
+            res["snapshot"] = {"error": _t("snapshot not saved: {e}", e=e)}
     return res
 
 
@@ -180,7 +183,8 @@ def p6_health_check_compare(project: ProjectId, before: str = "previous", after:
     if after == "current":  # before 'latest' or 'previous' = the latest snapshot saved before this run
         snap = p6_health_check(project).get("snapshot") or {}
         if "id" not in snap:
-            raise ValueError(f"after='current': {snap.get('error', 'the health check snapshot was not saved')}")
+            raise ValueError(_t("after='current': {error}",
+                                error=snap.get("error", _t("the health check snapshot was not saved"))))
         after, before = snap["id"], "previous" if before == "latest" else before
     snaps = _hc_snapshots(project)
     a, b = _hc_pick(project, before, snaps, "before"), _hc_pick(project, after, snaps, "after")
@@ -200,20 +204,23 @@ def p6_health_check_compare(project: ProjectId, before: str = "previous", after:
             row.update(entered=sorted(sb - sa)[:50], left=sorted(sa - sb)[:50], entered_count=len(sb - sa),
                        left_count=len(sa - sb))
         checks[k] = row
-    warn = [f"{k} differs: {a['params'].get(k)!r} -> {b['params'].get(k)!r}" for k in
+    warn = [_t("{param} differs: {before!r} -> {after!r}", param=k, before=a["params"].get(k), after=b["params"].get(k))
+            for k in
             dict.fromkeys(list(a.get("params", {})) + list(b.get("params", {})))
             if a.get("params", {}).get(k) != b.get("params", {}).get(k)]
     if a.get("project") != b.get("project"):
-        warn.append(f"different projects: {a.get('project')} -> {b.get('project')}")
+        warn.append(_t("different projects: {before} -> {after}", before=a.get("project"), after=b.get("project")))
     if a.get("db") != b.get("db"):
-        warn.append(f"different databases: {a.get('db')} -> {b.get('db')}")
+        warn.append(_t("different databases: {before} -> {after}", before=a.get("db"), after=b.get("db")))
     if b.get("stale") or a.get("stale"):
-        warn.append("a snapshot was taken while the project was edited since its last F9")
+        warn.append(_t("a snapshot was taken while the project was edited since its last F9"))
     ev = {"before": a.get("engine_version"), "after": b.get("engine_version")}
     if ev["before"] != ev["after"]:
-        warn.append(f"engine_version differs: {ev['before']} -> {ev['after']}" + (
-            " (a snapshot saved before engine versions were recorded)" if None in ev.values() else "")
-            + ": the critical path test may differ for that reason alone")
+        warn.append(_t("engine_version differs: {before} -> {after} (a snapshot saved before engine versions were "
+                       "recorded): the critical path test may differ for that reason alone", **ev)
+                    if None in ev.values() else
+                    _t("engine_version differs: {before} -> {after}: the critical path test may differ for that reason "
+                       "alone", **ev))
     wa, wb = a.get("weighted_score") or {}, b.get("weighted_score") or {}
     weighted = {"points": {"before": wa.get("points"), "after": wb.get("points"),
                            "delta": delta(wa.get("points"), wb.get("points"))},
@@ -235,7 +242,7 @@ def p6_dangling(project: ProjectId, kind: DanglingKind = "both", offset: Offset 
     ladder pair (SS + FF with the same lag), else an FS from (to) the closest activity of the same WBS
     finishing before its start (starting after its finish). Proposals only: nothing is written."""
     if kind not in get_args(DanglingKind):
-        raise ValueError("kind must be start, finish or both")
+        raise ValueError(_t("kind must be start, finish or both"))
     con = _connect()
     pid = _project_id(con, project)
     net = _net_snapshot(con, pid)
@@ -259,7 +266,8 @@ def p6_dangling(project: ProjectId, kind: DanglingKind = "both", offset: Offset 
     res = _slice(rows, offset, limit)
     res.update(counts={k: sum(r["kind"] == k for r in rows) for k in ("start", "finish") if kind in (k, "both")},
                with_suggestion=sum(r["suggestion"] is not None for r in rows), schedule_state=_schedule_state(con, pid),
-               note="Suggestions are proposals: check them, then pass the items to p6_add_relationships (dry run first).")
+               note=_t("Suggestions are proposals: check them, then pass the items to p6_add_relationships (dry run "
+                       "first)."))
     return res
 
 
@@ -276,7 +284,7 @@ def p6_progress_check(project: ProjectId, sample_size: SampleSize = 15) -> dict:
     project's out-of-sequence scheduling option (retained logic, progress override), which decides
     what F9 does with these links."""
     if not 0 <= int(sample_size) <= 50:
-        raise ValueError("sample_size must be 0 to 50")
+        raise ValueError(_t("sample_size must be 0 to 50"))
     k = int(sample_size)
     con = _connect()
     pid = _project_id(con, project)
@@ -327,17 +335,17 @@ def p6_progress_check(project: ProjectId, sample_size: SampleSize = 15) -> dict:
     finally:
         con.rollback()
     rl, po = opts.get("sched_retained_logic"), opts.get("sched_progress_override")
-    mode = ("progress override forward, retained logic backward (both flags Y)" if rl == po == "Y"
-            else "retained logic" if rl == "Y" else "progress override" if po == "Y"
-            else "actual dates" if rl == po == "N" else "retained logic (P6 default, no option stored)")
+    mode = (_t("progress override forward, retained logic backward (both flags Y)") if rl == po == "Y"
+            else _t("retained logic") if rl == "Y" else _t("progress override") if po == "Y"
+            else _t("actual dates") if rl == po == "N" else _t("retained logic (P6 default, no option stored)"))
     return {"project": project, "data_date": dd, "out_of_sequence": oos,
             "out_of_sequence_total": {"links": tot[0], "successors": tot[1]}, "status_checks": status,
             "logic_option": {"mode": mode, "sched_retained_logic": rl, "sched_progress_override": po, "source": src,
-                             "note": "Retained logic keeps the remaining work of an out-of-sequence successor after its "
-                                     "predecessors at F9; progress override ignores those links."},
+                             "note": _t("Retained logic keeps the remaining work of an out-of-sequence successor "
+                                        "after its predecessors at F9; progress override ignores those links.")},
             "schedule_state": _schedule_state(con, pid),
-            "note": "Statuses and dates as stored (last update and F9). Predecessors in other projects are shown as "
-                    "PROJECT:ACTIVITY."}
+            "note": _t("Statuses and dates as stored (last update and F9). Predecessors in other projects are shown "
+                       "as PROJECT:ACTIVITY.")}
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
@@ -356,7 +364,7 @@ def p6_driving_path(project: ProjectId, target: ActivityId, max_depth: Annotated
     (P6 places them too, retained logic). Read only; values of the last F9."""
     max_depth = int(max_depth)
     if max_depth < 1:
-        raise ValueError("max_depth must be 1 or more")
+        raise ValueError(_t("max_depth must be 1 or more"))
     con = _connect()
     pid = _project_id(con, project)
     net = _net_snapshot(con, pid)
@@ -404,7 +412,7 @@ def p6_driving_path(project: ProjectId, target: ActivityId, max_depth: Annotated
     res.update(target=net.act_view(tgt), drivers_at_root=roots, data_date=net.prj["last_recalc_date"],
                lag_rule=_lag_info(con, pid), tolerance_h=round(GAP_TOL_H, 4), schedule_state=_schedule_state(con, pid))
     if cut:
-        res["note"] = f"Stopped at max_depth {max_depth}: earlier drivers not listed."
+        res["note"] = _t("Stopped at max_depth {max_depth}: earlier drivers not listed.", max_depth=max_depth)
     return res
 
 
@@ -427,13 +435,13 @@ def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annota
     lag_d, gap). Read only."""
     max_depth = int(max_depth)
     if max_depth < 1:
-        raise ValueError("max_depth must be 1 or more")
+        raise ValueError(_t("max_depth must be 1 or more"))
     con = _connect()
     pid = _project_id(con, project)
     net = _net_snapshot(con, pid)
     d0 = net.task(task_code)
     if d0["status_code"] == "TK_Complete" or d0["lf"] is None:
-        raise ValueError(f"{task_code} is completed or has no late dates: no float to explain")
+        raise ValueError(_t("{task_code} is completed or has no late dates: no float to explain", task_code=task_code))
     w = _float_walk(net, d0, max_depth)
     level, via, origin, own, expl, cut = w["level"], w["via"], w["origin"], w["own"], w["explanation"], w["cut"]
     rows = []
@@ -451,7 +459,7 @@ def p6_float_origin(project: ProjectId, task_code: ActivityId, max_depth: Annota
                must_finish=net.prj["plan_end_date"], project_finish=net.prj["scd_end_date"],
                lag_rule=_lag_info(con, pid), tolerance_h=round(GAP_TOL_H, 4), schedule_state=_schedule_state(con, pid))
     if cut:
-        res["note"] = f"Stopped at max_depth {max_depth}: the source may lie further."
+        res["note"] = _t("Stopped at max_depth {max_depth}: the source may lie further.", max_depth=max_depth)
     return res
 
 
@@ -473,9 +481,9 @@ def p6_redundant_links(project: ProjectId, categories: Optional[list[RedundantCa
         [categories] if isinstance(categories, str) else categories))
     bad = [c for c in cats if c not in REDUNDANT_CATEGORIES]
     if bad or not cats:
-        raise ValueError(f"categories: some of {REDUNDANT_CATEGORIES}")
+        raise ValueError(_t("categories: some of {REDUNDANT_CATEGORIES}", REDUNDANT_CATEGORIES=REDUNDANT_CATEGORIES))
     if "marked_deleted" in cats and not (name_pattern or "").strip():
-        raise ValueError("name_pattern must not be empty")
+        raise ValueError(_t("name_pattern must not be empty"))
     con = _connect()
     pid = _project_id(con, project)
     net = _net_snapshot(con, pid)
@@ -485,13 +493,16 @@ def p6_redundant_links(project: ProjectId, categories: Optional[list[RedundantCa
         for lk in own:
             p, s = net.t[lk["pred"]], net.t[lk["succ"]]
             if p["status_code"] == "TK_Complete" and s["status_code"] != "TK_Complete":
-                hit.setdefault(lk["id"], {})["completed_predecessor"] = f"{p['task_code']} finished {p['act_end_date']}"
+                hit.setdefault(lk["id"], {})["completed_predecessor"] = _t("{code} finished {date}", code=p["task_code"],
+                                                                           date=p["act_end_date"])
     if "marked_deleted" in cats:
         pat = name_pattern.lower()
         for lk in own:
             m = [net.t[lk[k]]["task_code"] for k in ("pred", "succ") if pat in (net.t[lk[k]]["task_name"] or "").lower()]
             if m:
-                hit.setdefault(lk["id"], {})["marked_deleted"] = f"name of {' and '.join(m)} contains {name_pattern!r}"
+                hit.setdefault(lk["id"], {})["marked_deleted"] = (
+                    _t("name of {code} contains {pattern!r}", code=m[0], pattern=name_pattern) if len(m) == 1 else
+                    _t("name of {pred} and {succ} contains {pattern!r}", pred=m[0], succ=m[1], pattern=name_pattern))
     if "transitive" in cats:
         for i, txt in _transitive(net).items():
             hit.setdefault(i, {})["transitive"] = txt
@@ -500,7 +511,7 @@ def p6_redundant_links(project: ProjectId, categories: Optional[list[RedundantCa
         for lk in own:
             k = (lk["succ"], lk["pred"], lk["type"])
             if k in first:
-                hit.setdefault(lk["id"], {})["duplicate"] = f"same pair and type as task_pred_id {first[k]}"
+                hit.setdefault(lk["id"], {})["duplicate"] = _t("same pair and type as task_pred_id {id}", id=first[k])
             else:
                 first[k] = lk["id"]
     byid = {lk["id"]: lk for lk in own}
@@ -534,10 +545,10 @@ def p6_redundant_links(project: ProjectId, categories: Optional[list[RedundantCa
                 side[key].append({"project": d["project"], "task_code": d["task_code"], "task_name": d["task_name"],
                                   "task_type": d["task_type"]})
     side["count"] = len(side["no_predecessor"]) + len(side["no_successor"])
-    side["note"] = "if every listed link (all pages) were removed; LOE and WBS summary links do not count"
+    side["note"] = _t("if every listed link (all pages) were removed; LOE and WBS summary links do not count")
     res = _slice(rows, offset, limit)
     res.update(counts={c: sum(c in r["categories"] for r in rows) for c in cats}, categories=cats,
                side_effects=side, schedule_state=_schedule_state(con, pid),
-               note="Candidates only: check drives and side_effects, then pass the task_pred_id values to "
-                    "p6_delete_relationships(ids=...).")
+               note=_t("Candidates only: check drives and side_effects, then pass the task_pred_id values to "
+                       "p6_delete_relationships(ids=...)."))
     return res

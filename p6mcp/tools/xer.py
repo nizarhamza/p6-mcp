@@ -17,6 +17,7 @@ from p6mcp.core.xer import (
     _export_target, _export_xer, _import_target, _missing_rows, _removable, _remove_rows, UDF_FK_TABLES, _upsert,
     XER_CHILD_NEEDS, XER_EXPORT_TABLES, _xer_only, _xer_preflight, _xer_read_meta, XER_TABLES, _XerImport,
 )
+from p6mcp.messages import _join, _t
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False})
@@ -71,17 +72,19 @@ def p6_import_xer(
     topic, step name, expense name or Risk ID; the ones missing from the XER are kept).
     xer_project selects the project when the XER contains several. Press F9 in P6 afterwards."""
     if mode not in get_args(ImportMode):
-        raise ValueError("mode must be new, update or baseline")
+        raise ValueError(_t("mode must be new, update or baseline"))
     remove = _removable(remove_missing, mode)
     new_eps = None
     if create_eps is not None:
         if mode != "new":
-            raise ValueError("create_eps only applies to mode='new'")
+            raise ValueError(_t("create_eps only applies to mode='new'"))
         new_eps = dict(create_eps)
         if not all(isinstance(new_eps.get(k), str) and new_eps[k].strip() for k in ("eps_id", "eps_name")):
-            raise ValueError("create_eps needs eps_id and eps_name, e.g. {'eps_id': 'PV-01', 'eps_name': 'Solar PV'}")
+            raise ValueError(_t("create_eps needs eps_id and eps_name, e.g. {{'eps_id': 'PV-01', 'eps_name': 'Solar "
+                                "PV'}}"))
         if eps is not None and eps != new_eps["eps_id"]:
-            raise ValueError(f"eps={eps!r} and create_eps eps_id {new_eps['eps_id']!r} differ: give one")
+            raise ValueError(_t("eps={eps!r} and create_eps eps_id {eps_id!r} differ: give one", eps=eps,
+                                eps_id=new_eps["eps_id"]))
     header, x, meta = _xer_read_meta(path)
     xp = _xer_project(x, xer_project)
     xpid = xp["proj_id"]
@@ -101,21 +104,23 @@ def p6_import_xer(
                  "older": bool(db_dd and x_dd and x_dd < db_dd)}
     reasons = []
     if pf["errors"]:
-        reasons.append("XER pre-flight failed (" + ", ".join(f"{e['check']} {e['count']}" for e in pf["errors"])
-                       + "): fix the file, see preflight or p6_inspect_xer.")
+        reasons.append(_t("XER pre-flight failed ({checks}): fix the file, see preflight or p6_inspect_xer.",
+                          checks=", ".join(f"{e['check']} {e['count']}" for e in pf["errors"])))
     if no_eps and not new_eps:
-        reasons.append("No EPS node in this database: pass create_eps={'eps_id': ..., 'eps_name': ...} to create one "
-                       "in the same transaction (or p6_create_eps first).")
+        reasons.append(_t("No EPS node in this database: pass create_eps={{'eps_id': ..., 'eps_name': ...}} to create "
+                          "one in the same transaction (or p6_create_eps first)."))
     if data_date["older"] and not allow_older_data_date:
-        reasons.append(f"The XER data date {data_date['xer']} is older than the project's {data_date['database']}: "
-                       "the update would move the data date back. Pass allow_older_data_date=True to import it anyway.")
+        reasons.append(_t("The XER data date {xer} is older than the project's {database}: the update would move the "
+                          "data date back. Pass allow_older_data_date=True to import it anyway.",
+                          xer=data_date['xer'], database=data_date['database']))
     if reasons and confirm:
-        raise ValueError("Import refused. " + " ".join(reasons))
+        raise ValueError(_t("Import refused. {reasons}", reasons=_join(" ", reasons)))
     if any(e["check"] == "project_wbs_node_missing" for e in pf["errors"]):  # nothing to import into
-        return {"dry_run": True, "would_do": [f"Import {os.path.basename(path)}: not possible, the XER has no "
-                                              "project WBS node"], "counts": {}, "warnings": [], "data_date": data_date,
+        return {"dry_run": True, "would_do": [_t("Import {file}: not possible, the XER has no project WBS node",
+                                                 file=os.path.basename(path))],
+                "counts": {}, "warnings": [], "data_date": data_date,
                 "preflight": pf, "would_refuse": True, "refuse_reasons": reasons,
-                "next": "confirm=True would be refused: " + " ".join(reasons)}
+                "next": _t("confirm=True would be refused: {reasons}", reasons=_join(" ", reasons))}
 
     with _write_session(confirm) as (con, backup):
         imp = _XerImport(con, x, mode)
@@ -124,25 +129,28 @@ def p6_import_xer(
         if mode != "update":
             if con.execute("SELECT 1 FROM PROJECT WHERE proj_short_name = ?" + _alive(con, "PROJECT"),
                            (short,)).fetchone():
-                raise ValueError(f"Project ID {short!r} already exists: pass new_short_name=, "
-                                 "or mode='update' to update it.")
+                raise ValueError(_t("Project ID {short!r} already exists: pass new_short_name=, or mode='update' to "
+                                    "update it.", short=short))
             limit = _prefer(con, "proj_short_len") or 40
             if len(short) > limit:
-                raise ValueError(f"Project ID is limited to {limit} characters in this database: pass a shorter "
-                                 "new_short_name.")
+                raise ValueError(_t("Project ID is limited to {limit} characters in this database: pass a shorter "
+                                    "new_short_name.", limit=limit))
         eps_txt = None
         if mode == "new":
             hit = new_eps and next((n for n in _eps_nodes(con) if n["eps_id"] == new_eps["eps_id"]), None)
             if hit:
-                parent_wbs, eps_txt = hit["wbs_id"], f"EPS {hit['eps_id']} exists: used"
+                parent_wbs, eps_txt = hit["wbs_id"], _t("EPS {eps_id} exists: used", eps_id=hit["eps_id"])
             elif new_eps:
                 par = new_eps.get("parent_eps")
                 parent_wbs = _create_eps(con, new_eps["eps_id"], new_eps["eps_name"],
                                          _eps_wbs_id(con, par) if par else None, imp.now)
-                eps_txt = (f"Create EPS {new_eps['eps_id']} '{new_eps['eps_name']}'"
-                           + (f" under {par}" if par else " (top level)"))
+                eps_txt = (_t("Create EPS {eps_id} '{eps_name}' under {parent}", eps_id=new_eps["eps_id"],
+                              eps_name=new_eps["eps_name"], parent=par) if par else
+                           _t("Create EPS {eps_id} '{eps_name}' (top level)", eps_id=new_eps["eps_id"],
+                              eps_name=new_eps["eps_name"]))
             elif not _eps_nodes(con):  # dry run only: confirm=True was refused above
-                parent_wbs, eps_txt = None, "No EPS node: the project would have no parent (refused with confirm=True)"
+                parent_wbs, eps_txt = None, _t("No EPS node: the project would have no parent (refused with "
+                                               "confirm=True)")
             else:
                 parent_wbs = _eps_wbs_id(con, eps)
         elif mode == "baseline":
@@ -188,8 +196,8 @@ def p6_import_xer(
                     bt = con.execute("SELECT base_type_id FROM BASETYPE WHERE base_type = ?",
                                      (baseline_type,)).fetchone()
                     if not bt:
-                        raise ValueError(f"Baseline type not found: {baseline_type!r}: "
-                                         f"{[r[0] for r in con.execute('SELECT base_type FROM BASETYPE')]}")
+                        raise ValueError(_t("Baseline type not found: {baseline_type!r}: {types}", baseline_type=baseline_type,
+                                            types=[r[0] for r in con.execute("SELECT base_type FROM BASETYPE")]))
                     extra["base_type_id"] = bt[0]
             row = imp.prep("PROJECT", xp)
             row.update(extra)
@@ -225,7 +233,7 @@ def p6_import_xer(
         by_id = {w["wbs_id"]: w for w in wbs}
         node = next((w for w in wbs if w.get("proj_node_flag") == "Y"), None)
         if node is None:
-            raise ValueError("XER has no project WBS node.")
+            raise ValueError(_t("XER has no project WBS node."))
         if mode == "update":
             db_node = con.execute("SELECT wbs_id FROM PROJWBS WHERE proj_id = ? AND proj_node_flag = 'Y'"
                                   + _alive(con, "PROJWBS"), (pid,)).fetchone()[0]
@@ -374,14 +382,19 @@ def p6_import_xer(
         missing, gone_txt = None, []
         if mode == "update":
             missing, drop = _missing_rows(imp, pid)
-            for t, label in (("TASKPRED", "relationships"), ("TASKRSRC", "assignments")):
+            for t in ("TASKPRED", "TASKRSRC"):
                 missing[t]["removed"] = t in remove and bool(drop[t])
+                n = len(drop[t])
                 if missing[t]["removed"]:
                     _remove_rows(imp, t, drop[t])
-                    gone_txt.append(f"Delete {len(drop[t])} {label} missing from the XER (remove_missing)")
+                    gone_txt.append(_t("Delete {n} relationships missing from the XER (remove_missing)", n=n)
+                                    if t == "TASKPRED" else
+                                    _t("Delete {n} assignments missing from the XER (remove_missing)", n=n))
                 elif drop[t]:
-                    gone_txt.append(f"Keep {len(drop[t])} {label} missing from the XER "
-                                    f"(remove_missing=['{t}'] deletes them)")
+                    gone_txt.append(_t("Keep {n} relationships missing from the XER (remove_missing=['{table}'] "
+                                       "deletes them)", n=n, table=t) if t == "TASKPRED" else
+                                    _t("Keep {n} assignments missing from the XER (remove_missing=['{table}'] "
+                                       "deletes them)", n=n, table=t))
 
         do_opts = (mode != "baseline") if import_schedule_options is None else bool(import_schedule_options)
         sched = None
@@ -390,8 +403,8 @@ def p6_import_xer(
             imp.warnings += w
             imp.count("PROJPROP", sched["action"])
         elif x.get("SCHEDOPTIONS"):
-            imp.warnings.append("SCHEDOPTIONS not imported (import_schedule_options False): check Schedule Options "
-                                "in P6 before F9, or use p6_set_schedule_options from_xer.")
+            imp.warnings.append(_t("SCHEDOPTIONS not imported (import_schedule_options False): check Schedule Options "
+                                   "in P6 before F9, or use p6_set_schedule_options from_xer."))
             if target:
                 db_opts, lag_db = _sched_options(con, target["proj_id"])[0], _lag_rule(con, target["proj_id"])[0]
             else:
@@ -399,38 +412,49 @@ def p6_import_xer(
             xcodes = {t["task_id"]: t["task_code"] for t in x.get("TASK", [])}
             diff = [o for o in _sched_diff(db_opts, _xer_sched(x, xp), lambda v: _db_task_code(con, v), xcodes.get)
                     if o["same"] is False or (o["option"] not in db_opts and o["option"] != "levelprioritylist")]
-            where = f"project {target['proj_short_name']}" if target else "the new project"
+            where = _t("project {project}", project=target["proj_short_name"]) if target else _t("the new project")
             if diff and db_opts:
-                imp.warnings.append(f"XER schedule options that differ from {where}: " + "; ".join(
-                    f"{o['option']} XER {o['xer']}, database {o['db'] if o['option'] in db_opts else 'not stored'}"
-                    for o in diff))
+                imp.warnings.append(_t("XER schedule options that differ from {where}: {options}", where=where,
+                                       options=_join("; ", (
+                                           _t("{option} XER {xer}, database {db}", option=o["option"], xer=o["xer"],
+                                              db=o["db"]) if o["option"] in db_opts else
+                                           _t("{option} XER {xer}, database not stored", option=o["option"],
+                                              xer=o["xer"]) for o in diff))))
             elif diff:
-                imp.warnings.append(f"No schedule options stored for {where} (P6 defaults apply, lag rule "
-                                    f"{lag_db}). XER options: " + "; ".join(f"{o['option']} {o['xer']}" for o in diff))
+                imp.warnings.append(_t("No schedule options stored for {where} (P6 defaults apply, lag rule "
+                                       "{lag_db}). XER options: {options}", where=where, lag_db=lag_db,
+                                       options="; ".join(f"{o['option']} {o['xer']}" for o in diff)))
         skipped = sorted(set(x) - set(XER_TABLES) - {"SCHEDOPTIONS"})
         if skipped:
-            imp.warnings.append(f"Tables not handled, ignored: {skipped}")
+            imp.warnings.append(_t("Tables not handled, ignored: {skipped}", skipped=skipped))
 
-        target_txt = {"new": f"new project {short}", "baseline": f"baseline {short} of {target and target['proj_short_name']}",
-                      "update": f"update of {target and target['proj_short_name']}"}[mode]
-        plan = [f"Import {os.path.basename(path)} (P6 {header[1] if len(header) > 1 else '?'}, "
-                f"project {xp['proj_short_name']}) as {target_txt}"]
+        what = dict(file=os.path.basename(path), version=header[1] if len(header) > 1 else "?",
+                    xer_project=xp["proj_short_name"], short=short, project=target and target["proj_short_name"])
+        plan = [_t("Import {file} (P6 {version}, project {xer_project}) as new project {short}", **what)
+                if mode == "new" else
+                _t("Import {file} (P6 {version}, project {xer_project}) as baseline {short} of {project}", **what)
+                if mode == "baseline" else
+                _t("Import {file} (P6 {version}, project {xer_project}) as update of {project}", **what)]
         if eps_txt:
             plan.append(eps_txt)
         if sched:
             ch = [o for o in sched["options"] if o["changed"]]
-            plan.append(f"Schedule options: XER SCHEDOPTIONS written to PROJPROP scheduling ({len(ch)} values "
-                        f"change, row {sched['action']})")
+            plan.append(_t("Schedule options: XER SCHEDOPTIONS written to PROJPROP scheduling ({n} values change, "
+                           "row {action})", n=len(ch), action=sched["action"]))
         if mode == "update":
-            plan.append(f"Data date: database {data_date['database']} -> XER {data_date['xer']}" + (
-                (" (older, allowed)" if allow_older_data_date else " (older)") if data_date["older"] else ""))
-            plan.append(f"Missing from the XER: {missing['TASK']['count']} activities (kept), "
-                        f"{missing['TASKPRED']['count']} relationships, {missing['TASKRSRC']['count']} assignments")
+            dd = dict(database=data_date["database"], xer=data_date["xer"])
+            plan.append(_t("Data date: database {database} -> XER {xer}", **dd) if not data_date["older"] else
+                        _t("Data date: database {database} -> XER {xer} (older, allowed)", **dd)
+                        if allow_older_data_date else
+                        _t("Data date: database {database} -> XER {xer} (older)", **dd))
+            plan.append(_t("Missing from the XER: {acts} activities (kept), {links} relationships, {asg} assignments",
+                           acts=missing["TASK"]["count"], links=missing["TASKPRED"]["count"],
+                           asg=missing["TASKRSRC"]["count"]))
             plan += gone_txt
         else:
-            plan.append(f"Data date: XER {data_date['xer']}")
+            plan.append(_t("Data date: XER {xer}", xer=data_date['xer']))
         if backup:
-            plan.append(f"Backup: {backup}")
+            plan.append(_t("Backup: {path}", path=backup))
         # a new project or baseline holds the XER's own F9 results; an update mixes old and new data
         sched_rows = _opt_rows(con, sched["options"]) if sched else None
         res = _commit(con, plan, confirm, projects=(pid,) if mode == "update" else (),
@@ -445,7 +469,7 @@ def p6_import_xer(
         if not confirm:
             res.update(would_refuse=bool(reasons), refuse_reasons=reasons)
             if reasons:
-                res["next"] = "confirm=True would be refused: " + " ".join(reasons)
+                res["next"] = _t("confirm=True would be refused: {reasons}", reasons=_join(" ", reasons))
         return res
 
 
@@ -464,8 +488,8 @@ def p6_inspect_xer(path: str, xer_project: Optional[str] = None, db_preview: boo
                          "activities": sum(1 for t in x.get("TASK", []) if t.get("proj_id") == p.get("proj_id"))}
                         for p in x.get("PROJECT", [])]}
     if xer_project is None and len(res["projects"]) != 1:
-        res.update(preflight=None, note="Several projects: pass xer_project= for the pre-flight."
-                   if res["projects"] else "No PROJECT row: nothing to import.")
+        res.update(preflight=None, note=_t("Several projects: pass xer_project= for the pre-flight.")
+                   if res["projects"] else _t("No PROJECT row: nothing to import."))
         return res
     try:
         con = _connect()
@@ -500,9 +524,9 @@ def p6_export_xer(project: ProjectId, path: str, tables: Optional[list[XerTable]
     tables = [t.upper() for t in (tables or XER_EXPORT_TABLES)]
     bad = [t for t in tables if t not in XER_EXPORT_TABLES]
     if bad:
-        raise ValueError(f"Unknown tables {bad}; choose from {XER_EXPORT_TABLES}")
+        raise ValueError(_t("Unknown tables {bad}; choose from {tables}", bad=bad, tables=XER_EXPORT_TABLES))
     path = _export_target(path)
     if os.path.exists(path) and not overwrite:
-        raise ValueError(f"{path} already exists: pass overwrite=True to replace it, or choose another path.")
+        raise ValueError(_t("{path} already exists: pass overwrite=True to replace it, or choose another path.", path=path))
     with closing(_connect()) as con:
         return _export_xer(con, project, path, tables, xer_version)

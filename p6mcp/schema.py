@@ -14,6 +14,7 @@ import hashlib
 import re
 import sqlite3
 from typing import Iterable, Optional
+from p6mcp.messages import _t
 
 # Fingerprint -> label. Add an entry only after the whole test suite passed on that version.
 KNOWN_SCHEMAS: dict[str, str] = {
@@ -93,8 +94,8 @@ def detect(con: sqlite3.Connection, trusted: Iterable[str] = ()) -> dict:
 
 def write_refusal(info: dict) -> str:
     if info["missing"]:
-        return (f"This file does not look like a P6 Professional database (missing {info['missing'][:8]}). "
-                "Writes are refused.")
-    return (f"Unknown P6 schema (fingerprint {info['fingerprint'][:12]}): this P6 version was not tested, so "
-            "the database is read only. Reads work. To allow writes anyway, accept this schema in MCP for Primavera P6 "
-            "Settings (Database, Trust this schema) after backing up the database.")
+        return (_t("This file does not look like a P6 Professional database (missing {missing}). Writes are refused.",
+                   missing=info['missing'][:8]))
+    return (_t("Unknown P6 schema (fingerprint {fingerprint}): this P6 version was not tested, so the database is "
+               "read only. Reads work. To allow writes anyway, accept this schema in MCP for Primavera P6 Settings "
+               "(Database, Trust this schema) after backing up the database.", fingerprint=info['fingerprint'][:12]))
