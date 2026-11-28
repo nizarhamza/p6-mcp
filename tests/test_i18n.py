@@ -24,6 +24,8 @@ def used_keys() -> set:
     keys |= {f"kind.{k}" for k in policy.KINDS} | {f"restart.{k}" for k in settings_logic.RESTART_KEYS}
     states = ("not_installed", "not_registered", "registered", "outdated", "error")
     keys |= {f"cl.state.{k}" for k in states} | {f"cl.detail.{k}" for k in states}
+    from p6mcp import clients
+    keys |= {a.note for a in clients.ADAPTERS if a.note}  # remarks of the Clients page (cl.note.<id>)
     return keys
 
 

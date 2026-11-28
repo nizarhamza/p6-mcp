@@ -5,6 +5,23 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ## [Unreleased]
 
+### Added
+
+- Five more MCP clients registered by the installer and the Settings Clients page (register, repair, remove, the
+  p6mcp entry only, a backup of the file first, a file that cannot be read is refused and left untouched):
+  - **Devin** (Windsurf became Devin Desktop in June 2026): `%APPDATA%\devin\mcp_config.json`, read by Devin
+    Desktop and the Devin CLI.
+  - **Zed**: `context_servers` of `%APPDATA%\Zed\settings.json` (comments kept).
+  - **Continue**: a block file of its own, `~/.continue/mcpServers/p6mcp.yaml` (written as JSON, which is valid
+    YAML); the user's `config.yaml` is never edited. HTTP entries use `streamable-http` with `requestOptions`.
+  - **Gemini CLI**: `mcpServers` of `~/.gemini/settings.json` (HTTP entries use `httpUrl`).
+  - **Codex** (CLI, IDE extension and ChatGPT desktop app): the `[mcp_servers.p6mcp]` table of
+    `~/.codex/config.toml` (`CODEX_HOME` followed), with a 30 s start and 600 s tool timeout. `p6mcp/tomledit.py`
+    edits only that table and its subtables, keeps every other byte, refuses a file that does not parse or an
+    entry written as an inline table or dotted keys, and checks every edit by parsing it again.
+- P6 skills for Codex, Zed, Gemini CLI and Devin in `~/.agents/skills`, the folder the four share (Install skills
+  once serves them all). Continue gets no skills (its loader reads its own skills folder twice).
+
 ## [3.6.0] - 2026-11-28
 
 ### Added

@@ -272,7 +272,7 @@ def skills_html(skills):
 # Settings window captures: site/assets/img/settings-<key>[-dark]-<1180|2360>.webp
 GALLERY = [
     ("database", "Database", "database", "Pick the P6 database (suggestions come from P6's own connection list). Test connection reads it read only: P6 version, schema, projects. Or switch to XER files only."),
-    ("clients", "MCP clients", "plug", "Finds Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline, and adds, repairs or removes only the p6mcp entry, after a backup of the file. Install skills writes the P6 skills to the client's skills folder."),
+    ("clients", "MCP clients", "plug", "Finds Claude Desktop, Claude Code, Cursor, VS Code, LM Studio, Cline, Devin, Zed, Continue, Gemini CLI and Codex, and adds, repairs or removes only the p6mcp entry, after a backup of the file. Install skills writes the P6 skills to the client's skills folder."),
     ("tools", "Tools and safety", "shield", "Basic (11 read-only tools) or Full (58). Writes stay off until you allow them; a backup before every write, writes refused while P6 runs, the skill shop on or off."),
     ("instructions", "Instructions", "message", "What every MCP client receives when it connects. Turn built-in lines off or add your own rules, such as how to write activities."),
     ("skills", "Skills", "sparkles", "The installed skills, whether the current tool settings offer them and where they come from. Edit one, or write your own."),

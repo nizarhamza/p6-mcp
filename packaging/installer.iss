@@ -99,6 +99,11 @@ Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register vscode"; Descr
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register vscode_insiders"; Description: "{cm:RegisterWith,VS Code Insiders}"; Flags: postinstall runhidden; Check: ClientDetected('vscode_insiders') and not IsAutoUpdate
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register lmstudio"; Description: "{cm:RegisterWith,LM Studio}"; Flags: postinstall runhidden; Check: ClientDetected('lmstudio') and not IsAutoUpdate
 Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register cline"; Description: "{cm:RegisterWith,Cline}"; Flags: postinstall runhidden; Check: ClientDetected('cline') and not IsAutoUpdate
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register devin"; Description: "{cm:RegisterWith,Devin (Windsurf)}"; Flags: postinstall runhidden; Check: ClientDetected('devin') and not IsAutoUpdate
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register zed"; Description: "{cm:RegisterWith,Zed}"; Flags: postinstall runhidden; Check: ClientDetected('zed') and not IsAutoUpdate
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register continue"; Description: "{cm:RegisterWith,Continue}"; Flags: postinstall runhidden; Check: ClientDetected('continue') and not IsAutoUpdate
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register gemini"; Description: "{cm:RegisterWith,Gemini CLI}"; Flags: postinstall runhidden; Check: ClientDetected('gemini') and not IsAutoUpdate
+Filename: "{app}\p6mcp-server.exe"; Parameters: "clients register codex"; Description: "{cm:RegisterWith,Codex}"; Flags: postinstall runhidden; Check: ClientDetected('codex') and not IsAutoUpdate
 ; --after-setup: these run while setup still holds its SetupMutex, so the app waits for setup to end (else it exits)
 Filename: "{app}\p6mcp-settings.exe"; Parameters: "--after-setup"; Description: "{cm:OpenSettings}"; Flags: postinstall nowait skipifsilent
 ; an automatic update (/AUTOUPDATE=1, run by the tray app after it quit): start the tray app again

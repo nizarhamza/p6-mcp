@@ -2,8 +2,8 @@
 
 An adapter only declares where the client keeps its config, how it detects the client and the
 shape of a server entry. Reading, status, registration and removal are shared, and every write
-goes through: parse (refuse a malformed file), timestamped backup, minimal JSONC edit (other
-entries and formatting untouched, checked), atomic replace.
+goes through: parse (refuse a malformed file), timestamped backup, minimal edit (JSONC by default, TOML for
+Codex: other entries and formatting untouched, checked), atomic replace.
 """
 
 from __future__ import annotations
@@ -100,6 +100,7 @@ class Adapter:
     supports_http = True      # False: the client only starts stdio servers (gets a stdio entry in http mode)
     token_in_file = True      # an HTTP entry holds the access token in the client's file
     prompts_native = False    # the client lists the server's MCP prompts by itself
+    note = ""                 # i18n key of a remark the Clients page adds about this client ({name})
 
     # -- to define per client
     def skills_dir(self) -> Optional[str]:
@@ -122,6 +123,21 @@ class Adapter:
     def http_entry(self, http: HttpTarget) -> dict:
         return {"url": http.url, "headers": {"Authorization": f"Bearer {http.token}"}}
 
+    # -- file format: JSON / JSONC by default (Codex: TOML, Continue: a block file of its own)
+    def parse(self, text: str) -> dict:
+        data = jsonc.loads(text)
+        if not isinstance(data, dict):
+            raise jsonc.JsoncError("the file does not hold a JSON object")
+        return data
+
+    def set_entry(self, text: str, key: str, entry: dict) -> str:
+        """text with the server entry key set to entry (only that entry's text changes)."""
+        return jsonc.set_member(text, list(self.container), key, entry)
+
+    def delete_entry(self, text: str, key: str) -> Optional[str]:
+        """text without the server entry key (None: delete the file, it held nothing else)."""
+        return jsonc.delete_member(text, list(self.container), key)
+
     def extra_register(self, text: str, entry: dict) -> str:
         """Further edits a registration needs besides the entry (VS Code: its token prompt)."""
         return text
@@ -141,10 +157,7 @@ class Adapter:
         text, bom = files.read(path)
         if text is None or not text.strip():
             return text, bom, {}
-        data = jsonc.loads(text)
-        if not isinstance(data, dict):
-            raise jsonc.JsoncError("the file does not hold a JSON object")
-        return text, bom, data
+        return text, bom, self.parse(text)
 
     def servers(self, data: Any) -> dict:
         node = data
@@ -182,17 +195,19 @@ class Adapter:
         path = self.config_path()
         text, bom, _data = self._load()  # refuses a malformed file before anything is touched
         new = change(text or "")
-        if new == (text or ""):
+        if new == (text or "") or (new is None and text is None):
             return {"changed": False, "path": path, "backup": None}
         saved = files.backup(self.id, path)
-        files.write_atomic(path, new, bom)
+        if new is None:  # the file only held our entry (Continue's block file)
+            os.remove(path)
+        else:
+            files.write_atomic(path, new, bom)
         return {"changed": True, "path": path, "backup": saved}
 
     def register(self, ln: Optional[Launch] = None, http: Optional[HttpTarget] = None) -> dict:
         """Add or repair the p6mcp entry (HTTP when http is given and the client supports it)."""
         entry = self.expected(ln, http)
-        return self._edit(lambda t: self.extra_register(
-            jsonc.set_member(t, list(self.container), SERVER_KEY, entry), entry))
+        return self._edit(lambda t: self.extra_register(self.set_entry(t, SERVER_KEY, entry), entry))
 
     def unregister(self, key: str = SERVER_KEY) -> dict:
         """Remove the p6mcp entry (or, with key, another MCP for Primavera P6 entry such as a v2 install)."""
@@ -201,9 +216,14 @@ class Adapter:
             if key not in self.servers(data) or not _is_p6(self.servers(data)[key]):
                 raise ValueError(f"{key} is not a MCP for Primavera P6 entry of {self.name}: left unchanged")
         if key != SERVER_KEY:
-            return self._edit(lambda t: jsonc.delete_member(t, list(self.container), key) if t.strip() else t)
-        return self._edit(lambda t: self.extra_unregister(jsonc.delete_member(t, list(self.container), key))
-                          if t.strip() else t)
+            return self._edit(lambda t: self.delete_entry(t, key) if t.strip() else t)
+
+        def change(t: str) -> Optional[str]:
+            if not t.strip():
+                return t
+            new = self.delete_entry(t, key)
+            return None if new is None else self.extra_unregister(new)
+        return self._edit(change)
 
 
     # -- P6 skills (p6mcp.skills): a folder p6-<name> per skill in the client's skills folder

@@ -128,7 +128,7 @@
           "name": "Does it work with ChatGPT?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Yes, in the browser: turn on remote access (beta, through your own free Cloudflare account) and add its address as a custom MCP server in ChatGPT; tested with the Free plan. Codex and OpenAI's Secure MCP Tunnel are other routes, not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer."
+            "text": "Yes, in the browser: turn on remote access (beta, through your own free Cloudflare account) and add its address as a custom MCP server in ChatGPT; tested with the Free plan. Codex and OpenAI's Secure MCP Tunnel are other routes, not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio, Cline, Devin (formerly Windsurf), Zed, Continue, Gemini CLI and Codex are registered by the installer."
           }
         },
         {
@@ -169,6 +169,7 @@
           <li>[[i:terminal]]<span>Claude Code</span></li>
           <li>[[i:code]]<span>Cursor, VS Code<small>Copilot agent mode</small></span></li>
           <li>[[i:monitor]]<span>LM Studio, Cline<small>local models</small></span></li>
+          <li>[[i:terminal]]<span>Codex, Gemini CLI, Zed, Continue, Devin<small>installer</small></span></li>
           <li>[[i:globe]]<span>claude.ai, ChatGPT<small>browser, remote access (beta)</small></span></li>
         </ul>
       </div>
@@ -559,6 +560,11 @@
     <li>VS Code (Copilot agent mode) <span>installer</span></li>
     <li>LM Studio <span>installer</span></li>
     <li>Cline <span>installer</span></li>
+    <li>Devin (formerly Windsurf) <span>installer</span></li>
+    <li>Zed <span>installer</span></li>
+    <li>Continue <span>installer</span></li>
+    <li>Gemini CLI <span>installer</span></li>
+    <li>Codex (CLI, IDE extension, ChatGPT desktop app) <span>installer</span></li>
     <li>claude.ai, ChatGPT in the browser <span>remote access, beta</span></li>
     <li>Any other MCP client <span>stdio or local HTTP</span></li>
   </ul>
@@ -597,7 +603,7 @@
     <details><summary>Are the dates computed by the AI?</summary><div><p>No. Dates and float come from P6's last schedule run. What-if and risk use the server's CPM engine, and <code>p6_cpm_validate</code> shows how closely it matches P6's own dates on your project before you rely on it.</p></div></details>
     <details><summary>Which P6 versions and databases are supported?</summary><div><p>P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM servers through their REST API (and optionally a read-only SQL account), tested with P6 EPPM 25.12 on SQL Server. P6 Professional on SQL Server or Oracle through a local read-only copy of the projects you choose, not yet tested on a real server.</p></div></details>
     <details><summary>Do I need P6 installed?</summary><div><p>Not for XER files: XER-only mode analyses them without P6 or a P6 database. Not for a P6 EPPM server either: it is reached over the network.</p></div></details>
-    <details><summary>Does it work with ChatGPT?</summary><div><p>Yes, in the browser: turn on remote access (beta, through your own free Cloudflare account) and add its address as a custom MCP server in ChatGPT; tested with the Free plan. Codex and OpenAI's Secure MCP Tunnel are other routes, documented in the <a href="https://github.com/nizarhamza/p6-mcp#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer.</p></div></details>
+    <details><summary>Does it work with ChatGPT?</summary><div><p>Yes, in the browser: turn on remote access (beta, through your own free Cloudflare account) and add its address as a custom MCP server in ChatGPT; tested with the Free plan. Codex and OpenAI's Secure MCP Tunnel are other routes, documented in the <a href="https://github.com/nizarhamza/p6-mcp#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio, Cline, Devin (formerly Windsurf), Zed, Continue, Gemini CLI and Codex are registered by the installer.</p></div></details>
     <details><summary>Does it run on macOS or Linux?</summary><div><p>No. P6 Professional is a Windows program and the server is built for Windows 10 and 11.</p></div></details>
   </div>
 </section>

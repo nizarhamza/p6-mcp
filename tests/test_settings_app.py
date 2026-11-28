@@ -265,6 +265,27 @@ def test_clients_page_installs_skills(qtbot, env, tmp_path):
     assert page.skill_btn.isHidden() and "nothing to install" in page.skill_state.text()
 
 
+def test_clients_page_new_clients(qtbot, env, tmp_path):
+    os.makedirs(tmp_path / "User" / ".codex")
+    os.makedirs(tmp_path / "User" / ".continue")
+    skill = {"name": "float-check", "title": "Float check", "description": "Float check. Use when asked.",
+             "args": [], "template": "Run p6_float_analysis.", "enabled": True}
+    w = make(qtbot, {"language": "en", "tool_profile": "full", "core_skills_installed": True,
+                     "custom_skills": [skill]})
+    page = w.page(ClientsPage)
+    page.select("codex")
+    assert page.status().state == "not_registered" and "ChatGPT desktop app share this file" in page.state.text()
+    assert page.register()
+    qtbot.waitUntil(lambda: page.job is None, timeout=15000)
+    assert (tmp_path / "User" / ".codex" / "config.toml").read_text(encoding="utf-8").startswith(
+        "[mcp_servers.p6mcp]\n")
+    page.select("codex")
+    assert page.status().state == "registered" and not page.skill_btn.isHidden()
+    assert str(tmp_path / "User" / ".agents" / "skills") in page.skill_state.text()
+    page.select("continue")
+    assert "Agent mode only" in page.state.text() and page.skill_btn.isHidden()
+
+
 def test_save_rewrites_the_clients_skills(qtbot, env, tmp_path):
     from p6mcp import clients, settings_logic
     os.makedirs(tmp_path / "User" / ".cursor")
