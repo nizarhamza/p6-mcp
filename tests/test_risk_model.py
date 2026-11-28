@@ -1,4 +1,4 @@
-"""p6_schedule_risk risk model and worker processes (3.8.0) on the synthetic project DEMO-A (a chain A1010 ->
+"""p6_schedule_risk risk model and worker processes (3.6.0) on the synthetic project DEMO-A (a chain A1010 ->
 A1020 -> A1030 -> A1040 -> A1050, A1060 Permits beside it with 20 days of float): the draws of an iteration do not
 depend on how the iterations are shared (same output for 1 and 2 worker processes, spawn), a failed pool falls back
 to the server process, a risk event of probability 1 is a fixed delay, the finish impact of an event is the
