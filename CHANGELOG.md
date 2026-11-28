@@ -7,6 +7,17 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ### Added
 
+- `p6_use_database` (Full profile, app settings kind: dry run, then your confirmation; never offered to remote
+  clients): switches the data source of this server process to a database, the XER files, a P6 EPPM working copy or
+  a SQL Server / Oracle copy already set up and confirmed in Settings. Without arguments it lists them (what each
+  points to, confirmed, local copy, switchable or why not, active now, saved choice) and changes nothing;
+  `source="saved"` returns to the saved choice. The switch is layered over config.json in memory and never saved:
+  config.json and Settings keep their choice, and a restart returns to it. Refused: unconfirmed profiles, missing
+  files, P6 EPPM and SQL Server / Oracle profiles without a local copy, and any switch while `P6_DB_PATH` is set.
+  The tool list does not change: tools the new source does not allow (writes on XER files or a SQL Server / Oracle
+  copy) are refused when called. Caches, backups and the edit log follow the new database file. In HTTP mode the
+  switch applies to every later request of every client of that server. `p6_diagnose` gains `data_source` (active,
+  saved, switched, since, transport), and `restart_required` now compares with the saved settings.
 - P6 Professional on SQL Server or Oracle (read only): a fourth data source in Settings (Database), "A P6
   Professional database on SQL Server or Oracle". A profile holds the database type, server, port, database or
   service name, schema (owner), database login (its password in the Windows Credential Manager, stored once a test

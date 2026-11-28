@@ -14,7 +14,7 @@ stay outside this repository.
 
 ## Layout
 
-- The server (73 tools; the former single-file `p6_mcp_server.py`, then `p6mcp/server.py`, split into modules in
+- The server (74 tools; the former single-file `p6_mcp_server.py`, then `p6mcp/server.py`, split into modules in
   3.5.0 without a change in behaviour). Entry point `python -m p6mcp` (`p6mcp/__main__.py`).
   - `p6mcp/server.py`: the facade. It imports the modules below (a tool module registers its tools when imported,
     so the import order is the tool list order), re-exports every name they define (the tests, `remote/server.py`,
@@ -405,6 +405,21 @@ stay outside this repository.
 - Public repository: https://github.com/nizarhamza/p6-mcp (the name stays: no rename for 2.0; Apache 2.0, Copyright 2026 Nizar Hamza; LICENSE,
   NOTICE, SECURITY.md, CHANGELOG.md, issue templates; README screenshots in `docs/images`, rendered from the
   synthetic database in a neutral folder so no user name appears). Version 1.0.0 = first public release; 1.0.1 = fixes of the 2026-10-20 server review; 1.1.0 = assignment units tools and the XER export of schedule options; 1.2.0 = UDF tools (list, filter and columns, set and clear activity values); 1.3.0 = automatic updates; 1.6.0 = Excel dashboard (`p6_export_dashboard`); 1.7.0 = `export-dashboard` command (dashboard result gives `cards` and `dcma_failed`); 1.8.0 = P6 commands became skills (SKILL.md folders) and the skill shop on GitHub; 1.8.1 = share through the clipboard (short link); 1.9.0 = no built-in skills: the core set installed from the shop (bundled copy offline), automatic skill updates; 2.0.0 (unreleased; absorbs the unreleased 1.10.0) = renamed MCP for Primavera P6 (brand, installer names, wordmark by `tools/make_brand.py`), `p6_schedule_risk`, `p6_update_integrity`, logic density and weighted score, milestone and compare fields for the shop skills, MCP Registry listing (`server.json`), landing site (`site/`); 2.1.0 = CPM engine on the rules P6 25.12 applies (engine version 23: LOE, WBS summary, ALAP, resource dependent, out-of-sequence modes, free float, longest path, float paths), network analysis on the backward bound, parity test on 107 synthetic P6 cases; 2.1.1 = the clients' skills folders follow every Save and each start of the Settings app, no write skill in XER-only mode; 2.2.0 = p6_cpm_validate explains every difference (cause_class stale_f9 / data / engine / unknown, context, stale_f9), p6_schedule_whatif flags its assumptions (duration cuts, open ends, hard constraints, negative lags, SS lag 0, near critical, finish convergence, DCMA before and after).
+
+- Data source switch (`p6_use_database`, plan item P2, tools/database.py; policy CONFIG, in `NO_DB_TOOLS`, remote
+  never): `core/state.py` `OVERRIDE` ({source, profile, since, selection}) is layered by `_refresh()` through
+  `config.load(override=config.source_selection(source, profile))` (the data_source key and the active profile key
+  of `config.SOURCE_KEYS` replaced in the validated file content, so `raw` holds them; the environment `P6_DB_PATH`
+  wins and a broken or missing file ignores it; a problem of the switched source ends with `config.SWITCHED_NOTE`).
+  Never saved; kept across `_refresh()` calls until `source="saved"` (or switching to the saved profile) or the end
+  of the process. Without `source` the tool lists (`registry.LIST_WITHOUT`: no plan, no token, also with
+  dry_run=false). Refusals before the plan (`_source_problem`): unconfirmed profile or XER set, missing file, EPPM
+  or pmdb profile without a working copy / local copy, `P6_DB_PATH` set (`ENV_WINS`). The plan names the target's
+  file and is gated by `_plan_gate` (token bound to the config file, as `p6_shop_install`); the apply rolls back
+  the override when the new source leaves no `DB_PATH`. `STARTUP` and the tool list never change; `p6_diagnose`
+  `data_source` and `restart_required` against the saved settings. `state.TRANSPORT` = "http" set by
+  `http_server.build_app` (one process serves every client: the result says so). Tests:
+  `tests/test_use_database.py`; `conftest.P6` resets `OVERRIDE`.
 
 ## Running
 

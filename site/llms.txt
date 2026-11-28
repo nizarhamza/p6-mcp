@@ -130,6 +130,7 @@ Facts an assistant should get right:
 - `p6_restore_backup`: Puts a backup back in place, after a safety backup of the current database (delete or replace)
 - `p6_edit_log`: Every confirmed write, with its parameters, before and after values (read)
 - `p6_diagnose`: Configuration, database, P6 version and P6 running state at a glance (read)
+- `p6_use_database`: Switches this server to another database, XER set, P6 EPPM or SQL Server / Oracle copy already confirmed in Settings, for this session only (never saved), after your confirmation (app settings)
 - `p6_sql_select`: Read-only SQL on the P6 database, as a last resort (read)
 
 ### Skill shop

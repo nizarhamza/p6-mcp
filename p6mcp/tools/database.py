@@ -8,6 +8,7 @@ import sqlite3
 from datetime import date, datetime
 from time import monotonic
 from typing import Any, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from p6mcp import config as _config
 from p6mcp import pmdb as _pmdb
@@ -22,7 +23,8 @@ from p6mcp.core.constants import (
     SQL_COUNT_SECONDS, SQL_PAGE_BYTES, SQL_QUERY_SECONDS,
 )
 from p6mcp.registry import (
-    CalCheckKinds, DateStr, Limit, LISTED, Offset, ProjectId, SERVER_VERSION, _tool, TOOL_HINTS, Year,
+    CalCheckKinds, DateStr, Limit, LISTED, Offset, _plan_gate, ProjectId, SERVER_VERSION, SourceKind, _tool,
+    TOOL_HINTS, Year,
 )
 from p6mcp.core.db import (
     _alive, _backup_dir, _check_page, _cols, _connect, _db_dt, _dict, _env, _p6_running, _page, _parse_dt, _project_id,
@@ -416,10 +418,13 @@ def p6_sql_select(sql: str, offset: Offset = 0, limit: Limit = 200) -> dict:
 def p6_diagnose() -> dict:
     """Start here when a tool reports a configuration problem. Shows the server settings in force
     (database, tool profile, writes allowed, restart needed), the P6 schema and version detected,
-    whether P6 is running, the backup and edit log folders, and the network cache of the CPM engine
-    (engine_cache: on or off, projects kept, hits and misses). Works without a database."""
+    whether P6 is running, the backup and edit log folders, the network cache of the CPM engine
+    (engine_cache: on or off, projects kept, hits and misses) and data_source (the source in use, the saved
+    choice, and since when this server process was switched with p6_use_database). Works without a database."""
     st = _state.SETTINGS
-    now_listed = {t for t in TOOL_HINTS if _policy.listed(t, st.tool_profile, st.allow_writes, _shop_on(st))}
+    ov = _state.OVERRIDE
+    saved = _config.load() if ov else st  # the tool list follows the saved settings, never a switch of this process
+    now_listed = {t for t in TOOL_HINTS if _policy.listed(t, saved.tool_profile, saved.allow_writes, _shop_on(saved))}
     out: dict[str, Any] = {
         "server_version": SERVER_VERSION,
         "settings": {"source": st.source, "config_file": st.config_path, "config_error": st.config_error,
@@ -427,6 +432,8 @@ def p6_diagnose() -> dict:
                      "tool_profile": st.tool_profile, "allow_writes": st.allow_writes,
                      "backup_before_write": st.backup_before_write, "backup_scope": st.backup_scope,
                      "backup_retention": st.backup_retention, "block_when_p6_running": st.block_when_p6_running},
+        "data_source": {"active": _choice(st), "saved": _choice(saved), "switched": ov is not None,
+                        "since": ov["since"] if ov else None, "transport": _state.TRANSPORT},
         "tools_listed": len(LISTED),
         "restart_required": now_listed != LISTED,
         "p6_running": _p6_running(),
@@ -434,6 +441,10 @@ def p6_diagnose() -> dict:
         "shop": {"enabled": _shop_on(st), "catalog": _shop.REPO_URL},
         "engine_cache": _engine_cache_info(),
     }
+    if ov:
+        out["data_source"]["note"] = ("This server process was switched with p6_use_database: config.json and MCP for "
+                                      "Primavera P6 Settings keep the saved choice, and a restart of the server, or "
+                                      "p6_use_database(source=\"saved\"), returns to it.")
     if out["restart_required"]:
         out["restart_note"] = ("The tool profile, the write permission or the skill shop setting changed since the "
                                "server started: restart your MCP client to refresh its tool list.")
@@ -491,6 +502,265 @@ def p6_diagnose() -> dict:
     finally:
         con.close()
     return out
+
+
+# ----------------------------------------------------------------- data source of this server process (P2)
+# p6_use_database layers a data source selection over config.json for this server process only (_state.OVERRIDE,
+# read by _refresh at every call): the file and the Settings app keep their choice, a restart returns to it.
+
+SOURCE_LABELS = {"database": "P6 Professional SQLite database", "xer": "XER files (read only)",
+                 "eppm": "P6 EPPM server (local working copy)",
+                 "pmdb": "P6 Professional on SQL Server or Oracle (local read-only copy)"}
+READ_ONLY_SOURCES = ("xer", "pmdb")
+ENV_WINS = ("P6_DB_PATH is set in the environment of this server (the MCP client's configuration): the environment "
+            "wins over the settings, so this server always uses that database. Remove P6_DB_PATH from the client's "
+            "configuration to choose the data source in MCP for Primavera P6 Settings.")
+
+
+def _env_db() -> Optional[str]:
+    v = os.environ.get("P6_DB_PATH", "").strip()
+    return None if not v or "${" in v else os.path.abspath(v)
+
+
+def _no_userinfo(url: str) -> str:
+    """A server URL without a user name or password (a hand-written profile could hold them)."""
+    try:
+        parts = urlsplit(url or "")
+        if parts.username is None and parts.password is None:
+            return url or ""
+        host = (parts.hostname or "") + (f":{parts.port}" if parts.port else "")
+    except ValueError:
+        return ""
+    return urlunsplit((parts.scheme, host, parts.path, "", ""))
+
+
+def _choice(st: _config.Settings) -> dict:
+    """{source, profile} a Settings selects: a data source of config.json, 'environment' (P6_DB_PATH) or None."""
+    if _env_db():
+        return {"source": "environment", "profile": "P6_DB_PATH"}
+    if st.source != "config":
+        return {"source": None, "profile": None}
+    source, profile = _config.source_choice(st.raw)
+    return {"source": source, "profile": profile}
+
+
+def _describe(c: dict) -> str:
+    if c["source"] == "environment":
+        return "the database of P6_DB_PATH (environment)"
+    if c["source"] is None:
+        return "no data source (no settings file)"
+    return SOURCE_LABELS.get(c["source"], c["source"]) + (f" {c['profile']!r}" if c["profile"] is not None else "")
+
+
+def _source_state() -> dict:
+    """What this process uses now, the saved choice and the switch (since when)."""
+    st, ov = _state.SETTINGS, _state.OVERRIDE
+    saved = _config.load() if ov else st
+    out = {"active": dict(_choice(st), db_path=_state.DB_PATH or None),
+           "saved": _choice(saved), "switched": ov is not None, "since": ov["since"] if ov else None}
+    if not _state.DB_PATH:
+        out["active"]["problem"] = st.db_problem or _config.NO_DB_MESSAGE
+    return out
+
+
+def _source_entries(data: dict) -> list[tuple[str, Optional[str], dict]]:
+    """(source, profile name, entry) of every data source set up in the settings (one XER file set at most)."""
+    out = [("database", d.get("name"), d) for d in data.get("databases", [])]
+    if data.get("xer_files"):
+        out.append(("xer", None, {}))
+    out += [("eppm", p.get("name"), p) for p in data.get("eppm_profiles", [])]
+    out += [("pmdb", p.get("name"), p) for p in data.get("pmdb_profiles", [])]
+    return out
+
+
+def _source_target(source: str, name: Optional[str], entry: dict, data: dict) -> dict:
+    """What a profile points to (paths in full: a local tool; never a password) and its local copy."""
+    if source == "database":
+        return {"points_to": os.path.abspath(entry.get("path") or ""), "copy": None}
+    if source == "xer":
+        return {"points_to": [os.path.abspath(f) for f in data.get("xer_files", [])], "copy": None}
+    if source == "eppm":
+        m = _eppm_store.read_manifest(name) if name else None
+        db = f" (database {entry['database']})" if entry.get("database") else ""
+        return {"points_to": _no_userinfo(entry.get("base_url", "")) + db,
+                "copy": {"path": _eppm_store.store_path(name), "pulled_at": m.get("pulled_at"),
+                         "projects": [p.get("project_id") for p in m.get("projects", [])]} if m else None}
+    m = _pmdb.read_manifest(name) if name else None
+    where = f"{entry.get('host', '')}:{entry.get('port', '')} {entry.get('service', '')}".strip()
+    schema = f" schema {entry['schema']}" if entry.get("schema") else ""
+    return {"points_to": f"{entry.get('driver')} {where}{schema}",
+            "copy": {"path": _pmdb.store_path(name), "copied_at": m.get("copied_at"),
+                     "projects": [p.get("project_id") for p in m.get("projects", [])]} if m else None}
+
+
+def _source_problem(source: str, name: Optional[str], entry: dict, data: dict) -> Optional[str]:
+    """Why this profile cannot be switched to (None = it can)."""
+    settings = "MCP for Primavera P6 Settings (Database)"
+    if source == "xer":
+        files = data.get("xer_files") or []
+        if not data.get("xer_confirmed"):
+            return f"The XER files were not loaded and checked: open {settings} and click Load."
+        missing = [f for f in files if not os.path.isfile(f)]
+        return f"XER file not found: {missing[0]}." if missing else None
+    what = {"database": "Database", "eppm": "P6 EPPM server", "pmdb": "Database server"}[source]
+    if not entry.get("confirmed"):
+        return (f"{what} {name!r} was set up but its connection was not tested and confirmed: open {settings}, click "
+                "Test connection and confirm it.")
+    if source == "database":
+        path = os.path.abspath(entry.get("path") or "")
+        return None if os.path.isfile(path) else f"Database {name!r}: the file was not found ({path})."
+    if source == "eppm" and _eppm_store.read_manifest(name) is None:
+        return (f"P6 EPPM server {name!r} has no working copy yet: pull projects first (make it the data source in "
+                f"{settings}, then p6_eppm_pull).")
+    if source == "pmdb" and _pmdb.read_manifest(name) is None:
+        return (f"Database server {name!r} has no local copy yet: copy the projects first (Copy now in {settings}, "
+                "or p6_pmdb_refresh while it is the saved data source).")
+    return None
+
+
+def _source_rows(data: dict, state: dict, env: bool) -> list[dict]:
+    rows = []
+    for source, name, entry in _source_entries(data):
+        why = ENV_WINS if env else _source_problem(source, name, entry, data)
+        key = (source, name)
+        rows.append({"source": source, "kind": SOURCE_LABELS[source], "profile": name,
+                     **_source_target(source, name, entry, data),
+                     "confirmed": bool(data.get("xer_confirmed") if source == "xer" else entry.get("confirmed")),
+                     "read_only": source in READ_ONLY_SOURCES,
+                     "active": key == (state["active"]["source"], state["active"]["profile"]),
+                     "saved": key == (state["saved"]["source"], state["saved"]["profile"]),
+                     "switchable": why is None, "why_not": why})
+    return rows
+
+
+def _source_find(data: dict, source: str, profile: Optional[str]) -> tuple[str, Optional[str], dict]:
+    found = [e for e in _source_entries(data) if e[0] == source]
+    label = SOURCE_LABELS[source]
+    if not found:
+        raise ValueError(f"No {label} is set up in MCP for Primavera P6 Settings (Database): set it up and confirm it "
+                         "there first.")
+    if source == "xer":
+        return found[0]
+    names = [n for _s, n, _e in found]
+    if profile is None or not str(profile).strip():
+        if len(found) == 1:
+            return found[0]
+        raise ValueError(f"profile: name the {label} to use, one of {names}.")
+    hit = [e for e in found if e[1] == profile] or [e for e in found if str(e[1]).lower() == profile.strip().lower()]
+    if not hit:
+        raise ValueError(f"No {label} named {profile!r}: the ones set up are {names} (call p6_use_database without "
+                         "arguments to list them).")
+    return hit[0]
+
+
+def _source_writes(source: str, data: dict) -> str:
+    if source in READ_ONLY_SOURCES:
+        return "read only: every write tool is refused"
+    if not data.get("allow_writes"):
+        return "write tools refused (writes are turned off in the settings)"
+    if source == "eppm":
+        return "edits change the local working copy only (p6_eppm_push sends them to the server)"
+    return "as the settings allow (two-step flow; a P6 schema that is not known or trusted is read only)"
+
+
+def _source_notes() -> list[str]:
+    st, kind = _state.SETTINGS, _choice(_state.SETTINGS)["source"]
+    notes = [("This server process serves every client of the HTTP server: every later request of every connected "
+              "client uses this source." if _state.TRANSPORT == "http" else
+              "Other MCP clients and the remote access server run their own server process: they keep the saved "
+              "choice."),
+             "The tool list is the one the server started with: a tool the active source does not allow is refused "
+             "when called (writes on a read-only source, P6 EPPM tools outside a P6 EPPM working copy).",
+             "Dates and float still come from the last F9 stored in this source; staleness, backups and the edit log "
+             "follow its database file."]
+    if _state.DB_PATH and not _write_refusal() and not any(_policy.is_write(t) for t in LISTED):
+        notes.append("Writes are allowed on this source, but the write tools were not offered when the server "
+                     "started: save this source in MCP for Primavera P6 Settings and restart the MCP client to use them.")
+    startup = _choice(_state.STARTUP)["source"]
+    if kind != startup:
+        notes.append("The server instructions your MCP client received at startup describe the source it started "
+                     f"with ({SOURCE_LABELS.get(startup, startup)}).")
+    if st.eppm:
+        notes.append("P6 EPPM: p6_eppm_status lists the pending changes of this working copy.")
+    return notes
+
+
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+def p6_use_database(source: Optional[SourceKind] = None, profile: Optional[str] = None, confirm: bool = False) -> dict:
+    """Switches the data source of THIS server process to another one already set up and confirmed in MCP for
+    Primavera P6 Settings (Database): source database (a P6 SQLite file), xer (the XER files), eppm (a P6 EPPM
+    working copy) or pmdb (a SQL Server / Oracle copy), profile = its name (optional when only one is set up).
+    Without source: lists them (kind, what it points to, confirmed, local copy, switchable or why not, active now,
+    saved choice) and changes nothing. source="saved" returns to the choice saved in config.json. Never saved:
+    config.json and the Settings app keep their choice, and a restart of the server returns to it. Refused: a
+    profile not confirmed, a missing file, a P6 EPPM or SQL Server / Oracle profile without a local copy, and any
+    switch while P6_DB_PATH is set. The tool list does not change: a tool the new source does not allow (writes on
+    a read-only source) is refused when called."""
+    st, state, env = _state.SETTINGS, _source_state(), _env_db() is not None
+    data, err = None, st.config_error
+    if not err and st.source == "config":
+        try:
+            data = _config.read_file(st.config_path or _config.config_path())[0]
+        except _config.ConfigError as e:
+            err = str(e)
+    if source is None:
+        out = {**state, "profiles": _source_rows(data or {}, state, env), "transport": _state.TRANSPORT,
+               "note": "Nothing changed. Switch with source= and profile= (a dry run first); the switch is for this "
+                       "server process only, never saved."}
+        if env:
+            out["environment"] = ENV_WINS
+        if err:
+            out["config_error"] = err
+        return out
+    if env:
+        raise ValueError(ENV_WINS)
+    if data is None:
+        raise ValueError(f"The settings cannot be read ({err}): fix them in MCP for Primavera P6 Settings first." if err
+                         else "There is no settings file: set up a data source in MCP for Primavera P6 Settings first.")
+    if source not in (*SOURCE_LABELS, "saved"):
+        raise ValueError(f"source must be one of {[*SOURCE_LABELS, 'saved']}")
+    active, saved = state["active"], state["saved"]
+    if source == "saved":
+        if _state.OVERRIDE is None:
+            return {**state, "already_active": True,
+                    "note": "This server process already uses the saved data source: nothing to switch back."}
+        plan = [f"Return this server process to the saved data source: {_describe(saved)} (config.json)",
+                f"Stop using {_describe(active)}, used since {state['since']} (p6_use_database)"]
+        target, override = saved, None
+    else:
+        src, name, entry = _source_find(data, source, profile)
+        why = _source_problem(src, name, entry, data)
+        if why:
+            raise ValueError(why + " Nothing was switched.")
+        target = {"source": src, "profile": name}
+        if (src, name) == (active["source"], active["profile"]):
+            return {**state, "already_active": True,
+                    "note": f"{_describe(target)} is already the data source of this server process."}
+        tgt = _source_target(src, name, entry, data)
+        where = tgt["copy"]["path"] if tgt["copy"] else tgt["points_to"]
+        plan = [f"Use {_describe(target)} for this server process only: {where}",
+                f"Writes: {_source_writes(src, data)}",
+                f"config.json and MCP for Primavera P6 Settings keep the saved choice ({_describe(saved)}); a restart "
+                "of the server, or p6_use_database(source=\"saved\"), returns to it"]
+        override = (None if (src, name) == (saved["source"], saved["profile"]) else
+                    {"source": src, "profile": name, "since": datetime.now().isoformat(timespec="seconds"),
+                     "selection": _config.source_selection(src, name)})
+    gate = _plan_gate(plan, confirm)
+    if gate:
+        return {"applied": False, "error": gate.replace("The database changed", "The settings changed")}
+    if not confirm:
+        return {"dry_run": True, "would_do": plan, **state}
+    previous = _state.OVERRIDE
+    _state.OVERRIDE = override
+    now = _refresh()
+    if not _state.DB_PATH and source != "saved":  # the source would leave this process without a database
+        _state.OVERRIDE = previous
+        _refresh()
+        raise ValueError(f"{_describe(target)} cannot be used now: {now.db_problem or _config.NO_DB_MESSAGE} "
+                         "Nothing was switched.")
+    return {"applied": True, **_source_state(),
+            "writes": (_write_refusal() or "allowed") if _state.DB_PATH else None,
+            "notes": _source_notes()}
 
 
 # ----------------------------------------------------------------- P6 Professional on SQL Server or Oracle

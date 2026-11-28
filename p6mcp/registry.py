@@ -99,6 +99,8 @@ CalCheckKind = Literal["calendar_missing", "unreadable", "base_missing", "no_wor
 assert tuple(CAL_CHECK_KINDS) == get_args(CalCheckKind)
 CalCheckKinds = Annotated[list[CalCheckKind], Field(description="Finding kinds to list (default all).")]
 Year = Annotated[int, Field(ge=1900, le=2200, description="Calendar year, e.g. 2026.")]
+# p6_use_database: a data source of the settings (config data_source values), or back to the saved choice
+SourceKind = Literal["database", "xer", "eppm", "pmdb", "saved"]
 LaGrid = Literal["auto", "day", "week"]
 FloatEdges = Annotated[list[float], Field(min_length=1, description="Bucket edges in days, increasing; 0 is always added.")]
 ProjectIds = Annotated[list[ProjectId], Field(description="Project IDs (earlier updates of the same schedule).")]
@@ -192,6 +194,8 @@ _CALL: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar("p6_call"
 WRITE_DOC = ("\n\nTwo steps: dry_run=true (default) writes nothing and returns the plan and a confirmation_token. "
              "Show the plan; only after the user's explicit yes, call again with the same arguments, dry_run=false "
              "and that token.")
+# CONFIG tools that list their choices when called without this argument (no plan, no token, nothing applied)
+LIST_WITHOUT = {"p6_use_database": "source"}
 DESTRUCTIVE_DOC = " This tool deletes or replaces data: step 2 also needs confirmation_text, given by the dry run."
 
 
@@ -304,6 +308,8 @@ def _gated(fn: Callable) -> Callable:
                                f"same arguments plus dry_run=false, confirmation_token=\"{g.token}\"{extra}."
                                + ("" if settings_only or _state.SETTINGS.eppm else " P6 must be closed."))
             return res
+        if name in LIST_WITHOUT and params.get(LIST_WITHOUT[name]) is None:  # nothing to apply: the listing
+            return fn(**params, confirm=False)
         if destructive:
             want = _confirm_text(name, params)
             if (confirmation_text or "").strip() != want:

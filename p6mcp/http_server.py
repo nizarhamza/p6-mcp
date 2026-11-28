@@ -66,7 +66,9 @@ def build_app(port: int, token: str):
     """The guarded ASGI app (the SDK's own Host/Origin protection stays on as a second layer)."""
     from mcp.server.transport_security import TransportSecuritySettings
 
+    from p6mcp.core import state
     from p6mcp.server import mcp
+    state.TRANSPORT = "http"  # p6_use_database: a switch then applies to every later request of every client
     security = TransportSecuritySettings(enable_dns_rebinding_protection=True,
                                          allowed_hosts=sorted({f"127.0.0.1:{port}", f"localhost:{port}"}),
                                          allowed_origins=sorted({f"http://127.0.0.1:{port}",

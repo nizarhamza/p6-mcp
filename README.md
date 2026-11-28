@@ -179,7 +179,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 ## Tools
 
 <!-- tools:start -->
-73 tools: 42 read-only (11 of them in the Basic profile), 5 that write a file, 25 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
+74 tools: 42 read-only (11 of them in the Basic profile), 5 that write a file, 25 write tools (off by default; a dry run, then your confirmation; a backup first) and 2 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
 
 **Projects and structure**
 
@@ -304,6 +304,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 | `p6_restore_backup` | Puts a backup back in place, after a safety backup of the current database | Delete or replace |  |
 | `p6_edit_log` | Every confirmed write, with its parameters, before and after values | Read |  |
 | `p6_diagnose` | Configuration, database, P6 version and P6 running state at a glance | Read | yes |
+| `p6_use_database` | Switches this server to another database, XER set, P6 EPPM or SQL Server / Oracle copy already confirmed in Settings, for this session only (never saved), after your confirmation | App settings |  |
 | `p6_sql_select` | Read-only SQL on the P6 database, as a last resort | Read |  |
 
 **Skill shop**
@@ -341,7 +342,7 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
 
 ![Settings: tools and safety](docs/images/settings-tools.png)
 
-- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 73).
+- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 74).
 - **Writes are off by default.** With the Full profile and "Allow write operations", every write takes two calls:
   a dry run that shows the plan and returns a single-use confirmation token, then, after your explicit yes, the
   same call with that token. Deleting a project or an activity and restoring a backup also need a confirmation
@@ -588,11 +589,23 @@ the age of the copy; refresh it to see changes made in P6. Write tools are refus
 Not tested against a real SQL Server or Oracle P6 database yet: the tests run on simulated servers (see
 CHANGELOG).
 
+## Switching the data source from your MCP client
+
+`p6_use_database` (Full profile) lists the data sources set up in Settings (SQLite databases, the XER files, P6
+EPPM working copies, SQL Server or Oracle copies) and switches the server to one of them for the rest of its
+session: ask "use the other database" and the assistant shows the plan, then switches after your yes. Only
+profiles you have already tested and confirmed in Settings are offered; a P6 EPPM or SQL Server / Oracle profile
+needs its local copy first, and nothing can be switched while `P6_DB_PATH` is set in the client's configuration.
+The switch is never saved: config.json and Settings keep your choice, and a restart of the server (or
+`p6_use_database` with source `saved`) returns to it. In HTTP mode one server process serves every client, so the
+switch applies to all of them. The tool list stays the one the server started with: write tools are refused on a
+read-only source. Remote clients (claude.ai, ChatGPT) never get this tool.
+
 ## FAQ
 
 **What is an MCP server for Primavera P6?**
 MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant
-73 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
+74 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
 computed from the schedule rather than guessed by the model.
 
 **Can the AI change my schedule?**

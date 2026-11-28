@@ -56,7 +56,7 @@ class StubVerifier:
 
 EXPECTED_NEVER = {"p6_delete_activity", "p6_delete_project", "p6_eppm_push", "p6_restore_backup", "p6_export_xer",
                   "p6_export_dashboard", "p6_export_lookahead", "p6_import_xer", "p6_inspect_xer", "p6_shop_search",
-                  "p6_shop_get", "p6_shop_install"}
+                  "p6_shop_get", "p6_shop_install", "p6_use_database"}
 
 
 def test_every_tool_has_a_remote_decision(server):
