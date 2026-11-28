@@ -699,5 +699,9 @@
   "pmdb.result.none": "Rien à copier pour l'instant : saisissez des ID de projet ou une EPS.",
   "pmdb.result.missing": "Introuvable dans la base : {ids}.",
   "pmdb.result.driver": "Le pilote {driver} n'est pas installé : cliquez sur Installer le pilote.",
-  "pmdb.result.failed": "{err}"
+  "pmdb.result.failed": "{err}",
+  "app.nav": "Pages",
+  "skill.file.text": "Texte du fichier",
+  "cl.snippet.kind": "Format de l'extrait",
+  "cl.snippet.text": "Extrait de configuration"
 }

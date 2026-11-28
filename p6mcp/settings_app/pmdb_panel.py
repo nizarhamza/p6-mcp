@@ -11,12 +11,13 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QComboBox, QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 from p6mcp import config, credentials, pmdb, settings_logic
 from p6mcp.i18n import tr
-from p6mcp.settings_app.common import Job, ask, group, note, pill, start
+from p6mcp.settings_app import a11y
+from p6mcp.settings_app.common import Check, Job, ask, fit_spin, group, note, pill, start
 
 
 def _stored(name: str) -> Optional[str]:
@@ -43,6 +44,7 @@ class PmdbPanel(QWidget):
         self.list = QListWidget()
         self.list.setMinimumHeight(self.fontMetrics().height() * 4)
         self.list.itemSelectionChanged.connect(self._fill)
+        a11y.name(self.list, tr("pmdb.box"))
         bl.addWidget(self.list)
         row = QHBoxLayout()
         self.add_btn = QPushButton(tr("pmdb.add"))
@@ -69,6 +71,7 @@ class PmdbPanel(QWidget):
         self.host_edit = self._line(form, "pmdb.host", "host")
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
+        fit_spin(self.port)
         self.port.editingFinished.connect(lambda: self._set(port=self.port.value()))
         form.addRow(tr("pmdb.port"), self.port)
         self.service_edit = self._line(form, "pmdb.service", "service", tr("pmdb.service.placeholder"))
@@ -77,7 +80,7 @@ class PmdbPanel(QWidget):
         self.pw_edit = QLineEdit()
         self.pw_edit.setEchoMode(QLineEdit.EchoMode.Password)
         form.addRow(tr("pmdb.password"), self.pw_edit)
-        self.tls = QCheckBox(tr("pmdb.tls"))
+        self.tls = Check(tr("pmdb.tls"))
         self.tls.clicked.connect(lambda: self._set(tls=self.tls.isChecked()))
         form.addRow("", self.tls)
         self.projects_edit = QLineEdit()
@@ -100,7 +103,7 @@ class PmdbPanel(QWidget):
         trow = QHBoxLayout()
         self.test_btn = QPushButton(tr("pmdb.test"))
         self.test_btn.clicked.connect(self.run_test)
-        self.state = QLabel()
+        self.state = a11y.live(QLabel())
         self.state.setWordWrap(True)
         self.state.setTextFormat(Qt.TextFormat.PlainText)
         trow.addWidget(self.test_btn)
@@ -124,12 +127,15 @@ class PmdbPanel(QWidget):
         urow.addWidget(self.copy_btn)
         urow.addStretch(1)
         dl.addLayout(urow)
-        self.copy_state = QLabel()
+        self.copy_state = a11y.live(QLabel())
         self.copy_state.setWordWrap(True)
         self.copy_state.setTextFormat(Qt.TextFormat.PlainText)
         dl.addWidget(self.copy_state)
         lay.addWidget(box)
         self.refresh()
+
+    def access_keys(self) -> list:
+        return [self.add_btn, self.test_btn, self.use_btn, self.copy_btn, self.remove_btn, self.install_btn]
 
     # -- helpers
     def _line(self, form: QFormLayout, label: str, key: str, placeholder: str = "") -> QLineEdit:
@@ -318,7 +324,7 @@ class PmdbPanel(QWidget):
             return
         m = pmdb.read_manifest(p["name"])
         if not m:
-            self.copy_state.setText(tr("pmdb.copy.none"))
+            a11y.set_status(self.copy_state, tr("pmdb.copy.none"))
             self.copy_state.setStyleSheet("")
             return
         pill(self.copy_state, "ok", tr("pmdb.copy.state", when=m.get("copied_at", "").replace("T", " "),

@@ -7,12 +7,13 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel, QMessageBox, QPushButton,
+from PySide6.QtWidgets import (QComboBox, QFormLayout, QHBoxLayout, QLabel, QMessageBox, QPushButton,
                                QVBoxLayout, QWidget)
 
 from p6mcp import __version__, config, runtime, updates
 from p6mcp.i18n import tr
-from p6mcp.settings_app.common import Job, group, note, pill, start
+from p6mcp.settings_app import a11y
+from p6mcp.settings_app.common import Check, Job, group, note, pill, start
 
 
 def _open_folder(path: str) -> None:
@@ -37,18 +38,20 @@ class LogsPage(QWidget):
         form.addRow(tr("logs.level"), self.level)
         bl.addLayout(form)
         row = QHBoxLayout()
+        self.folder_btns = []
         for key, path in (("logs.open", runtime.logs_dir()), ("logs.open_data", config.localdata_dir()),
                           ("logs.open_config", os.path.dirname(config.config_path()))):
             b = QPushButton(tr(key))
             b.clicked.connect(lambda _c=False, p=path: _open_folder(p))
             row.addWidget(b)
+            self.folder_btns.append(b)
         row.addStretch(1)
         bl.addLayout(row)
         bl.addWidget(note(tr("logs.note")))
         lay.addWidget(box)
 
         box, ul = group(tr("upd.box"))
-        self.auto = QCheckBox(tr("upd.auto"))
+        self.auto = Check(tr("upd.auto"))
         self.auto.clicked.connect(lambda c: self.win.set_data(dict(self.win.data, auto_update=bool(c))))
         ul.addWidget(self.auto)
         row = QHBoxLayout()
@@ -63,7 +66,7 @@ class LogsPage(QWidget):
         row.addWidget(self.open_btn)
         row.addStretch(1)
         ul.addLayout(row)
-        self.state = QLabel()
+        self.state = a11y.live(QLabel())
         self.state.setWordWrap(True)
         ul.addWidget(self.state)
         ul.addWidget(note(tr("upd.note")))
@@ -73,6 +76,9 @@ class LogsPage(QWidget):
         if self.updater is not None:
             self.updater.changed.connect(self._updater_changed)
         self.refresh()
+
+    def access_keys(self) -> list[list[QWidget]]:
+        return [[self.check_btn, self.update_btn, self.open_btn, self.auto, *self.folder_btns]]
 
     def _updater_changed(self) -> None:
         self._render()

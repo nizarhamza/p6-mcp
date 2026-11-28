@@ -11,13 +11,14 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFormLayout,
-                               QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QRadioButton,
-                               QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QFileDialog, QFormLayout, QHBoxLayout,
+                               QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QTableWidget,
+                               QTableWidgetItem, QVBoxLayout, QWidget)
 
 from p6mcp import config, credentials, dbcheck, policy, runtime, settings_logic, startup
 from p6mcp.i18n import tr
-from p6mcp.settings_app.common import Job, ask, group, note, pill, start
+from p6mcp.settings_app import a11y
+from p6mcp.settings_app.common import Check, Job, Radio, ask, fit_spin, group, note, pill, start
 
 
 def _mb(n: Optional[int]) -> str:
@@ -41,10 +42,10 @@ class DatabasePage(QWidget):
         lay.addWidget(note(tr("db.intro")))
 
         box, sl = group(tr("db.source"))
-        self.src_db = QRadioButton(tr("db.source.database"))
-        self.src_xer = QRadioButton(tr("db.source.xer"))
-        self.src_eppm = QRadioButton(tr("db.source.eppm"))
-        self.src_pmdb = QRadioButton(tr("db.source.pmdb"))
+        self.src_db = Radio(tr("db.source.database"))
+        self.src_xer = Radio(tr("db.source.xer"))
+        self.src_eppm = Radio(tr("db.source.eppm"))
+        self.src_pmdb = Radio(tr("db.source.pmdb"))
         self.src_grp = QButtonGroup(self)
         for b in (self.src_db, self.src_xer, self.src_eppm, self.src_pmdb):
             self.src_grp.addButton(b)
@@ -65,6 +66,7 @@ class DatabasePage(QWidget):
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.itemSelectionChanged.connect(self._show_selected)
+        a11y.name(self.table, tr("db.profiles"))
         bl.addWidget(self.table)
         row = QHBoxLayout()
         self.add_btn = QPushButton(tr("db.add"))
@@ -103,7 +105,7 @@ class DatabasePage(QWidget):
         trow = QHBoxLayout()
         self.test_btn = QPushButton(tr("db.test"))
         self.test_btn.clicked.connect(self.run_test)
-        self.state = QLabel()
+        self.state = a11y.live(QLabel())
         trow.addWidget(self.test_btn)
         trow.addWidget(self.state, 1)
         dl.addLayout(trow)
@@ -112,7 +114,7 @@ class DatabasePage(QWidget):
         self.result.setTextFormat(Qt.TextFormat.RichText)
         self.result.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         dl.addWidget(self.result)
-        self.trust = QCheckBox(tr("db.trust"))
+        self.trust = Check(tr("db.trust"))
         self.trust.clicked.connect(self._trust_clicked)
         dl.addWidget(self.trust)
         crow = QHBoxLayout()
@@ -133,6 +135,12 @@ class DatabasePage(QWidget):
         lay.addWidget(self.pmdb)
         lay.addStretch(1)
         self.refresh()
+
+    def access_keys(self) -> list[list[QWidget]]:
+        """Access key groups (window._access_keys): the source choice, then each source's panel."""
+        return [[self.src_db, self.src_xer, self.src_eppm, self.src_pmdb],
+                [self.add_btn, self.test_btn, self.use_btn, self.remove_btn, self.active_btn],
+                self.xer.access_keys(), self.eppm.access_keys(), self.pmdb.access_keys()]
 
     def _source(self, *_args) -> None:
         src = ("xer" if self.src_xer.isChecked() else "eppm" if self.src_eppm.isChecked()
@@ -419,8 +427,8 @@ class ServerPage(QWidget):
         lay = QVBoxLayout(self)
 
         box, bl = group(tr("srv.transport"))
-        self.stdio = QRadioButton(tr("srv.stdio"))
-        self.http = QRadioButton(tr("srv.http"))
+        self.stdio = Radio(tr("srv.stdio"))
+        self.http = Radio(tr("srv.http"))
         self.grp = QButtonGroup(self)
         for b in (self.stdio, self.http):
             self.grp.addButton(b)
@@ -434,10 +442,11 @@ class ServerPage(QWidget):
         prow = QHBoxLayout()
         self.port = QSpinBox()
         self.port.setRange(1024, 65535)
+        fit_spin(self.port)
         self.port.valueChanged.connect(self._port)
         self.port_check = QPushButton(tr("srv.port.check"))
         self.port_check.clicked.connect(self.check_port)
-        self.port_state = QLabel()
+        self.port_state = a11y.live(QLabel())
         prow.addWidget(self.port)
         prow.addWidget(self.port_check)
         prow.addWidget(self.port_state, 1)
@@ -462,22 +471,26 @@ class ServerPage(QWidget):
         lay.addWidget(self.http_box)
 
         box, sl = group(tr("srv.status"))
-        self.status = QLabel()
+        self.status = a11y.live(QLabel())
         self.status.setWordWrap(True)
         sl.addWidget(self.status)
         brow = QHBoxLayout()
         self.restart_btn = QPushButton(tr("srv.restart"))
         self.restart_btn.clicked.connect(self._restart)
-        logs = QPushButton(tr("srv.open_logs"))
-        logs.clicked.connect(self._open_logs)
+        self.logs_btn = QPushButton(tr("srv.open_logs"))
+        self.logs_btn.clicked.connect(self._open_logs)
         brow.addWidget(self.restart_btn)
-        brow.addWidget(logs)
+        brow.addWidget(self.logs_btn)
         brow.addStretch(1)
         sl.addLayout(brow)
         lay.addWidget(box)
         lay.addStretch(1)
         self.sup_state = None
         self.refresh()
+
+    def access_keys(self) -> list[list[QWidget]]:
+        return [[self.stdio, self.http, self.port_check, self.show_btn, self.copy_btn, self.regen_btn,
+                 self.restart_btn, self.logs_btn]]
 
     def refresh(self) -> None:
         d = self.win.data
@@ -543,7 +556,7 @@ class ServerPage(QWidget):
             self.token_edit.setText(self.token if self.show_btn.isChecked() else credentials.mask(self.token))
 
     def _show_token(self, _checked: bool) -> None:
-        self.show_btn.setText(tr("srv.token.hide") if self.show_btn.isChecked() else tr("srv.token.show"))
+        a11y.retext(self.show_btn, tr("srv.token.hide") if self.show_btn.isChecked() else tr("srv.token.show"))
         self._render_token()
 
     def _copy_token(self) -> None:
@@ -571,19 +584,22 @@ class StartupPage(QWidget):
         self.win = win
         lay = QVBoxLayout(self)
         box, bl = group(tr("st.box"))
-        self.run = QCheckBox(tr("st.run"))
+        self.run = Check(tr("st.run"))
         self.run.clicked.connect(lambda c: self._set(run_at_startup=bool(c)))
-        self.minimized = QCheckBox(tr("st.minimized"))
+        self.minimized = Check(tr("st.minimized"))
         self.minimized.clicked.connect(lambda c: self._set(start_minimized=bool(c)))
         bl.addWidget(self.run)
         bl.addWidget(self.minimized)
         bl.addWidget(note(tr("st.note")))
-        self.registry = QLabel()
+        self.registry = a11y.live(QLabel())
         self.registry.setWordWrap(True)
         bl.addWidget(self.registry)
         lay.addWidget(box)
         lay.addStretch(1)
         self.refresh()
+
+    def access_keys(self) -> list[list[QWidget]]:
+        return [[self.run, self.minimized]]
 
     def _set(self, **changes) -> None:
         self.win.set_data(dict(self.win.data, **changes))
@@ -615,8 +631,8 @@ class ToolsPage(QWidget):
         n_basic, n_all = len(policy.BASIC_TOOLS), len(policy.TOOL_KIND)
 
         box, bl = group(tr("tools.profile"))
-        self.basic = QRadioButton(tr("tools.basic", n=n_basic))
-        self.full = QRadioButton(tr("tools.full", n=n_all))
+        self.basic = Radio(tr("tools.basic", n=n_basic))
+        self.full = Radio(tr("tools.full", n=n_all))
         self.grp = QButtonGroup(self)
         for b in (self.basic, self.full):
             self.grp.addButton(b)
@@ -625,11 +641,11 @@ class ToolsPage(QWidget):
         lay.addWidget(box)
 
         box, wl = group(tr("tools.writes"))
-        self.allow = QCheckBox(tr("tools.allow"))
+        self.allow = Check(tr("tools.allow"))
         self.allow.clicked.connect(self._allow)
-        self.backup = QCheckBox(tr("tools.backup"))
+        self.backup = Check(tr("tools.backup"))
         self.backup.clicked.connect(self._backup)
-        self.block = QCheckBox(tr("tools.block"))
+        self.block = Check(tr("tools.block"))
         self.block.clicked.connect(self._block)
         for w in (self.allow, self.backup, self.block):
             wl.addWidget(w)
@@ -637,7 +653,7 @@ class ToolsPage(QWidget):
         lay.addWidget(box)
 
         box, sl = group(tr("tools.shop"))
-        self.shop = QCheckBox(tr("tools.shop.allow"))
+        self.shop = Check(tr("tools.shop.allow"))
         self.shop.clicked.connect(lambda checked: self._set(shop_enabled=checked))
         sl.addWidget(self.shop)
         sl.addWidget(note(tr("tools.shop.note")))
@@ -661,6 +677,7 @@ class ToolsPage(QWidget):
         self.keep.setRange(0, 1000)
         self.keep.setSuffix(" " + tr("tools.backups.unit"))
         self.keep.setSpecialValueText(tr("tools.backups.keep_all"))
+        fit_spin(self.keep)
         self.keep.valueChanged.connect(self._keep)
         form.addRow(tr("tools.backups.keep"), self.keep)
         kl.addLayout(form)
@@ -677,11 +694,15 @@ class ToolsPage(QWidget):
         for c in (1, 2):
             self.table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
         self.table.setMinimumHeight(self.fontMetrics().height() * 10)
+        a11y.name(self.table, tr("tools.list"))
         tl.addWidget(self.table)
         self.count = note()
         tl.addWidget(self.count)
         lay.addWidget(box, 1)
         self.refresh()
+
+    def access_keys(self) -> list[list[QWidget]]:
+        return [[self.basic, self.full, self.allow, self.backup, self.block, self.shop]]
 
     def refresh(self) -> None:
         d = self.win.data

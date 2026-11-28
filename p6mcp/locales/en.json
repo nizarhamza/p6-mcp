@@ -700,5 +700,9 @@
   "pmdb.result.none": "Nothing to copy yet: enter Project IDs or an EPS.",
   "pmdb.result.missing": "Not found in the database: {ids}.",
   "pmdb.result.driver": "The {driver} driver is not installed: click Install the driver.",
-  "pmdb.result.failed": "{err}"
+  "pmdb.result.failed": "{err}",
+  "app.nav": "Pages",
+  "skill.file.text": "File text",
+  "cl.snippet.kind": "Snippet format",
+  "cl.snippet.text": "Configuration snippet"
 }

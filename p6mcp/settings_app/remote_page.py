@@ -17,14 +17,15 @@ from typing import Optional
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QFormLayout, QHBoxLayout, QHeaderView,
-                               QInputDialog, QLabel, QLineEdit, QPushButton, QRadioButton, QTableWidget,
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QFormLayout, QHBoxLayout, QHeaderView,
+                               QInputDialog, QLabel, QLineEdit, QPushButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
 from p6mcp import config, runtime, settings_logic
 from p6mcp.i18n import tr
+from p6mcp.settings_app import a11y
 from p6mcp.remote import cloudflare, manage, resource_url
-from p6mcp.settings_app.common import Job, ask, group, note, pill, start
+from p6mcp.settings_app.common import Check, Job, Radio, ask, group, note, pill, start
 
 SIGNUP_URL = "https://dash.cloudflare.com/sign-up"
 
@@ -67,8 +68,8 @@ class RemotePage(QWidget):
         lay.addWidget(box)
 
         box, sl = group(tr("remote.setup"))
-        self.relay = QRadioButton(tr("remote.mode.relay"))
-        self.domain = QRadioButton(tr("remote.mode.domain"))
+        self.relay = Radio(tr("remote.mode.relay"))
+        self.domain = Radio(tr("remote.mode.domain"))
         self.mode = QButtonGroup(self)
         for b in (self.relay, self.domain):
             self.mode.addButton(b)
@@ -103,7 +104,7 @@ class RemotePage(QWidget):
         brow.addWidget(self.remove_btn)
         brow.addStretch(1)
         sl.addLayout(brow)
-        self.progress = note()
+        self.progress = a11y.live(note())
         sl.addWidget(self.progress)
         lay.addWidget(box)
 
@@ -111,6 +112,7 @@ class RemotePage(QWidget):
         arow = QHBoxLayout()
         self.address = QLineEdit()
         self.address.setReadOnly(True)
+        a11y.name(self.address, tr("remote.address"))
         self.copy_btn = QPushButton(tr("common.copy"))
         self.copy_btn.clicked.connect(lambda: QGuiApplication.clipboard().setText(self.address.text()))
         arow.addWidget(self.address, 1)
@@ -121,13 +123,13 @@ class RemotePage(QWidget):
         lay.addWidget(box)
 
         box, wl = group(tr("remote.access"))
-        self.enabled = QCheckBox(tr("remote.enabled"))
+        self.enabled = Check(tr("remote.enabled"))
         self.enabled.toggled.connect(self._enabled)
-        self.edits = QCheckBox(tr("remote.edits"))
+        self.edits = Check(tr("remote.edits"))
         self.edits.toggled.connect(self._edits)
-        self.files = QCheckBox(tr("remote.files"))
+        self.files = Check(tr("remote.files"))
         self.files.toggled.connect(self._files)
-        self.awake = QCheckBox(tr("remote.awake"))
+        self.awake = Check(tr("remote.awake"))
         self.awake.toggled.connect(lambda on: self._set(remote_keep_awake=bool(on)))
         for w in (self.enabled, self.edits, self.files, self.awake):
             wl.addWidget(w)
@@ -146,6 +148,7 @@ class RemotePage(QWidget):
         self.clients.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.clients.horizontalHeader().setStretchLastSection(True)
         self.clients.itemSelectionChanged.connect(self._render_buttons)
+        a11y.name(self.clients, tr("remote.clients"))
         cl.addWidget(self.clients)
         crow = QHBoxLayout()
         self.revoke_btn = QPushButton(tr("remote.clients.revoke"))
@@ -162,13 +165,18 @@ class RemotePage(QWidget):
         lay.addWidget(box)
 
         box, tl = group(tr("remote.status"))
-        self.status = QLabel()
+        self.status = a11y.live(QLabel())
         self.status.setWordWrap(True)
         tl.addWidget(self.status)
         lay.addWidget(box)
         lay.addStretch(1)
         self.grants: list[dict] = []
         self.refresh()
+
+    def access_keys(self) -> list[list[QWidget]]:
+        return [[self.setup_btn, self.remove_btn, self.copy_btn, self.enabled, self.edits, self.files, self.awake,
+                 self.revoke_btn, self.revoke_all_btn, self.reload_btn, self.relay, self.domain, self.signup_btn,
+                 self.token_btn]]
 
     # ------------------------------------------------------------- state
     def _mode(self) -> str:
@@ -208,7 +216,7 @@ class RemotePage(QWidget):
         set_up = bool(d.get("remote_public_host"))
         busy = self.job is not None
         self.domain_host.setEnabled(self.domain.isChecked() and not busy)
-        self.setup_btn.setText(tr("remote.setup.repair") if set_up else tr("remote.setup.run"))
+        a11y.retext(self.setup_btn, tr("remote.setup.repair") if set_up else tr("remote.setup.run"))
         self.setup_btn.setEnabled(not busy)
         self.remove_btn.setEnabled(set_up and not busy)
         self.address.setText(resource_url(d["remote_public_host"]) if set_up else "")
@@ -265,7 +273,7 @@ class RemotePage(QWidget):
             pill(self.progress, level, text)
         else:
             self.progress.setStyleSheet("")
-            self.progress.setText(text)
+            a11y.set_status(self.progress, text)
 
     def run_setup(self, account_id: Optional[str] = None) -> None:
         token = self.token.text().strip()

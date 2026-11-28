@@ -249,7 +249,7 @@ def test_clients_page_installs_skills(qtbot, env, tmp_path):
     assert "Full tool profile" in page.skill_state.text()
     config.save(dict(config.read_file()[0], tool_profile="full", allow_writes=False))
     page._show_selected()
-    assert page.skill_btn.isEnabled() and page.skill_btn.text() == "Install skills"
+    assert page.skill_btn.isEnabled() and page.skill_btn.text().replace("&", "") == "Install skills"
     assert page.install_skills()
     qtbot.waitUntil(lambda: page.job is None, timeout=15000)
     folder = tmp_path / "User" / ".claude" / "skills"  # Cursor reads Claude Code's skills folder
@@ -815,7 +815,8 @@ def test_restore_core_skills_and_edited_shop_skills(qtbot, win, env, monkeypatch
     from p6mcp.settings_app.shop_page import ShopPage
     monkeypatch.setattr(guidance_pages, "ask", lambda *a, **k: True)
     page, sp, names = win.page(SkillsPage), win.page(ShopPage), core_skills.names()
-    assert sp.restore_btn.text() == page.restore_btn.text() == "Restore core skills..."
+    assert sp.restore_btn.text().replace("&", "") == "Restore core skills..."  # "&": its access key
+    assert page.restore_btn.text().replace("&", "") == "Restore core skills..."
     assert page.restore_core() and not page.restore_btn.isEnabled()  # the shop is offline in these tests (env)
     qtbot.waitUntil(lambda: page.job is None, timeout=15000)
     assert [r["name"] for r in page.rows] == names and page.restore_btn.isEnabled() and win.dirty()

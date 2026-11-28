@@ -14,10 +14,11 @@ from typing import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QCheckBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
 from p6mcp.i18n import tr
-from p6mcp.settings_app.common import note, pill
+from p6mcp.settings_app import a11y
+from p6mcp.settings_app.common import Check, note, pill
 
 MAX_TRIES = 3
 
@@ -38,8 +39,10 @@ class ApprovalDialog(QDialog):
         lay.addWidget(intro)
         if request.get("via") == "dcr":
             lay.addWidget(note(tr("remote.approve.unverified")))
-        lay.addWidget(QLabel(tr("remote.approve.code")))
+        code_label = QLabel(tr("remote.approve.code"))
+        lay.addWidget(code_label)
         self.code = QLineEdit()
+        code_label.setBuddy(self.code)
         self.code.setMaxLength(6)
         self.code.setPlaceholderText("ABC234")
         f = QFont(self.code.font())
@@ -48,11 +51,11 @@ class ApprovalDialog(QDialog):
         self.code.setFont(f)
         self.code.textChanged.connect(self._typed)
         lay.addWidget(self.code)
-        self.error = QLabel()
+        self.error = a11y.live(QLabel())
         self.error.setVisible(False)
         lay.addWidget(self.error)
         lay.addWidget(note(tr("remote.approve.only_yours")))
-        self.edits = QCheckBox(tr("remote.approve.edits"))
+        self.edits = Check(tr("remote.approve.edits"))
         self.edits.setEnabled(edits_allowed)
         lay.addWidget(self.edits)
         if not edits_allowed:
@@ -73,8 +76,8 @@ class ApprovalDialog(QDialog):
         """The Connect button of the browser page on this PC sent the code (p6mcp.remote.pairing): fill it in. The
         user still decides with a click (Deny stays the default button)."""
         self.code.setText(code)
+        self.error.setVisible(True)  # shown first: a live label is announced only on screen
         pill(self.error, "ok", tr("remote.approve.prefilled"))
-        self.error.setVisible(True)
 
     def _typed(self, text: str) -> None:
         self.approve_btn.setEnabled(len(text.strip()) == 6)
@@ -88,8 +91,8 @@ class ApprovalDialog(QDialog):
                 self.result_text = "denied"
                 self.accept()
                 return
-            pill(self.error, "error", tr("remote.approve.mismatch", left=MAX_TRIES - self.tries))
             self.error.setVisible(True)
+            pill(self.error, "error", tr("remote.approve.mismatch", left=MAX_TRIES - self.tries))
             self.code.clear()
             return
         self.result_text = (res or {}).get("status") or "expired"

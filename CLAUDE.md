@@ -165,6 +165,40 @@ stay outside this repository.
   dialog size are window state: `settings_logic.load_ui_state` / `save_ui_state` / `ui_view`
   (`%LOCALAPPDATA%\P6MCP\settings_ui.json`, written at once, outside config.json and Save / Revert); search and
   Source filter are `settings_logic.filter_skills` / `skill_source`. Pages have a `show_dialog` seam (tests).
+- Accessibility of the Settings window (plan item P6, ACCESSIBILITY.md; `settings_app/a11y.py`, tests
+  `tests/test_accessibility.py`). Names: every interactive widget (`a11y.INTERACTIVE`, focusable cards) has an
+  accessibleName, a button text or a buddy label: `a11y.name(w, tr(...))` for lists, tables, text boxes and
+  icon buttons; `a11y.tie_forms(root)` (run by `SettingsWindow.build`) makes a QFormLayout label the buddy of a
+  field given as a layout; a QLabel beside a field gets `setBuddy`. `a11y.problems(root)` lists what is missing
+  (the test walks every page in en and fr and for each data source, and the dialogs). Live statuses:
+  `a11y.live(label)` marks a status label; `common.pill` (and `a11y.set_status` for plain text) announce a new text
+  while the label is on screen (`a11y.announce`: `QAccessibleAnnouncementEvent` = UIA Notification, assertive for
+  errors; `a11y.ANNOUNCED` keeps the last ones for tests); `SettingsWindow.flash` and a new banner are announced.
+  Access keys: never put "&" in a catalog string; `SettingsWindow._access_keys()` assigns letters per language
+  (`a11y.with_key`, ASCII letters, word initials first): Save, Revert, the page list (`MNEMONIC_ROLE` item data
+  drawn by `a11y.MnemonicDelegate`, `QShortcut` Alt+letter in `nav_shortcuts`, rebuilt with the window), Language
+  (`global_keys`), then each page's `access_keys()`: a list of widget groups, the first always shown, each later one
+  shown alone (the data source panels of the Database page choose first). A button whose text changes keeps its
+  letter through `a11y.retext(button, text)` (never `setText` on a button that has a key); tests compare button
+  texts with "&" removed. A new page or panel: add `access_keys()`, name its fields, mark its status labels live.
+  Tab order = creation order, checked against the reading order by `a11y.tab_order_problems` (a widget marked
+  `a11y_bar_end`, the Grid / List switch, may close a toolbar that wraps). Ctrl+S = `save_shortcut`; Esc closes every
+  QDialog, `common.question_box` sets No as escape and default button. Focus: `a11y.FocusRing` (installed by
+  `__main__` and the window) draws a ring in `a11y.focus_color` (accent, else highlight, else text, 3:1 against the
+  window and field backgrounds) around the focus widget of each window; a widget that draws its own focus sets
+  `a11y_own_focus` (Card). Colours: `common.COLORS` pairs at 4.5:1, `a11y.muted_color` (placeholder made 4.5:1 on
+  Window and Base), `cards.card_border` (3:1 on Window), `cards.primary_colors` (fill, hover and pressed at 4.5:1
+  against a black or white label); `a11y.contrast` / `readable` are WCAG 2.1, and the test recomputes them on the
+  Windows 11 light and dark palettes (values captured from the windows11 style). High contrast:
+  `a11y.high_contrast()` (Qt contrastPreference, else SPI_GETHIGHCONTRAST; `HIGH_CONTRAST` forces it in tests);
+  `a11y.apply_contrast_mode` switches to the classic `windows` style and `system_palette()` (GetSysColor) and back,
+  at start and on `contrastPreferenceChanged` (the window is rebuilt); our colours are dropped (pill = framed text,
+  Badge and card border in the palette's text colour, `primary` unstyled). Large text: `common.Radio` / `Check`
+  (labels wrap with heightForWidth, the indicator on the first line) instead of QRadioButton / QCheckBox for text
+  choices, `common.fit_spin` after a spin box's range and suffix, `cards.mono_font(widget.font())` for code boxes
+  (not `QFontDatabase.systemFont(FixedFont)`, which ignores the Windows text size); the window opens as wide as its
+  widest page's minimum width, within the screen. Screenshots for checks: native platform, `WA_DontShowOnScreen`,
+  `QT_SCALE_FACTOR` 1.5 / 2 and an application font 2.25 times larger for the largest Windows text size.
 
 - `p6mcp/jsonc.py`: parser with spans (comments, trailing commas, BOM-free text) and minimal edits
   `set_member(text, path, key, value)` / `delete_member`: only our member's text changes (indentation, line

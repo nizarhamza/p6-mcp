@@ -13,13 +13,14 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel,
+from PySide6.QtWidgets import (QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 from p6mcp import config, credentials, eppm, settings_logic
 from p6mcp.eppm import proxy
 from p6mcp.i18n import tr
-from p6mcp.settings_app.common import Job, ask, group, note, pill, start
+from p6mcp.settings_app import a11y
+from p6mcp.settings_app.common import Check, Job, ask, fit_spin, group, note, pill, start
 
 SQL_DEFAULTS = {"mssql": (1433, "dbo"), "oracle": (1521, "ADMUSER")}
 
@@ -46,6 +47,7 @@ class EppmPanel(QWidget):
         self.list = QListWidget()
         self.list.setMinimumHeight(self.fontMetrics().height() * 4)
         self.list.itemSelectionChanged.connect(self._fill)
+        a11y.name(self.list, tr("eppm.box"))
         bl.addWidget(self.list)
         row = QHBoxLayout()
         self.add_btn = QPushButton(tr("eppm.add"))
@@ -104,7 +106,7 @@ class EppmPanel(QWidget):
         dl.addLayout(form)
         dl.addWidget(note(tr("eppm.proxy.help")))
 
-        self.sql_check = QCheckBox(tr("eppm.sql"))
+        self.sql_check = Check(tr("eppm.sql"))
         self.sql_check.clicked.connect(self._sql_toggled)
         dl.addWidget(self.sql_check)
         self.sql_box = QWidget()
@@ -118,6 +120,7 @@ class EppmPanel(QWidget):
         self.host_edit = self._line(sform, "eppm.sql.host", "host", sql=True)
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
+        fit_spin(self.port)
         self.port.editingFinished.connect(lambda: self._set_sql(port=self.port.value()))
         sform.addRow(tr("eppm.sql.port"), self.port)
         self.service_edit = self._line(sform, "eppm.sql.service", "service", sql=True)
@@ -133,7 +136,7 @@ class EppmPanel(QWidget):
         trow = QHBoxLayout()
         self.test_btn = QPushButton(tr("eppm.test"))
         self.test_btn.clicked.connect(self.run_test)
-        self.state = QLabel()
+        self.state = a11y.live(QLabel())
         self.state.setWordWrap(True)
         self.state.setTextFormat(Qt.TextFormat.PlainText)
         trow.addWidget(self.test_btn)
@@ -156,6 +159,9 @@ class EppmPanel(QWidget):
         dl.addLayout(urow)
         lay.addWidget(box)
         self.refresh()
+
+    def access_keys(self) -> list:
+        return [self.add_btn, self.test_btn, self.use_btn, self.remove_btn, self.install_btn]
 
     # -- helpers
     def _line(self, form: QFormLayout, label: str, key: str, placeholder: str = "", sql: bool = False) -> QLineEdit:

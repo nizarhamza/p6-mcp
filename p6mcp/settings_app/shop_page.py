@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QGridLayout, QHBoxLayout, QIn
 
 from p6mcp import settings_logic, shop, skills
 from p6mcp.i18n import tr
+from p6mcp.settings_app import a11y
 from p6mcp.settings_app.cards import (GRID, LIST, Badge, Card, CardView, Elided, Flow, ViewToggle, bold,
                                       card_button, icon_button, later, mono_font, primary, retain_hidden)
 from p6mcp.settings_app.common import Job, ask, muted, note, pill, start
@@ -200,7 +201,7 @@ class ShopPage(QWidget):
         self.toggle.changed.connect(self.set_view)
         bar.addWidget(self.toggle, 0, Qt.AlignmentFlag.AlignTop)
         lay.addLayout(bar)
-        self.state = QLabel()
+        self.state = a11y.live(QLabel())
         self.state.setWordWrap(True)
         lay.addWidget(self.state)
         self.busy = QProgressBar()
@@ -214,6 +215,9 @@ class ShopPage(QWidget):
         lay.addWidget(self.view, 1)
         lay.addWidget(note(tr("shop.review_note")))
         self.refresh()
+
+    def access_keys(self) -> list[list[QWidget]]:
+        return [[self.reload_btn, self.restore_btn]]
 
     def enabled(self) -> bool:
         return self.win.data.get("shop_enabled", True) is not False

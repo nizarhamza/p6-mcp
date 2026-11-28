@@ -17,7 +17,7 @@ import os
 from typing import Optional
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication, QIcon
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QIcon
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                                QFormLayout, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
 
 from p6mcp import core_skills, instructions, settings_logic, shop, skills
 from p6mcp.i18n import tr
+from p6mcp.settings_app import a11y
 from p6mcp.settings_app.cards import (GRID, LIST, Badge, Card, CardView, Elided, Flow, ViewToggle, bold,
                                       card_button, icon_button, later, mono_font, more_button, retain_hidden)
 from p6mcp.settings_app.common import Job, ask, group, muted, note, start
@@ -37,7 +38,7 @@ CHECKED = {True: Qt.CheckState.Checked, False: Qt.CheckState.Unchecked}
 def _preview_box(lines: int) -> QPlainTextEdit:
     box = QPlainTextEdit()
     box.setReadOnly(True)
-    box.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+    box.setFont(mono_font(box.font()))  # the size of the UI font (large Windows text)
     box.setMinimumHeight(box.fontMetrics().height() * lines)
     return box
 
@@ -57,6 +58,7 @@ class InstructionsPage(QWidget):
         self.builtin.setWordWrap(True)
         self.builtin.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.builtin.itemChanged.connect(self._builtin_changed)
+        a11y.name(self.builtin, tr("ins.builtin"))
         bl.addWidget(self.builtin)
         lay.addWidget(box)
 
@@ -66,6 +68,7 @@ class InstructionsPage(QWidget):
         self.custom.itemChanged.connect(self._custom_changed)
         self.custom.itemDoubleClicked.connect(lambda _it: self.edit())
         self.custom.currentRowChanged.connect(lambda _r: self._buttons())
+        a11y.name(self.custom, tr("ins.custom"))
         cl.addWidget(self.custom)
         row = QHBoxLayout()
         self.add_btn = QPushButton(tr("ins.add"))
@@ -87,10 +90,14 @@ class InstructionsPage(QWidget):
 
         box, pl = group(tr("ins.preview"))
         self.preview = _preview_box(10)
+        a11y.name(self.preview, tr("ins.preview"))
         pl.addWidget(self.preview)
         pl.addWidget(note(tr("ins.restart")))
         lay.addWidget(box, 1)
         self.refresh()
+
+    def access_keys(self) -> list[list[QWidget]]:
+        return [[self.add_btn, self.edit_btn, self.remove_btn, self.up_btn, self.down_btn]]
 
     def refresh(self) -> None:
         d = self.win.data
@@ -196,6 +203,7 @@ class FileDialog(QDialog):
         form.addRow(tr("skill.file.path"), self.path)
         lay.addLayout(form)
         self.text = QPlainTextEdit(f.get("text", ""))
+        a11y.name(self.text, tr("skill.file.text"))
         lay.addWidget(self.text, 1)
         lay.addWidget(note(tr("skill.file.note", n=skills.MAX_FILE_TEXT)))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -244,6 +252,7 @@ class SkillDialog(QDialog):
         for c in (0, 2, 3):
             hh.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
         self.args.setMinimumHeight(self.fontMetrics().height() * 6)
+        a11y.name(self.args, tr("skill.f.args"))
         for a in item.get("args") or []:
             self._add_arg(a)
         al.addWidget(self.args)
@@ -261,6 +270,7 @@ class SkillDialog(QDialog):
         box, tl = group(tr("skill.f.text"))
         self.text = QPlainTextEdit(item.get("template", ""))
         self.text.setMinimumHeight(self.fontMetrics().height() * 12)
+        a11y.name(self.text, tr("skill.f.text"))
         tl.addWidget(self.text)
         tl.addWidget(note(tr("skill.f.text.note")))
         lay.addWidget(box, 1)
@@ -269,6 +279,7 @@ class SkillDialog(QDialog):
         self.file_list = QListWidget()
         self.file_list.setMinimumHeight(self.fontMetrics().height() * 4)
         self.file_list.itemDoubleClicked.connect(lambda *_a: self.edit_file_row())
+        a11y.name(self.file_list, tr("skill.f.files"))
         fl.addWidget(self.file_list)
         row = QHBoxLayout()
         for key, fn in (("skill.file.add", self.add_file), ("skill.file.load", self.load_file),
@@ -516,6 +527,9 @@ class SkillsPage(QWidget):
         lay.addWidget(self.view, 1)
         lay.addWidget(note(tr("skill.restart")))
         self.refresh()
+
+    def access_keys(self) -> list[list[QWidget]]:
+        return [[self.add_btn, self.import_btn, self.restore_btn]]
 
     def refresh(self, select: Optional[str] = None) -> None:
         if select is not None:

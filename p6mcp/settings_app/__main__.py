@@ -38,6 +38,9 @@ def main(argv=None) -> int:
     app = QApplication([a for a in args if a not in ("--minimized", "--after-setup")])
     app.setApplicationName("MCP for Primavera P6 Settings")
     app.setOrganizationName("P6MCP")
+    from p6mcp.settings_app import a11y
+    a11y.apply_contrast_mode(app)  # Windows high contrast: the classic style and the system colours
+    a11y.FocusRing.install(app)
 
     from p6mcp import config, i18n
     from p6mcp.settings_app.tray import TrayApp, app_icon, signal_running_instance
