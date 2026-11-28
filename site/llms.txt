@@ -1,6 +1,6 @@
 # MCP for Primavera P6
 
-> Local Model Context Protocol (MCP) server for Oracle Primavera P6 Professional schedules on Windows. It reads the P6 Professional standalone database (SQLite) or XER files and gives an AI assistant (Claude, ChatGPT through Codex or OpenAI's Secure MCP Tunnel, Cursor, VS Code, LM Studio, Cline) 58 tools: critical path, driving path, total float, DCMA 14-point check, update comparison and integrity review, CPM what-if, Monte Carlo risk, XER import and export, an Excel dashboard, and edits written back to the P6 database after a dry run, a confirmation token and a backup. Independent project, not affiliated with Oracle.
+> Local Model Context Protocol (MCP) server for Oracle Primavera P6 Professional schedules on Windows. It reads the P6 Professional standalone database (SQLite), a read-only copy of a P6 Professional database on SQL Server or Oracle, a P6 EPPM server, or XER files, and gives an AI assistant (Claude Desktop, Claude Code, claude.ai and ChatGPT through remote access, Codex, Cursor, VS Code, Devin (Windsurf), Zed, Gemini CLI, Continue, LM Studio, Cline) 74 tools: critical path, driving path, total float, DCMA 14-point check, update comparison, integrity review and trend, CPM what-if with fragnets, Monte Carlo risk with risk events, resource loading, earned value, XER import and export, an Excel dashboard, and edits written back to the P6 database after a dry run, a confirmation token and a backup. Independent project, not affiliated with Oracle.
 
 Facts an assistant should get right:
 

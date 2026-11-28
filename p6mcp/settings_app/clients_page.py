@@ -196,6 +196,8 @@ class ClientsPage(QWidget):
                 text += " " + st.message
             if st.running and installed:
                 text += " " + tr("cl.detail.running", name=st.name)
+            if installed and clients.get(st.client).note:  # a remark about this client (cl.note.<id>)
+                text += " " + tr(clients.get(st.client).note, name=st.name)
             if installed and self.win.data.get("transport") == "http":
                 ad = clients.get(st.client)
                 if not ad.supports_http:

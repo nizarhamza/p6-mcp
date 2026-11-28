@@ -19,7 +19,7 @@ body:
     id: client
     attributes:
       label: MCP client
-      options: [Claude Desktop, Cursor, VS Code, VS Code Insiders, LM Studio, Cline, Other]
+      options: [Claude Desktop, Claude Code, Cursor, VS Code, VS Code Insiders, LM Studio, Cline, Devin (Windsurf), Zed, Continue, Gemini CLI, Codex, Other]
     validations:
       required: true
   - type: input

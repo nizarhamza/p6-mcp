@@ -141,9 +141,22 @@ stay outside this repository.
   endings and comments of the file followed), and every edit is re-parsed and compared with the expected
   value before it is returned (`JsoncError` otherwise). An add then a delete gives back the original bytes,
   except a trailing comma before our entry and the empty containers an add created.
+- `p6mcp/tomledit.py`: minimal edits of one TOML table (`set_table(text, path, table)` / `delete_table`, the
+  Codex config.toml): `headers()` finds the table headers (skipping strings and multi-line arrays), the table and
+  its subtables are replaced in place or appended at the end, removed with the blank line they leave doubled;
+  everything else stays byte for byte. tomllib reads (Python 3.11+, `TomlError` on 3.10, a subclass of
+  `JsoncError`); a file that does not parse, or an entry written as an inline table or dotted keys, is refused;
+  every edit is parsed again and compared with the expected data. Add then delete gives the original back (a file
+  without a final newline gets one).
 - `p6mcp/clients/`: one `Adapter` per client in `adapters.py` (`ADAPTERS`: Claude Desktop, Claude Code, Cursor,
-  VS Code, VS Code Insiders, LM Studio, Cline; paths and formats checked against each client's docs, sources in the
-  module docstring). An adapter declares `config_path()`, `installed()`, `container` and `stdio_entry()`;
+  VS Code, VS Code Insiders, LM Studio, Cline, Devin (Windsurf), Zed, Continue, Gemini CLI, Codex; paths and formats
+  checked against each client's docs, sources in the module docstring). An adapter declares `config_path()`,
+  `installed()`, `container` and `stdio_entry()`, and may override the file format (`parse`, `set_entry`,
+  `delete_entry`: JSONC by default; Codex TOML through `tomledit`, `[mcp_servers.p6mcp]` with `CODEX_TIMEOUTS`,
+  `CODEX_HOME` followed; Continue its own block file `~/.continue/mcpServers/p6mcp.yaml` written as JSON (valid
+  YAML), `servers()` maps its `mcpServers` list by name, the file deleted when only our server is left,
+  `CONTINUE_GLOBAL_DIR` followed; Zed `context_servers` in `%APPDATA%\Zed\settings.json`; Gemini CLI HTTP =
+  `httpUrl`; Devin `%APPDATA%\devin\mcp_config.json`) and a `note` (i18n key `cl.note.<id>` the Clients page adds);
   `base.Adapter` does `status()` (not_installed / not_registered / registered / outdated / error, `others` =
   other P6 MCP entries such as the v2 `primavera-p6`, `running`), `register()` (add or repair) and
   `unregister(key)` (a foreign key only when it is a P6 entry). Every write: parse first (a malformed or
@@ -337,7 +350,8 @@ stay outside this repository.
   needs the network, so `core_skills.run_first_start` does it at the start of the Settings app, before
   `convert_legacy_commands`). Clients: `Adapter.skills_dir()` (Claude Code, Cursor and VS Code
   share `~/.claude/skills`: Cursor and VS Code read it, writing their own folders too would show duplicates;
-  Cline `~/.cline/skills`; Claude Desktop / LM Studio none), `install_skills` / `skills_state` /
+  Codex, Zed, Gemini CLI and Devin share `~/.agents/skills` (Cursor and VS Code read it too: with both folders
+  filled they may list a skill twice); Cline `~/.cline/skills`; Claude Desktop / LM Studio / Continue none), `install_skills` / `skills_state` /
   `remove_skills` (ours = a `p6-*` folder whose SKILL.md has the marker; only the listed files are deleted),
   `legacy_commands_dir()` + `remove_legacy_commands` for the 1.4 to 1.7 command files (`COMMAND_MARKER`),
   `clients.convert_legacy_commands()` run at every start of the Settings app; CLI `clients skills

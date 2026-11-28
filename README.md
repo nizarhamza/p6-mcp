@@ -70,7 +70,7 @@ bundled.
    `SHA256SUMS.txt` (`certutil -hashfile P6MCP-Setup-3.1.1.exe SHA256`).
 2. Run it. It installs for your Windows user only (no administrator rights) and, on its last page, offers to
    register the server with every MCP client it finds (Claude Desktop, Claude Code, Cursor, VS Code, LM Studio,
-   Cline). Untick the ones you do not want.
+   Cline, Devin (formerly Windsurf), Zed, Continue, Gemini CLI, Codex). Untick the ones you do not want.
 3. **MCP for Primavera P6 Settings** opens. Under **Database**, pick your P6 database (suggestions come from
    P6's own connection list), click **Test connection** (read only), then **Use this database**, and **Save**.
    The server never picks a database by itself: until you do this, every tool answers "No database configured".
@@ -141,14 +141,21 @@ Then open Copilot Chat in **Agent** mode and pick the tools from the tools menu.
 ChatGPT cannot start a program on your PC, so the other routes go through Codex or a tunnel of OpenAI. Neither
 is tested by the maintainer yet: please report how it goes in an issue.
 
-- **Codex** (in the ChatGPT desktop app, or the Codex CLI) starts local MCP servers from
-  `%USERPROFILE%\.codex\config.toml`:
+- **Codex** (in the ChatGPT desktop app, the Codex CLI or the Codex IDE extension, which share one file) starts
+  local MCP servers from `%USERPROFILE%\.codex\config.toml` (`%CODEX_HOME%\config.toml` when set). The installer
+  registers it; only the `[mcp_servers.p6mcp]` table is written, the rest of the file (comments included) is
+  kept as it is. By hand:
 
   ```toml
   [mcp_servers.p6mcp]
   command = 'C:\Users\<you>\AppData\Local\Programs\P6 MCP\p6mcp-server.exe'
   args = []
+  startup_timeout_sec = 30
+  tool_timeout_sec = 600
   ```
+
+  The longer timeouts (Codex waits 10 seconds for a start and 60 seconds per tool by default) leave room for a cold
+  start and for long tools such as `p6_schedule_risk`. Restart Codex after a change.
 
 - **ChatGPT chat** reaches MCP servers over HTTPS only. OpenAI's
   [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) runs a small client on
@@ -160,7 +167,24 @@ is tested by the maintainer yet: please report how it goes in an issue.
 ### Claude Code, LM Studio, Cline and other clients
 
 The installer registers Claude Code (`%USERPROFILE%\.claude.json`), LM Studio (`%USERPROFILE%\.lmstudio\mcp.json`)
-and Cline as well. For Claude Code by hand:
+and Cline as well, and these clients (3.7):
+
+| Client | File the installer writes | Entry | Skills folder |
+|---|---|---|---|
+| Devin (Windsurf became Devin Desktop in June 2026; also the Devin CLI) | `%APPDATA%\devin\mcp_config.json` | `mcpServers.p6mcp` | `%USERPROFILE%\.agents\skills` |
+| Zed | `%APPDATA%\Zed\settings.json` | `context_servers.p6mcp` | `%USERPROFILE%\.agents\skills` |
+| Continue (VS Code or JetBrains) | `%USERPROFILE%\.continue\mcpServers\p6mcp.yaml`, a block file of its own | `mcpServers` item `p6mcp` | none |
+| Gemini CLI | `%USERPROFILE%\.gemini\settings.json` | `mcpServers.p6mcp` (HTTP: `httpUrl`) | `%USERPROFILE%\.agents\skills` |
+| Codex | `%USERPROFILE%\.codex\config.toml` | `[mcp_servers.p6mcp]` | `%USERPROFILE%\.agents\skills` |
+
+Codex, Zed, Gemini CLI and Devin read the same skills folder, so **Install skills** for one of them serves the four.
+Cursor and VS Code read that folder too: with skills installed for Claude Code as well, they may list each P6
+skill twice. Continue uses MCP tools in Agent mode only; its `config.yaml` is never edited. Devin also imports the
+servers of Claude Code (`~/.claude.json`) by default: when both are registered, check that `p6mcp` is listed
+once (Devin's `read_config_from` setting turns that import off). The pre-rename Windsurf file
+(`%USERPROFILE%\.codeium\windsurf\mcp_config.json`) is not written.
+
+For Claude Code by hand:
 
 ```powershell
 claude mcp add --scope user p6mcp -- "$env:LOCALAPPDATA\Programs\P6 MCP\p6mcp-server.exe"
@@ -643,8 +667,9 @@ in the edits (deep duration cuts, open ends, hard constraints, negative lags, SS
 near-critical work, DCMA checks before and after) and says that it checks logic, not crews, materials or access.
 
 **Which AI clients work?**
-Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered automatically; any MCP client
-that starts stdio servers or speaks Streamable HTTP works too. ChatGPT works through Codex or OpenAI's Secure MCP
+Claude Desktop, Claude Code, Cursor, VS Code, LM Studio, Cline, Devin (formerly Windsurf), Zed, Continue, Gemini
+CLI and Codex are registered automatically; any MCP client that starts stdio servers or speaks Streamable HTTP
+works too. ChatGPT works through Codex or OpenAI's Secure MCP
 Tunnel (see [ChatGPT](#chatgpt)).
 
 **Does it run on macOS or Linux?**

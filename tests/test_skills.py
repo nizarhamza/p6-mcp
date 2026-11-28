@@ -15,6 +15,7 @@ from p6mcp.clients.base import Launch
 
 LN = Launch(r"C:\Program Files\P6 MCP\p6mcp-server.exe", [])
 SHARED = ("User", ".claude", "skills")  # Claude Code, Cursor and VS Code read ~/.claude/skills
+AGENTS = ("User", ".agents", "skills")  # Codex, Zed, Gemini CLI and Devin read ~/.agents/skills
 
 
 def item(name: str, tool: str) -> dict:
@@ -215,7 +216,7 @@ def test_reference_files_follow_the_skill(home):
     assert ad.skills_state() == clients.SKILLS_INSTALLED
 
 
-@pytest.mark.parametrize("cid", ["claude_desktop", "lmstudio"])
+@pytest.mark.parametrize("cid", ["claude_desktop", "lmstudio", "continue"])
 def test_clients_without_skills_folder(home, cid):
     ad = clients.get(cid)
     assert ad.skills_state() == clients.SKILLS_UNSUPPORTED and ad.legacy_commands() == []
@@ -231,6 +232,22 @@ def test_scan_reports_skill_state(home):
     clients.get("cursor").install_skills("full", True)
     st = {s.client: s for s in clients.scan()}
     assert st["cursor"].skills == clients.SKILLS_INSTALLED == st["claude_code"].skills  # one shared folder
+
+
+def test_agents_skills_folder_is_shared(home):
+    """Codex, Zed, Gemini CLI and Devin read ~/.agents/skills: one install serves the four of them."""
+    for d in (("User", ".codex"), ("Roaming", "Zed"), ("User", ".gemini"), ("Roaming", "devin")):
+        home.joinpath(*d).mkdir(parents=True)
+    ids = ("codex", "zed", "gemini", "devin")
+    folder = str(home.joinpath(*AGENTS))
+    assert {clients.get(i).skills_dir() for i in ids} == {folder}
+    assert all(clients.get(i).legacy_commands_dir() is None for i in ids)
+    res = clients.get("codex").install_skills("full", True)
+    assert sorted(res["written"]) == sorted(FOLDERS) and res["folder"] == folder
+    st = {s.client: s.skills for s in clients.scan()}
+    assert {st[i] for i in ids} == {clients.SKILLS_INSTALLED} and not home.joinpath(*SHARED).exists()
+    assert sorted(os.listdir(folder)) == sorted(FOLDERS)
+    assert cli(["skills", "remove", "--detected"]) == 0 and os.listdir(folder) == []
 
 
 def test_convert_legacy_commands(home):
