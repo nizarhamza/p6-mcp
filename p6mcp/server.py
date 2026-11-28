@@ -158,6 +158,10 @@ from p6mcp.core.writes import (  # noqa: F401  (re-exported)
     _release, _side_effects, _single_link, _sum_plan, SUM_TABLES, _summaries_stale, SUMMARIZE_ADVICE, _task_by_id,
     _temp_id_sets, UDF_KEYS, _udf_next, _udf_set, _udf_shown, _udf_store, _write_session,
 )
+from p6mcp.core.writes import (  # noqa: F401  (re-exported: activity code values and WBS moves)
+    _act_move, CODE_KEYS, _code_set, _code_value, _codes_next, CODES_NOTE, MOVE_KEYS, _moves_next, _wbs_find,
+    _wbs_summaries,
+)
 from p6mcp.core.xer import (  # noqa: F401  (re-exported)
     _col_type, _cp1252_ok, _export_target, _export_xer, _has_next_key, IMPORT_ACTIONS, _import_target, _memo_blob,
     _missing_rows, _preview_matches, _removable, _remove_rows, UDF_FK_TABLES, _upsert, XER_ALIASES, XER_CHILD_KEYS,
@@ -194,6 +198,7 @@ from p6mcp.tools.writes import (  # noqa: F401  (re-exported)
     p6_update_activities, p6_update_activity, p6_update_assignment, p6_update_assignments, p6_update_relationship,
     p6_update_relationships, p6_update_udf, p6_update_udfs,
 )
+from p6mcp.tools.writes import p6_move_activities, p6_update_activity_codes  # noqa: F401  (re-exported)
 from p6mcp.tools.admin import (  # noqa: F401  (re-exported)
     p6_backup_database, p6_create_eps, p6_delete_project, p6_edit_log, p6_list_backups, p6_list_eps, p6_restore_backup,
     p6_set_schedule_options,
