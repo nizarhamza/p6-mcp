@@ -38,6 +38,26 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
     log is off). Rate limits for `/files` and `/upload`; the upload route alone accepts a body above 1 MB. The
     relay Worker already forwards every path: no Repair is needed.
 
+### Changed
+
+- Settings window accessibility (ACCESSIBILITY.md):
+  - Screen readers: every button, field, list, table and card has a name (form labels are tied to their fields,
+    lists and tables are named after their box); a status that changes (test results, port check, server and
+    remote access state, copy progress, update state, shop catalog, the banner, "Copied" and "Saved" messages) is
+    read out at once through a UI Automation notification, without moving the focus.
+  - Keyboard: access keys (Alt + the underlined letter) for the pages, Save, Revert, Language and each page's main
+    buttons and choices, unique among the controls shown together, in English and in French; Ctrl+S saves; Esc
+    closes every dialog (and answers No to a question); a focus ring is drawn around the focused control at 3:1 or
+    more against the background.
+  - Contrast: secondary text (the Windows 11 placeholder colour, 3.9:1) is darkened or lightened to 4.5:1, card
+    borders to 3:1, the hover and pressed fills of primary buttons keep 4.5:1 against their label with any Windows
+    accent colour.
+  - Windows high contrast mode: the window switches to the classic style and the system colours, and drops its own
+    colours (status pills, badges, primary buttons), also when the mode is turned on while it is open.
+  - Large text and display scale: long check box and radio button labels wrap instead of widening the page, spin
+    boxes fit their longest value, code boxes follow the text size, and the window opens wide enough for its widest
+    page (within the screen).
+
 ## [3.6.0] - 2026-11-28
 
 ### Added

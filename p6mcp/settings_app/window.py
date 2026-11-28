@@ -6,12 +6,13 @@ import copy
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent, QPalette
+from PySide6.QtGui import QCloseEvent, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton,
                                QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
 from p6mcp import __version__, config, core_skills, i18n, settings_logic, startup
 from p6mcp.i18n import tr
+from p6mcp.settings_app import a11y
 from p6mcp.settings_app.common import brand_pixmap, muted, pill
 from p6mcp.settings_app.about_pages import AboutPage, LogsPage
 from p6mcp.settings_app.clients_page import ClientsPage
@@ -44,6 +45,12 @@ class SettingsWindow(QMainWindow):
         self.pages: list[QWidget] = []
         self.client_statuses: list = []  # filled by the Clients page scan (at every launch)
         i18n.set_language(self.data.get("language", "auto"))
+        self.nav_shortcuts: list[QShortcut] = []
+        # Ctrl+S saves (when there is something to save); created once, the window is rebuilt on a language change
+        self.save_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Save), self)
+        self.save_shortcut.activated.connect(self._save_key)
+        a11y.FocusRing.install()
+        self._watch_contrast()
         self.build()
         # the only network call, can be off; with the tray's updater the tray also checks on its own schedule
         if self.data.get("auto_update", True) and auto_update_check and (updater is None or updater.info is None):
@@ -64,7 +71,7 @@ class SettingsWindow(QMainWindow):
             self.header.setPixmap(logo)
         self.header.setVisible(logo is not None)
         lay.addWidget(self.header, 0, Qt.AlignmentFlag.AlignLeft)
-        self.banner = QLabel()
+        self.banner = QLabel()  # read by _banner() when it appears or changes
         self.banner.setWordWrap(True)
         self.banner.setVisible(False)
         self.banner_btn = QPushButton()
@@ -77,6 +84,8 @@ class SettingsWindow(QMainWindow):
 
         body = QHBoxLayout()
         self.nav = QListWidget()
+        a11y.name(self.nav, tr("app.nav"))
+        self.nav.setItemDelegate(a11y.MnemonicDelegate(self.nav))
         self.stack = QStackedWidget()
         self.pages = []
         for key, cls in PAGES:
@@ -96,8 +105,10 @@ class SettingsWindow(QMainWindow):
         lay.addLayout(body, 1)
 
         bottom = QHBoxLayout()
-        bottom.addWidget(QLabel(tr("app.language")))
+        self.lang_label = QLabel(tr("app.language"))
+        bottom.addWidget(self.lang_label)
         self.lang = QComboBox()
+        self.lang_label.setBuddy(self.lang)
         self.lang.addItem(tr("app.language.auto"), "auto")
         for code in i18n.available():
             self.lang.addItem(i18n.NAMES.get(code, code), code)
@@ -106,7 +117,7 @@ class SettingsWindow(QMainWindow):
         self.lang.currentIndexChanged.connect(self._language)
         bottom.addWidget(self.lang)
         bottom.addStretch(1)
-        self.status = QLabel()
+        self.status = a11y.live(QLabel())
         bottom.addWidget(self.status)
         self.revert_btn = QPushButton(tr("app.revert"))
         self.revert_btn.clicked.connect(self.revert)
@@ -119,10 +130,79 @@ class SettingsWindow(QMainWindow):
         lay.addWidget(muted(QLabel(tr("app.footer", version=__version__))))
 
         self.setCentralWidget(root)
+        self._access_keys()
+        a11y.tie_forms(root)
         self.nav.setCurrentRow(page)
         fm = self.fontMetrics()
-        self.resize(max(self.width(), fm.averageCharWidth() * 110), max(self.height(), fm.height() * 40))
+        # wide enough for the widest page without a horizontal scroll bar (sizes follow the font: large Windows
+        # text), within the screen
+        bar = self.style().pixelMetric(self.style().PixelMetric.PM_ScrollBarExtent, None, self)
+        widest = max(p.minimumSizeHint().width() for p in self.pages) + bar + self.nav.width() + fm.height() * 3
+        width = max(self.width(), fm.averageCharWidth() * 110, widest)
+        height = max(self.height(), fm.height() * 40)
+        screen = self.screen().availableGeometry() if self.screen() is not None else None
+        if screen is not None:
+            width, height = min(width, screen.width()), min(height, screen.height())
+        self.resize(width, height)
         self.page_changed()
+
+    # -- keyboard and screen readers
+    def _access_keys(self) -> None:
+        """Access keys (Alt+letter), chosen for the language shown: Save, Revert, the page list and Language first
+        (they work on every page), then each page's main buttons in its order of importance (Page.access_keys():
+        groups of widgets, the first one always shown, each later one shown alone, such as the data source panels
+        of the Database page; the panels choose first, the first group takes the letters left). A letter is never
+        used twice among the widgets shown together."""
+        for sc in self.nav_shortcuts:
+            sc.setEnabled(False)
+            sc.setParent(None)
+            sc.deleteLater()
+        self.nav_shortcuts = []
+        taken: set = set()
+        a11y.give_keys([self.save_btn, self.revert_btn], taken)
+        for row, (key, _cls) in enumerate(PAGES):
+            text = a11y.with_key(tr(key), taken)
+            item = self.nav.item(row)
+            item.setData(a11y.MNEMONIC_ROLE, text)
+            letter = a11y.mnemonic_of(text)
+            if letter:
+                item.setData(Qt.ItemDataRole.AccessibleDescriptionRole, a11y.shortcut_text(letter))
+                sc = QShortcut(QKeySequence(f"Alt+{letter.upper()}"), self)
+                sc.activated.connect(lambda r=row: self.go_to(r))
+                self.nav_shortcuts.append(sc)
+        a11y.give_keys([self.lang_label], taken)
+        self.global_keys = frozenset(taken)
+        for page in self.pages:
+            groups = page.access_keys() if hasattr(page, "access_keys") else []
+            used = set(taken)
+            for g in groups[1:]:
+                mine = set(taken)
+                a11y.give_keys(g, mine)
+                used |= mine
+            if groups:
+                a11y.give_keys(groups[0], used)
+
+    def go_to(self, row: int) -> None:
+        """Show page row and put the keyboard on the page list (Alt + the page's letter)."""
+        self.nav.setCurrentRow(row)
+        self.nav.setFocus(Qt.FocusReason.ShortcutFocusReason)
+
+    def _save_key(self) -> None:
+        if self.save_btn.isEnabled():
+            self.save()
+
+    def _watch_contrast(self) -> None:
+        """Windows high contrast turned on or off while the window is open: rebuilt with or without our colours."""
+        try:
+            from PySide6.QtGui import QGuiApplication
+            self._a11y_hints = QGuiApplication.styleHints().accessibility()
+            self._a11y_hints.contrastPreferenceChanged.connect(self._contrast_changed)
+        except (AttributeError, RuntimeError):  # Qt before 6.10: read at the next start
+            self._a11y_hints = None
+
+    def _contrast_changed(self, *_args) -> None:
+        a11y.apply_contrast_mode()
+        self.build(self.nav.currentRow())
 
     # -- state
     def dirty(self) -> bool:
@@ -202,8 +282,12 @@ class SettingsWindow(QMainWindow):
             pill(self.banner, "info", tr("app.clients.new", names=", ".join(s.name for s in new)))
         else:
             self.banner.setVisible(False)
+            self._banner_said = None
             return
         self.banner.setVisible(True)
+        if self.isVisible() and self.banner.text() != getattr(self, "_banner_said", None):
+            self._banner_said = self.banner.text()  # a new banner is read once
+            a11y.announce(self.banner, self.banner.text())
 
     def page(self, cls):
         return next(p for p in self.pages if isinstance(p, cls))
@@ -310,7 +394,9 @@ class SettingsWindow(QMainWindow):
         QMessageBox.warning(self, tr("app.title"), text)
 
     def flash(self, text: str) -> None:
+        """A short confirmation in the status bar, also read by screen readers."""
         self.statusBar().showMessage(text, 4000)
+        a11y.announce(self.statusBar(), text)
 
     def close_for_quit(self) -> bool:
         """Before the app quits: False when the user cancels (unsaved changes)."""

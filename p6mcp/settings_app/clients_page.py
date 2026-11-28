@@ -10,13 +10,15 @@ import os
 from typing import Optional
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel, QPlainTextEdit,
                                QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from p6mcp import clients, config, credentials, skills
 from p6mcp.clients import files
 from p6mcp.i18n import tr
+from p6mcp.settings_app import a11y
+from p6mcp.settings_app.cards import mono_font
 from p6mcp.jsonc import JsoncError
 from p6mcp.settings_app.common import Job, ask, group, note, pill, start
 
@@ -47,6 +49,7 @@ class ClientsPage(QWidget):
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.setMinimumHeight(self.fontMetrics().height() * 10)
         self.table.itemSelectionChanged.connect(self._show_selected)
+        a11y.name(self.table, tr("cl.detected"))
         bl.addWidget(self.table)
         row = QHBoxLayout()
         self.reg_btn = QPushButton(tr("cl.register"))
@@ -64,10 +67,10 @@ class ClientsPage(QWidget):
         row.addStretch(1)
         row.addWidget(self.scan_btn)
         bl.addLayout(row)
-        self.state = QLabel()
+        self.state = a11y.live(QLabel())
         self.state.setWordWrap(True)
         bl.addWidget(self.state)
-        self.skill_state = QLabel()  # P6 skills (p6mcp.skills) as folders in the client's skills folder
+        self.skill_state = a11y.live(QLabel())  # P6 skills (p6mcp.skills) as folders in the client's skills folder
         self.skill_state.setWordWrap(True)
         bl.addWidget(self.skill_state)
         crow = QHBoxLayout()
@@ -80,10 +83,12 @@ class ClientsPage(QWidget):
         crow.addStretch(1)
         bl.addLayout(crow)
         lrow = QHBoxLayout()
-        self.legacy = QLabel()
+        self.legacy = a11y.live(QLabel())
         self.legacy.setWordWrap(True)
         self.legacy_btn = QPushButton()
         self.legacy_btn.clicked.connect(self.remove_legacy)
+        self.legacy.hide()  # shown with its text when the selected client has a v2 entry
+        self.legacy_btn.hide()
         lrow.addWidget(self.legacy, 1)
         lrow.addWidget(self.legacy_btn)
         bl.addLayout(lrow)
@@ -96,6 +101,7 @@ class ClientsPage(QWidget):
         for code, key in self.KINDS:
             self.kind.addItem(tr(key), code)
         self.kind.currentIndexChanged.connect(lambda _i: self.show_snippet())
+        a11y.name(self.kind, tr("cl.snippet.kind"))
         self.copy_btn = QPushButton(tr("common.copy"))
         self.copy_btn.clicked.connect(self.copy_snippet)
         srow.addWidget(self.kind, 1)
@@ -103,14 +109,19 @@ class ClientsPage(QWidget):
         sl.addLayout(srow)
         self.text = QPlainTextEdit()
         self.text.setReadOnly(True)
-        self.text.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.text.setFont(mono_font(self.font()))  # the size of the UI font (large Windows text)
         self.text.setMinimumHeight(self.fontMetrics().height() * 9)
+        a11y.name(self.text, tr("cl.snippet.text"))
         sl.addWidget(self.text)
         sl.addWidget(note(tr("cl.snippet.note")))
         lay.addWidget(box)
         lay.addStretch(1)
         self.show_snippet()
         self.rescan()
+
+    def access_keys(self) -> list[list[QWidget]]:
+        return [[self.reg_btn, self.unreg_btn, self.skill_btn, self.scan_btn, self.copy_btn, self.ignore_btn,
+                 self.open_btn, self.skill_remove_btn]]
 
     # -- scanning
     def rescan(self) -> None:
@@ -181,11 +192,11 @@ class ClientsPage(QWidget):
         st = self.status()
         installed = bool(st and st.state != clients.NOT_INSTALLED)
         self.reg_btn.setEnabled(bool(st and st.state in (clients.NOT_REGISTERED, clients.OUTDATED)))
-        self.reg_btn.setText(tr("cl.repair") if st and st.state == clients.OUTDATED else tr("cl.register"))
+        a11y.retext(self.reg_btn, tr("cl.repair") if st and st.state == clients.OUTDATED else tr("cl.register"))
         self.unreg_btn.setEnabled(bool(st and st.state in (clients.REGISTERED, clients.OUTDATED)))
         self.ignore_btn.setEnabled(bool(st and st.state == clients.NOT_REGISTERED))
         ignored = bool(st and st.client in self.win.data.get("clients_ignored", []))
-        self.ignore_btn.setText(tr("cl.unignore") if ignored else tr("cl.ignore"))
+        a11y.retext(self.ignore_btn, tr("cl.unignore") if ignored else tr("cl.ignore"))
         self.open_btn.setEnabled(installed)
         if st is None:
             self.state.clear()
@@ -234,7 +245,8 @@ class ClientsPage(QWidget):
         self.skill_btn.setVisible(folder_ok)
         self.skill_remove_btn.setVisible(folder_ok)
         self.skill_btn.setEnabled(folder_ok and bool(offered) and state != clients.SKILLS_INSTALLED)
-        self.skill_btn.setText(tr("cl.skill.update") if state == clients.SKILLS_OUTDATED else tr("cl.skill.install"))
+        a11y.retext(self.skill_btn,
+                    tr("cl.skill.update") if state == clients.SKILLS_OUTDATED else tr("cl.skill.install"))
         self.skill_remove_btn.setEnabled(folder_ok and state in (clients.SKILLS_INSTALLED, clients.SKILLS_OUTDATED))
         self.skill_state.setVisible(installed)
         if not installed:

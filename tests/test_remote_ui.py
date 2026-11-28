@@ -76,7 +76,7 @@ def page(w) -> RemotePage:
 
 def test_not_set_up(win):
     p = page(win)
-    assert p.status.text().startswith("Not set up") and p.setup_btn.text() == "Set up"
+    assert p.status.text().startswith("Not set up") and p.setup_btn.text().replace("&", "") == "Set up"
     assert not p.enabled.isEnabled() and not p.remove_btn.isEnabled() and p.address.text() == ""
     p.run_setup()
     assert "Paste a Cloudflare API token" in p.progress.text()
@@ -107,7 +107,8 @@ def test_setup_saves_at_once_and_keeps_other_edits(qtbot, win, env, monkeypatch)
     assert win.data["p6_user"] == "TYPED" and win.dirty()
     assert env["vault"] == {"remote:tunnel_token": "tunnel-token", "remote:relay_secret": "relay-secret"}
     assert p.token.text() == "" and p.address.text() == f"https://{HOST}/mcp" and "Done" in p.progress.text()
-    assert p.setup_btn.text() == "Repair" and p.enabled.isEnabled() and "tunnel-token" not in json.dumps(disk)
+    assert p.setup_btn.text().replace("&", "") == "Repair" and p.enabled.isEnabled()  # "&": its access key
+    assert "tunnel-token" not in json.dumps(disk)
     p.token.setText("tok")
     p.run_setup()  # repair keeps the relay secret
     qtbot.waitUntil(lambda: p.job is None, timeout=10000)
@@ -225,7 +226,7 @@ def test_remove_with_and_without_token(qtbot, env, monkeypatch):
 def test_french_page(qtbot, env):
     w = make(qtbot, {"language": "fr"})
     try:
-        assert page(w).setup_btn.text() == "Configurer" and "Accès à distance" in [
+        assert page(w).setup_btn.text().replace("&", "") == "Configurer" and "Accès à distance" in [
             w.nav.item(i).text() for i in range(w.nav.count())]
     finally:
         i18n.set_language("en")

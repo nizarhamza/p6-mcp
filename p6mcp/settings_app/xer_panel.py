@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QListWidget, QLi
 
 from p6mcp import xerstore
 from p6mcp.i18n import tr
+from p6mcp.settings_app import a11y
 from p6mcp.settings_app.common import Job, group, note, pill, start
 
 
@@ -27,6 +28,7 @@ class XerPanel(QWidget):
         self.list = QListWidget()
         self.list.setMinimumHeight(self.fontMetrics().height() * 6)
         self.list.itemSelectionChanged.connect(self._buttons)
+        a11y.name(self.list, tr("xer.box"))
         bl.addWidget(self.list)
         row = QHBoxLayout()
         self.add_btn = QPushButton(tr("xer.add"))
@@ -42,7 +44,7 @@ class XerPanel(QWidget):
         row.addStretch(1)
         row.addWidget(self.load_btn)
         bl.addLayout(row)
-        self.state = QLabel()
+        self.state = a11y.live(QLabel())
         self.state.setWordWrap(True)
         bl.addWidget(self.state)
         self.details = QLabel()
@@ -52,6 +54,9 @@ class XerPanel(QWidget):
         bl.addWidget(self.details)
         lay.addWidget(box)
         self.refresh()
+
+    def access_keys(self) -> list:
+        return [self.add_btn, self.load_btn, self.remove_btn, self.up_btn]
 
     def files(self) -> list[str]:
         return list(self.win.data.get("xer_files", []))

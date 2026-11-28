@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QGridLayout, 
                                QVBoxLayout, QWidget)
 
 from p6mcp.i18n import tr
+from p6mcp.settings_app import a11y
 from p6mcp.settings_app.common import COLORS, muted
 
 GRID, LIST = "grid", "list"
@@ -70,6 +71,15 @@ def fit_columns(columns: list[tuple[str, int, int]], budget: int, gap: int = 0) 
     return out
 
 
+def card_border(pal: QPalette) -> QColor:
+    """The frame of a card: a light grey of the theme, darkened (or lightened) to 3:1 against the window
+    background, so a card's edge is seen (WCAG 1.4.11)."""
+    if a11y.high_contrast():
+        return pal.color(QPalette.ColorRole.WindowText)
+    base, text = pal.color(QPalette.ColorRole.Base), pal.color(QPalette.ColorRole.Text)
+    return a11y.readable(mix(base, text, 0.16), pal.color(QPalette.ColorRole.Window), a11y.LARGE_MIN)
+
+
 def bold(w: QWidget) -> QWidget:
     f = w.font()
     f.setBold(True)
@@ -88,17 +98,31 @@ def card_button(text: str, fn: Callable[[], object]) -> QPushButton:
 
 def primary(b: QPushButton) -> QPushButton:
     """The main action of a card or dialog (Install, Update) filled with the Windows accent colour, as Windows 11
-    draws a primary button (the windows11 style only outlines a default button). Height kept from the style."""
+    draws a primary button (the windows11 style only outlines a default button). Height kept from the style.
+    The label is black or white, whichever reads better, and the fill is darkened (or lightened) until the label
+    reaches 4.5:1, also when hovered or pressed (moved away from the label colour). High contrast: the system
+    button."""
+    if a11y.high_contrast():
+        return b
     pal, u = b.palette(), b.fontMetrics().averageCharWidth()
-    accent, base = pal.color(QPalette.ColorRole.Accent), pal.color(QPalette.ColorRole.Base)
-    ink = "#000000" if accent.lightnessF() > 0.55 else "#ffffff"
+    fill, ink, hover, pressed = primary_colors(pal)
     b.setFixedHeight(b.sizeHint().height())
     b.setStyleSheet(
-        f"QPushButton {{ background: {accent.name()}; color: {ink}; border: none; border-radius: {max(3, u // 2)}px;"
-        f" padding: 0 {u * 2}px; }}"
-        f" QPushButton:hover {{ background: {mix(accent, base, 0.12).name()}; }}"
-        f" QPushButton:pressed {{ background: {mix(accent, base, 0.25).name()}; }}")
+        f"QPushButton {{ background: {fill.name()}; color: {ink.name()}; border: none;"
+        f" border-radius: {max(3, u // 2)}px; padding: 0 {u * 2}px; }}"
+        f" QPushButton:hover {{ background: {hover.name()}; }}"
+        f" QPushButton:pressed {{ background: {pressed.name()}; }}")
     return b
+
+
+def primary_colors(pal: QPalette) -> tuple[QColor, QColor, QColor, QColor]:
+    """(fill, label, hover fill, pressed fill) of a primary button: the accent colour, every fill at 4.5:1 or more
+    against the label."""
+    accent = pal.color(QPalette.ColorRole.Accent)
+    ink = a11y.ink(accent)
+    fill = a11y.readable(accent, ink, a11y.TEXT_MIN)  # fill measured against the label: same ratio both ways
+    away = QColor("#ffffff") if ink.lightnessF() < 0.5 else QColor("#000000")
+    return fill, ink, mix(fill, away, 0.12), mix(fill, away, 0.25)
 
 
 def icon_button(icon: QIcon.ThemeIcon, text: str, fn: Callable[[], object]) -> QToolButton:
@@ -236,6 +260,11 @@ class Badge(Elided):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
+        if a11y.high_contrast():  # system colours: the text colour on the background, a frame for the shape
+            pal = self.palette()
+            fg = pal.color(self.foregroundRole()).name()
+            p.setPen(QPen(QColor(fg), 1))
+            bg = pal.color(QPalette.ColorRole.Window).name()
         p.setBrush(QColor(bg))
         radius = self.height() / 2
         p.drawRoundedRect(QRectF(self.rect()), radius, radius)
@@ -298,6 +327,7 @@ class ViewToggle(QWidget):
             b.setIconSize(QSize(size, size))
             b.setToolTip(names[kind])
             b.setAccessibleName(names[kind])
+            b.setProperty("a11y_bar_end", True)  # after the toolbar in the Tab order, even when it wraps
             self.group.addButton(b)
             lay.addWidget(b)
             self.buttons[kind] = b
@@ -423,6 +453,7 @@ class Card(QFrame):
         self.menu_anchor: Optional[QWidget] = None  # where the keyboard opens the menu
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus if header else Qt.FocusPolicy.ClickFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, not header)
+        self.setProperty("a11y_own_focus", True)  # draws its focus itself (paintEvent), no focus ring around it
         self.unit = self.fontMetrics().averageCharWidth()
 
     def menu(self) -> Optional[QMenu]:
@@ -476,7 +507,7 @@ class Card(QFrame):
         base, text = pal.color(QPalette.ColorRole.Base), pal.color(QPalette.ColorRole.Text)
         fill = mix(base, text, 0.06) if self.underMouse() else base
         focus = self.hasFocus()
-        pen = QPen(pal.color(QPalette.ColorRole.Accent) if focus else mix(base, text, 0.16), 2 if focus else 1)
+        pen = QPen(a11y.focus_color(pal) if focus else card_border(pal), 2 if focus else 1)
         p.setPen(pen)
         p.setBrush(fill)
         inset = pen.widthF() / 2
