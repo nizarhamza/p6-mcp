@@ -3,23 +3,28 @@ UDF values, activity and project deletes, EPS nodes."""
 
 from __future__ import annotations
 
+import difflib
 import functools
 import math
 import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
+from datetime import timedelta
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from p6mcp.core import state as _state
 from p6mcp.core.constants import (
-    CSTR_FINISH, CSTR_TYPES, EPPM_NEXT, HPD_SQL, REL_TYPES, REL_TYPES_REV, SUMMARY_TYPES, UDF_INDICATOR, UDF_KINDS,
-    UDF_TEXT_MAX, UDF_VALUE,
+    ACT_LINKS_CAP, ACT_TYPES, CSTR_FINISH, CSTR_LABELS, CSTR_TYPES, EPPM_NEXT, HPD_SQL, REL_TYPES, REL_TYPES_REV,
+    SUMMARY_TYPES, TYPE_NAMES, UDF_INDICATOR, UDF_KINDS, UDF_TEXT_MAX, UDF_VALUE,
 )
-from p6mcp.registry import ActEdit, _ActEditKeys, AsgEdit, CodeEdit, LinkEdit, LinkNew, LinkRef, _plan_gate, UdfEdit, WbsMove
+from p6mcp.registry import (
+    ActEdit, _ActEditKeys, AsgEdit, CodeEdit, LinkEdit, LinkNew, LinkRef, NewActivity, NewLink, _plan_gate, UdfEdit,
+    WbsMove,
+)
 from p6mcp.core.db import (
     _alive, _backup, _cols, _connect, _days, _db_dt, _dict, _fmt_dt, _guard_write, _ids_sql, _insert, _next_key,
-    _now_str, _num, _parse_dt, _project_id, _stamp_cols, _task, _write_refusal,
+    _now_str, _num, _parse_dt, _prefer, _project_id, _stamp_cols, _task, _write_refusal,
 )
 from p6mcp.core.props import _lag_hpd, _lag_info
 from p6mcp.core.calendar import _calendars, _resolve_dt
@@ -518,6 +523,419 @@ def _act_update(con, project: str, it: Mapping) -> dict:
             "before": {k: t[k] for k in changed}, "after": {k: sets[k] for k in changed}, "summary": head}]
     return {"plan": head + "".join(f"; Note: {n}" for n in notes), "_lines": [head] + [f"Note: {n}" for n in notes],
             "log": log, "projects": [t["proj_id"]] if sched else [], "task_code": task_code}
+
+
+# ----------------------------------------------------------------- new activities (p6_add_activities)
+
+NEW_ACT_KEYS = set(NewActivity.__required_keys__) | set(NewActivity.__optional_keys__)
+NEW_LINK_KEYS = set(NewLink.__required_keys__) | set(NewLink.__optional_keys__)
+TASK_NAME_MAX = 120  # TASK.task_name is TEXT(120), as P6's Activity Name field
+TASK_CODE_MAX = 40  # TASK.task_code is TEXT(40): the limit when PREFER has no task_code_len
+NEW_LINKS_CAP = ACT_LINKS_CAP  # predecessors, and successors, per new activity
+NO_DURATION_TYPES = ("TT_Mile", "TT_FinMile")  # P6 keeps 0
+COMPUTED_DURATION_TYPES = ("TT_LOE", "TT_WBS")  # P6 computes the duration from the relationships at F9
+# What a new TASK row gets beside the user's values (the values of P6's own rows and of the XER import): no primary
+# resource, no units, no float until F9, normal priority, weight 1, nothing locked.
+NEW_TASK_FIXED = {"phys_complete_pct": 0, "rev_fdbk_flag": "N", "est_wt": 1, "lock_plan_flag": "N",
+                  "auto_compute_act_flag": "N", "status_code": "TK_NotStart", "rsrc_id": None,
+                  "total_float_hr_cnt": None, "free_float_hr_cnt": None,
+                  "act_work_qty": 0, "remain_work_qty": 0, "target_work_qty": 0, "act_equip_qty": 0,
+                  "remain_equip_qty": 0, "target_equip_qty": 0, "act_this_per_work_qty": 0, "act_this_per_equip_qty": 0,
+                  "priority_type": "PT_Normal", "driving_path_flag": "N", "scp_pct_complete": 0,
+                  "control_updates_flag": "N"}
+NEW_TASK_DEFAULTS = {"complete_pct_type": ("def_complete_pct_type", "CP_Drtn"),
+                     "duration_type": ("def_duration_type", "DT_FixedDUR2")}  # PROJECT column, else this
+NEW_DATES_NOTE = ("New activities are placed at the data date (planned, early and remaining dates = data date + "
+                  "duration on their calendar; late dates and float empty) until P6 schedules them: press F9.")
+
+
+def _code_ok(code: Any, field: str) -> str:
+    if not isinstance(code, str) or not code.strip():
+        raise ValueError(f"{field} is required")
+    if code != code.strip() or any(ord(ch) < 32 for ch in code):
+        raise ValueError(f"{field} {code!r}: no leading or trailing spaces, tabs or line breaks")
+    return code
+
+
+def _new_link_check(v: Any, field: str) -> list[dict]:
+    if v is None:
+        return []
+    if not isinstance(v, (list, tuple)):
+        raise ValueError(f"{field}: a list of {{task_code, type, lag_days, project}}")
+    if len(v) > NEW_LINKS_CAP:
+        raise ValueError(f"{field}: at most {NEW_LINKS_CAP} per activity")
+    out = []
+    for k, x in enumerate(v):
+        if not isinstance(x, Mapping):
+            raise ValueError(f"{field}[{k}]: an object with task_code")
+        bad = sorted(set(x) - NEW_LINK_KEYS)
+        if bad:
+            raise ValueError(f"{field}[{k}]: unknown key(s) {bad}; allowed: {sorted(NEW_LINK_KEYS)}")
+        _code_ok(x.get("task_code"), f"{field}[{k}].task_code")
+        code = _rel_code(x.get("type") or "FS", f"{field}[{k}].type")
+        lag = _lag_arg(x.get("lag_days") or 0)
+        if x.get("project") is not None and (not isinstance(x["project"], str) or not x["project"]):
+            raise ValueError(f"{field}[{k}].project: a Project ID")
+        out.append({"task_code": x["task_code"], "type": REL_TYPES_REV[code], "lag_days": lag,
+                    "project": x.get("project") or None})
+    return out
+
+
+def _new_act_check(it: Any) -> dict:
+    """Checks of one new activity that need no database. Returns the item normalised: task_code, task_name, type
+    (TT_ code), duration (days or None), cstr (code or None), cstr_date, wbs, calendar, predecessors, successors."""
+    if not isinstance(it, Mapping):
+        raise ValueError("an item must be an object with task_code and task_name")
+    bad = sorted(set(it) - NEW_ACT_KEYS)
+    if bad:
+        raise ValueError(f"unknown key(s) {bad}; allowed: {sorted(NEW_ACT_KEYS)}")
+    code = _code_ok(it.get("task_code"), "task_code")
+    name = it.get("task_name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"{code}: task_name is required")
+    if len(name) > TASK_NAME_MAX:
+        raise ValueError(f"{code}: task_name has {len(name)} characters, P6 takes at most {TASK_NAME_MAX}")
+    raw = it.get("type") or "task"
+    ttype = ACT_TYPES.get(raw) or (raw if raw in TYPE_NAMES else None)
+    if ttype is None:
+        raise ValueError(f"{code}: type must be one of {list(ACT_TYPES)}")
+    dur = it.get("original_duration_days")
+    if dur is not None:
+        f = _num(dur)
+        if isinstance(dur, bool) or f is None or f < 0:
+            raise ValueError(f"{code}: original_duration_days must be 0 or more")
+        dur = f
+    if ttype in NO_DURATION_TYPES and dur:
+        raise ValueError(f"{code}: a {TYPE_NAMES[ttype].lower()} has no duration (leave original_duration_days "
+                         "out or 0)")
+    if ttype in COMPUTED_DURATION_TYPES and dur:
+        raise ValueError(f"{code}: P6 computes the duration of a {TYPE_NAMES[ttype]} activity from its "
+                         "relationships when it schedules (F9): leave original_duration_days out")
+    cname = it.get("constraint")
+    if cname is not None and cname not in CSTR_TYPES:
+        raise ValueError(f"{code}: constraint must be one of {list(CSTR_TYPES)}")
+    cstr = CSTR_TYPES.get(cname) if cname is not None else None
+    if cstr and ttype in COMPUTED_DURATION_TYPES:
+        raise ValueError(f"{code}: P6 takes no constraint on a {TYPE_NAMES[ttype]} activity")
+    cdate = it.get("constraint_date")
+    if cstr and cstr != "CS_ALAP":
+        if not cdate:
+            raise ValueError(f"{code}: constraint_date is required for this constraint")
+        _parse_dt(cdate, "constraint_date")
+    elif cdate:
+        raise ValueError(f"{code}: constraint_date needs a constraint that takes a date")
+    for k in ("wbs", "calendar"):
+        if it.get(k) is not None and (not isinstance(it[k], str) or not it[k].strip()):
+            raise ValueError(f"{code}: {k} must be a non-empty text")
+    return {"task_code": code, "task_name": name, "type": ttype, "duration": dur, "cstr": cstr,
+            "cstr_date": cdate if cstr and cstr != "CS_ALAP" else None, "wbs": it.get("wbs"),
+            "calendar": it.get("calendar"), "predecessors": _new_link_check(it.get("predecessors"), "predecessors"),
+            "successors": _new_link_check(it.get("successors"), "successors")}
+
+
+class _NewActCtx:
+    """What every new activity of one call needs from the project (read once, inside the write transaction)."""
+
+    def __init__(self, con, project: str):
+        self.project, self.pid = project, _project_id(con, project)
+        pcols = _cols(con, "PROJECT")
+        sel = ", ".join(c if c in pcols else f"NULL AS {c}" for c in (
+            "clndr_id", "last_recalc_date", "plan_start_date", "def_complete_pct_type", "def_duration_type",
+            "project_flag"))
+        self.prj = con.execute(f"SELECT {sel} FROM PROJECT WHERE proj_id = ?", (self.pid,)).fetchone()
+        if (self.prj["project_flag"] or "Y") != "Y":
+            raise ValueError(f"{project} is an EPS node, not a project")
+        self.sep = _name_sep(con, self.pid)
+        self.nodes = _wbs_tree(con, self.pid, self.sep)
+        if not self.nodes:
+            raise ValueError(f"{project} has no project WBS node: P6 cannot hold activities there")
+        self.code_max = _prefer(con, "task_code_len") or TASK_CODE_MAX
+        self.dd = _db_dt(self.prj["last_recalc_date"]) or _db_dt(self.prj["plan_start_date"])
+        self.dd_src = "data date" if _db_dt(self.prj["last_recalc_date"]) else "project planned start"
+        self.cals = _calendars(con)
+        has_type = "clndr_type" in _cols(con, "CALENDAR")
+        self.cal_rows = con.execute(
+            "SELECT clndr_id, clndr_name, proj_id, " + ("clndr_type" if has_type else "NULL AS clndr_type")
+            + " FROM CALENDAR WHERE (proj_id IS NULL OR proj_id = ?)" + _alive(con, "CALENDAR")
+            + " ORDER BY clndr_id", (self.pid,)).fetchall()
+        self.batch: dict[str, int] = {}  # Activity IDs created by this call -> item index
+
+    def wbs(self, value: Optional[str]) -> dict:
+        """WBS node by code (full, or below the project node as p6_list_wbs shows it), else by a unique name."""
+        if value is None:
+            return self.nodes[0]
+        top, p = self.nodes[0]["wbs_code"], value.strip()
+        for n in self.nodes:
+            if n["wbs_code"] in (p, top + self.sep + p):
+                return n
+        for same in (lambda n: n["wbs_name"] == p, lambda n: (n["wbs_name"] or "").casefold() == p.casefold()):
+            hits = [n for n in self.nodes if same(n)]
+            if len(hits) == 1:
+                return hits[0]
+            if hits:
+                raise ValueError(f"WBS name {value!r} is used by {len(hits)} nodes: give its code, one of "
+                                 f"{[n['wbs_code'] for n in hits][:10]}")
+        rel = [n["wbs_code"][len(top) + len(self.sep):] for n in self.nodes[1:]]
+        near = difflib.get_close_matches(p, rel, n=10) or [r for r, n in zip(rel, self.nodes[1:], strict=False)
+                                                            if n["depth"] == 1][:10]
+        raise ValueError(f"WBS {value!r} not found in {self.project} (code or name). Close codes: {near}")
+
+    def calendar(self, value: Optional[str]) -> sqlite3.Row:
+        """Activity calendar by name: a global calendar or one of this project's (not a resource calendar);
+        default the project's calendar."""
+        if value is None:
+            cid = self.prj["clndr_id"]
+            hit = [r for r in self.cal_rows if r["clndr_id"] == cid]
+            if not hit:
+                raise ValueError(f"{self.project} has no default calendar: give calendar (p6_list_calendars)")
+            return hit[0]
+        name = value.strip()
+        for same in (lambda r: r["clndr_name"] == name, lambda r: (r["clndr_name"] or "").casefold() == name.casefold()):
+            hits = [r for r in self.cal_rows if same(r)]
+            usable = [r for r in hits if r["clndr_type"] != "CA_Rsrc"]
+            if len(usable) > 1:
+                raise ValueError(f"calendar {value!r} names {len(usable)} calendars (ids "
+                                 f"{[r['clndr_id'] for r in usable]}): rename one in P6")
+            if usable:
+                return usable[0]
+            if hits:
+                raise ValueError(f"calendar {value!r} is a resource calendar: activities take a global or project "
+                                 "calendar")
+        names = [r["clndr_name"] for r in self.cal_rows if r["clndr_type"] != "CA_Rsrc"]
+        raise ValueError(f"calendar {value!r} not found among the global calendars and those of {self.project}. "
+                         f"Close names: {difflib.get_close_matches(name, names, n=10) or names[:10]}")
+
+
+def _act_add(con, ctx: _NewActCtx, i: int, chk: dict) -> dict:
+    """Insert one new activity (a _new_act_check result) on an open write connection. Returns {plan, log,
+    projects, task_code, task_id, wbs_code, calendar, start, finish}; ValueError when P6 would refuse it."""
+    code, ttype = chk["task_code"], chk["type"]
+    if len(code) > ctx.code_max:
+        raise ValueError(f"{code}: an Activity ID has at most {ctx.code_max} characters in this database")
+    if code in ctx.batch:
+        raise ValueError(f"{code}: Activity ID already given by item {ctx.batch[code]}")
+    if con.execute("SELECT 1 FROM TASK WHERE proj_id = ? AND task_code = ?" + _alive(con, "TASK"),
+                   (ctx.pid, code)).fetchone():
+        raise ValueError(f"{code}: Activity ID already used in {ctx.project}")
+    node, cal_row = ctx.wbs(chk["wbs"]), ctx.calendar(chk["calendar"])
+    cal = ctx.cals.get(cal_row["clndr_id"])
+    hpd = cal.hpd if cal is not None else 8.0
+    days = chk["duration"]
+    notes: list[str] = []
+    if days is None and ttype in ("TT_Task", "TT_Rsrc"):
+        dflt = con.execute("SELECT def_target_drtn_hr_cnt FROM PREFER").fetchone() \
+            if "def_target_drtn_hr_cnt" in _cols(con, "PREFER") else None
+        if not dflt or dflt[0] is None:
+            raise ValueError(f"{code}: original_duration_days is required (no default duration in the admin "
+                             "preferences)")
+        days = float(dflt[0]) / hpd
+        notes.append(f"duration {days:g} d: default of the admin preferences ({float(dflt[0]):g} h)")
+    hours = (days or 0) * hpd
+    usable = cal is not None and not cal.error
+    start = finish = None
+    if ctx.dd is not None:
+        try:
+            start = cal.next_work_start(ctx.dd) if usable else ctx.dd
+            finish = cal.add_work_hours(start, hours) if usable else start + timedelta(hours=hours)
+        except ValueError:  # a calendar without working time
+            usable, start, finish = False, ctx.dd, ctx.dd + timedelta(hours=hours)
+        if not usable:
+            notes.append(f"calendar {cal_row['clndr_name']!r} is unreadable or has no working time: dates placed in "
+                         "elapsed time")
+    cstr_date = None
+    if chk["cstr_date"]:
+        edge = "finish" if chk["cstr"] in CSTR_FINISH else "start"
+        cstr_date, n = _resolve_dt(cal if usable else None, chk["cstr_date"], "constraint_date", edge)
+        notes += n
+    tid = _next_key(con, "TASK", "task_id")
+    dates = {} if start is None else {
+        "target_start_date": _fmt_dt(start), "target_end_date": _fmt_dt(finish), "early_start_date": _fmt_dt(start),
+        "early_end_date": _fmt_dt(finish), "restart_date": _fmt_dt(start), "reend_date": _fmt_dt(finish)}
+    row = {"task_id": tid, "proj_id": ctx.pid, "wbs_id": node["wbs_id"], "clndr_id": cal_row["clndr_id"],
+           "task_code": code, "task_name": chk["task_name"], "task_type": ttype,
+           **{k: ctx.prj[c] or d for k, (c, d) in NEW_TASK_DEFAULTS.items()}, **NEW_TASK_FIXED,
+           "target_drtn_hr_cnt": hours, "remain_drtn_hr_cnt": hours, "cstr_type": chk["cstr"], "cstr_date": cstr_date,
+           **dates, "guid": _guid(), **_stamp_cols(con, "TASK", _now_str(con), create=True)}
+    _insert(con, "TASK", row)
+    ctx.batch[code] = i
+    wbs_code = node["wbs_code"]
+    head = (f"Add {code} '{chk['task_name']}' ({TYPE_NAMES[ttype]}, {days or 0:g} d, WBS {wbs_code}, calendar "
+            f"{cal_row['clndr_name']}" + (f", {CSTR_LABELS[chk['cstr']]} {cstr_date or ''}".rstrip() if chk["cstr"] else "")
+            + f") task_id {tid}")
+    plan = head + "".join(f"; Note: {n}" for n in notes)
+    log = [{"operation": "add_activity", "proj_id": ctx.pid, "table": "TASK", "keys": {"task_id": tid, "task_code": code},
+            "before": None, "after": {k: row[k] for k in ACT_SNAPSHOT if k in row}, "summary": head}]
+    return {"plan": plan, "log": log, "projects": [ctx.pid], "task_code": code, "task_id": tid, "wbs_code": wbs_code,
+            "calendar": cal_row["clndr_name"], "original_duration_days": days or 0,
+            "start": dates.get("early_start_date"), "finish": dates.get("early_end_date")}
+
+
+def _act_add_links(con, project: str, made: Mapping[int, dict]) -> tuple[dict[int, list[dict]], list[str], list[dict],
+                                                                          set[int], int]:
+    """The relationships of the new activities (made: item index -> {task_code, predecessors, successors}), each
+    through _rel_add in its own savepoint. A link given twice (A's successor and B's predecessor) is added once.
+    Returns (reports per item, plan lines, log entries, projects, failed links)."""
+    reps: dict[int, list[dict]] = {}
+    plan, log, projects, failed, seen = [], [], set(), 0, {}
+    for i, m in made.items():
+        for direction, specs in (("predecessor", m["predecessors"]), ("successor", m["successors"])):
+            for s in specs:
+                other = (s["project"] or project, s["task_code"])
+                me = (project, m["task_code"])
+                pred, succ = (other, me) if direction == "predecessor" else (me, other)
+                rep = {"direction": direction, "task_code": s["task_code"], "project": s["project"],
+                       "type": s["type"], "lag_days": s["lag_days"]}
+                key = (pred, succ, s["type"])
+                if key in seen:
+                    j, lag = seen[key]
+                    if lag == s["lag_days"]:
+                        rep.update(ok=True, plan=f"{pred[1]} -> {succ[1]} {s['type']}: given twice, added once (item {j})")
+                    else:
+                        rep.update(ok=False, error=f"{pred[1]} -> {succ[1]} {s['type']} is given twice with lags "
+                                                   f"{lag:g} and {s['lag_days']:g} d")
+                        failed += 1
+                    reps.setdefault(i, []).append(rep)
+                    continue
+                seen[key] = (i, s["lag_days"])
+                it = {"predecessor_code": pred[1], "successor_code": succ[1], "rel_type": s["type"],
+                      "lag_days": s["lag_days"], "predecessor_project": pred[0] if pred[0] != succ[0] else None}
+                con.execute("SAVEPOINT p6_new_link")
+                try:
+                    x = _rel_add(con, succ[0], it)
+                except ValueError as e:
+                    con.execute("ROLLBACK TO p6_new_link")
+                    con.execute("RELEASE p6_new_link")
+                    rep.update(ok=False, error=str(e))
+                    failed += 1
+                    reps.setdefault(i, []).append(rep)
+                    continue
+                except BaseException:
+                    con.execute("ROLLBACK TO p6_new_link")
+                    con.execute("RELEASE p6_new_link")
+                    raise
+                con.execute("RELEASE p6_new_link")
+                rep.update(ok=True, plan=x["plan"], task_pred_id=x["task_pred_id"])
+                reps.setdefault(i, []).append(rep)
+                plan.append(x["plan"])
+                log += x["log"]
+                projects |= {p for p in x["projects"] if p is not None}
+    return reps, plan, log, projects, failed
+
+
+def _new_loops(con, new_ids: Iterable[int]) -> list[list[int]]:
+    """Logic loops through the new activities: one cycle (task_ids, first = last) per strongly connected group of
+    the network reachable from them that holds a new activity. Every loop the new links close passes through a
+    new activity (they are the only links added), so loops the network already had are not reported."""
+    new = set(new_ids)
+    succ: dict[int, list[int]] = {}
+    for p, s in con.execute("SELECT r.pred_task_id, r.task_id FROM TASKPRED r JOIN TASK a ON a.task_id = r.pred_task_id "
+                            "JOIN TASK b ON b.task_id = r.task_id WHERE 1=1" + _alive(con, "TASKPRED", "r")
+                            + _alive(con, "TASK", "a") + _alive(con, "TASK", "b")):
+        succ.setdefault(p, []).append(s)
+    index: dict[int, int] = {}
+    low: dict[int, int] = {}
+    on, stack, groups, n = set(), [], [], 0
+    for root in sorted(new):  # Tarjan, iterative
+        if root in index:
+            continue
+        work = [(root, 0)]
+        while work:
+            v, k = work.pop()
+            if k == 0:
+                index[v] = low[v] = n
+                n += 1
+                stack.append(v)
+                on.add(v)
+            nxt = succ.get(v, [])
+            if k < len(nxt):
+                work.append((v, k + 1))
+                w = nxt[k]
+                if w not in index:
+                    work.append((w, 0))
+                elif w in on:
+                    low[v] = min(low[v], index[w])
+                continue
+            if low[v] == index[v]:
+                g = []
+                while True:
+                    w = stack.pop()
+                    on.discard(w)
+                    g.append(w)
+                    if w == v:
+                        break
+                if (len(g) > 1 or v in succ.get(v, [])) and new & set(g):
+                    groups.append(set(g))
+            if work:
+                u = work[-1][0]
+                low[u] = min(low[u], low[v])
+    out = []
+    for g in groups:  # one cycle per group, from its first new activity (BFS inside the group)
+        s0 = min(new & g)
+        prev, todo = {}, [s0]
+        while todo and s0 not in prev:
+            v = todo.pop(0)
+            for w in succ.get(v, []):
+                if w in g and w not in prev:
+                    prev[w] = v
+                    todo.append(w)
+        path, v = [s0], prev[s0]
+        while v != s0:
+            path.append(v)
+            v = prev[v]
+        out.append([s0] + path[1:][::-1] + [s0])
+    return out
+
+
+def _act_add_batch(con, project: str, items: Sequence) -> dict:
+    """p6_add_activities in an open write transaction: the activities (_batch), then their relationships, then the
+    loop check. Returns a _batch result (items: one report per activity with its links) for _batch_commit."""
+    ctx = _NewActCtx(con, project)
+    made: dict[int, dict] = {}
+
+    def apply_one(i: int, it) -> dict:
+        chk = _new_act_check(it)
+        x = _act_add(con, ctx, i, chk)
+        made[i] = {"task_code": chk["task_code"], "predecessors": chk["predecessors"], "successors": chk["successors"],
+                   "task_id": x["task_id"]}
+        return x
+
+    b = _batch(con, items, apply_one)
+    reps, lplan, llog, lprojects, _ = _act_add_links(con, project, made)
+    for rep in b["items"]:
+        links = reps.get(rep["index"], [])
+        if rep["ok"]:
+            rep["links"] = links
+            bad = [x for x in links if not x["ok"]]
+            if bad:
+                rep.update(ok=False, error=f"{len(bad)} of {len(links)} relationship(s) refused (see links)")
+                b["failed"] += 1
+    by_id = {m["task_id"]: i for i, m in made.items()}
+    loops = _new_loops(con, by_id)
+    if loops:
+        ids = sorted({t for c in loops for t in c})
+        name = {r[0]: (r[1], r[2]) for r in con.execute(
+            "SELECT t.task_id, t.task_code, p.proj_short_name FROM TASK t JOIN PROJECT p ON p.proj_id = t.proj_id "
+            f"WHERE t.task_id IN {_ids_sql(ids)}")}
+
+        def label(t: int) -> str:
+            c, p = name.get(t, (str(t), None))
+            return c if p == project else f"{p} {c}"
+        for c in loops:
+            txt = "logic loop: " + " -> ".join(label(t) for t in c)
+            for t in set(c) & set(by_id):
+                rep = b["items"][by_id[t]]
+                if rep["ok"]:
+                    rep.update(ok=False, error=txt)
+                    b["failed"] += 1
+                else:
+                    rep["error"] += f"; {txt}"
+    b["plan"] += lplan
+    b["log"] += llog
+    b["projects"] |= lprojects
+    b["loops"] = len(loops)
+    b["data_date"] = _fmt_dt(ctx.dd) if ctx.dd else None
+    b["dates_from"] = ctx.dd_src if ctx.dd else None
+    return b
 
 
 # ----------------------------------------------------------------- resource assignment units

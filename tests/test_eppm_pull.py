@@ -367,7 +367,9 @@ def test_local_edits_become_pending_changes(p6, eppm_env, monkeypatch):
                               {"task_code": a, "code_type": "Area", "code_value": "N"}]},
                            "Activity code values are not sent"),
                           ("p6_move_activities", {"project": "DEMO-A", "items": [{"task_code": a, "wbs": "ENG"}]},
-                           "WBS moves are not sent")):
+                           "WBS moves are not sent"),
+                          ("p6_add_activities", {"project": "DEMO-A", "items": [{"task_code": "N1", "task_name": "N"}]},
+                           "not created through")):
         with pytest.raises(ValueError, match=msg):
             p6.call(tool, **kw)
     with pytest.raises(ValueError, match="1 local change"):

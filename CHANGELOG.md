@@ -23,6 +23,19 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 - Both are write tools (Full profile, writes on, two-step confirmation; remote clients only with remote edits on
   and a grant with edits). They are refused on a P6 EPPM working copy: the push does not send activity code
   values or WBS changes yet.
+- `p6_add_activities`: creates activities in a project, with their relationships, in one all-or-nothing change
+  (two-step write, at most 500 items). Item: Activity ID (unique in the project, length limit of the admin
+  preferences), name, WBS (code or unique name; default the project node), type (task, resource dependent, start or
+  finish milestone, level of effort, WBS summary), original duration in days of the activity calendar (task and
+  resource dependent default to the admin preference; none for milestones, level of effort and WBS summary),
+  calendar (global or project calendar by name; default the project calendar), constraint and date as
+  `p6_update_activity` takes them, predecessors and successors (Activity IDs of the project, of the same call or of
+  another project, with type and lag). New activities are Not Started with remaining = original duration and the
+  project's default duration and % complete types; their planned, early and remaining dates sit at the data date
+  until F9 (late dates and float empty). Refused: an Activity ID already used or given twice, an unknown WBS or
+  calendar, a relationship P6 would refuse, a logic loop the new relationships close. One edit log entry per
+  activity and per relationship; the project is marked stale (F9). Not available on a P6 EPPM working copy (the
+  push does not create activities); offered to remote clients with edits allowed.
 
 ### Changed
 
@@ -30,6 +43,7 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   the skill shop at 3b082c3: two new skills, `trend-report` (`p6_trend`) and `resource-loading-review`
   (`p6_resource_loading`), cost figures in `progress-earned-value` and `weekly-update-review`, and smaller activity
   lists (`fields=`) in `float-near-critical`, `lookahead-brief` and `weekly-update-review`. 17 core skills.
+- Server instructions: new activities come from `p6_add_activities` or `p6_import_xer`.
 
 ## [3.5.0] - 2026-11-27
 

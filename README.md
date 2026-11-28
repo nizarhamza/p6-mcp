@@ -175,7 +175,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 ## Tools
 
 <!-- tools:start -->
-71 tools: 42 read-only (11 of them in the Basic profile), 4 that write a file, 24 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
+72 tools: 42 read-only (11 of them in the Basic profile), 4 that write a file, 25 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
 
 **Projects and structure**
 
@@ -267,6 +267,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 |---|---|---|---|
 | `p6_update_activity` | Edits an activity: name, durations, constraint, actual dates, physical % complete | Write |  |
 | `p6_update_activities` | Edits many activities in one all-or-nothing change (a progress update) | Write |  |
+| `p6_add_activities` | Creates activities with their relationships in one all-or-nothing change (F9 afterwards) | Write |  |
 | `p6_update_assignment` | Sets budgeted, actual or remaining units of one resource assignment | Write |  |
 | `p6_update_assignments` | Sets the units of many assignments in one all-or-nothing change | Write |  |
 | `p6_update_udf` | Sets or clears one activity UDF value | Write |  |
@@ -555,7 +556,7 @@ on SQL Server.
 
 **What is an MCP server for Primavera P6?**
 MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant
-71 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
+72 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
 computed from the schedule rather than guessed by the model.
 
 **Can the AI change my schedule?**
