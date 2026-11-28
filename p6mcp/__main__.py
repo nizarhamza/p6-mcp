@@ -10,7 +10,11 @@
 
 
 def main() -> None:
+    import multiprocessing
     import sys
+    # A worker process of p6_schedule_risk (spawn) starts this exe again when frozen: freeze_support runs the
+    # worker and exits there, so a worker never starts a second server. A no-op when not frozen.
+    multiprocessing.freeze_support()
     args = sys.argv[1:]
     if args[:1] == ["clients"]:  # registration commands (installer)
         from p6mcp.clients.__main__ import main as clients_main

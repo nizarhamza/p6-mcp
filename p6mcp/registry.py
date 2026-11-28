@@ -537,6 +537,49 @@ class RiskRange(RiskPcts, total=False):
 
 RiskRanges = Annotated[list[RiskRange], Field(description="Ranges by Activity ID, WBS or activity code value.")]
 RiskIterations = Annotated[int, Field(description="Iterations: clamped to 100..5000, then to the network size cap.")]
+RiskWorkers = Annotated[int, Field(ge=1, description="Worker processes (1 = none); default min(4, CPUs - 1).")]
+
+
+class RiskCorrelation(TypedDict, total=False):
+    """A group of activities whose drawn durations move together: coefficient 0 (independent) to 1 (the same
+    percentile of each one's range), one selector: task_codes (a list of Activity IDs), wbs (a WBS code: every
+    activity below it) or code_type with code_value (activities with that activity code value or a child code)."""
+    coefficient: float
+    task_codes: list[str]
+    wbs: str
+    code_type: str
+    code_value: str
+
+
+class RiskDays(TypedDict):
+    """A triangular range of days drawn once per firing: min <= likely <= max."""
+    min: float
+    likely: float
+    max: float
+
+
+class RiskImpact(TypedDict, total=False):
+    """What a risk event adds when it fires: add_days (a number, or min / likely / max) to the remaining duration
+    of the activities of one selector (task_codes, wbs, or code_type with code_value), in days of each activity's
+    calendar. A P6 risk read with use_p6_risks may omit the selector: its assigned activities (TASKRISK)."""
+    add_days: Union[float, RiskDays]
+    task_codes: list[str]
+    wbs: str
+    code_type: str
+    code_value: str
+
+
+class RiskEvent(TypedDict, total=False):
+    """A discrete risk event: id, name, probability 0 to 1 of firing in an iteration, impact."""
+    id: str
+    name: str
+    probability: float
+    impact: RiskImpact
+
+
+RiskCorrelations = Annotated[list[RiskCorrelation], Field(description="Groups of activities whose durations are "
+                                                                      "correlated.")]
+RiskEvents = Annotated[list[RiskEvent], Field(description="Discrete risk events (probability and impact in days).")]
 
 
 # ----------------------------------------------------------------- update integrity: an update against the previous one

@@ -96,7 +96,7 @@ SUMMARY = {
     "p6_schedule_whatif": "What-if in memory: add or remove links, change durations or constraints, insert a "
                           "fragnet of new activities, see the new finish and what a reviewer would question",
     "p6_schedule_risk": "Monte Carlo schedule risk in memory: finish percentiles, on-time probability, "
-                        "criticality index",
+                        "criticality index, correlated durations and ranked risk events",
     "p6_inspect_xer": "Reads an XER file without importing it and runs the import pre-flight checks",
     "p6_import_xer": "Imports an XER as a new project, a baseline or an update of an existing project",
     "p6_export_xer": "Exports a project to an XER file, schedule options included",

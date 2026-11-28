@@ -16,6 +16,8 @@ import sys
 
 
 def main(argv=None) -> int:
+    import multiprocessing
+    multiprocessing.freeze_support()  # a spawned worker process of this exe runs there and exits (no-op otherwise)
     args = list(sys.argv if argv is None else argv)
     minimized = "--minimized" in args
     after_setup = "--after-setup" in args
