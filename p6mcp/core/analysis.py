@@ -22,7 +22,7 @@ from p6mcp.core.props import (
 from p6mcp.core.calendar import _Cal, _calendar, _calendars, WEEKDAYS
 from p6mcp.core.editlog import _log_dir
 from p6mcp.core.read import _critical_clause
-from p6mcp.core.engine import CPM_TF_TOL_H, CPM_TOL, _float_walk, GAP_TOL_H, LINK_FROM, LINK_TO, _Net
+from p6mcp.core.engine import CPM_TF_TOL_H, CPM_TOL, _float_walk, GAP_TOL_H, LINK_FROM, LINK_TO, _Net, _net_load
 
 
 # DCMA 14 check -> (DCMA default threshold, rule, PROJPROP 'schedule_check' target, its limit in hours, on/off flag).
@@ -776,7 +776,7 @@ def _integrity(con, pid: int, oid: int, near_days: float) -> tuple[dict[str, lis
         + " FROM PROJECT WHERE proj_id = ?", (p,)).fetchone()) for p in (pid, oid)}
     cals = _calendars(con)
     rule = {p: _lag_rule(con, p)[0] for p in (pid, oid)}
-    net_b = _Net(con, oid)
+    net_b = _net_load(con, oid)
     tol, out = CPM_TF_TOL_H, {f: [] for f in INTEGRITY_FLAGS}
     summ = lambda r: r["task_type"] in ("TT_LOE", "TT_WBS")  # noqa: E731
     cst = lambda r: (r["cstr_type"], r["cstr_date"], r["cstr_type2"], r["cstr_date2"])  # noqa: E731

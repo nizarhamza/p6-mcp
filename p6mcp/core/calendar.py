@@ -102,17 +102,21 @@ class _Cal:
                 secs += (hi - lo).total_seconds()
         return secs
 
-    def _cum_secs(self, d: date) -> float:
-        """Working seconds of the days before d, from an index built on demand (CAL_WINDOW_DAYS margin)."""
-        o = d.toordinal()
-        c0, cum = self._cum if self._cum else (o, [])
-        if not c0 <= o < c0 + len(cum):  # cum[i] = seconds of the days c0 .. c0 + i - 1
-            lo, hi = min(o, c0) - CAL_WINDOW_DAYS // 10, max(o, c0 + len(cum)) + CAL_WINDOW_DAYS // 10
+    def _cum_index(self, o1: int, o2: int) -> tuple[int, list]:
+        """(c0, cum): an index of the working seconds of the days before each day, cum[i] = seconds of the days
+        c0 .. c0 + i - 1, covering the days o1 .. o2 (ordinals; built on demand, CAL_WINDOW_DAYS // 10 margin).
+        The caller reads both ends from the one index returned: a calendar is shared by the copies of a cached
+        network (core/netcache.py), so another thread may replace self._cum meanwhile. The seconds are whole
+        numbers (shifts in minutes), so any index gives the same differences."""
+        cur = self._cum
+        c0, cum = cur if cur else (o1, [])
+        if not (c0 <= o1 and o2 < c0 + len(cum)):
+            lo, hi = min(o1, c0) - CAL_WINDOW_DAYS // 10, max(o2, c0 + len(cum)) + CAL_WINDOW_DAYS // 10
             cum = [0.0]
             for k in range(lo, hi + 1):
                 cum.append(cum[-1] + self._day_secs(date.fromordinal(k)))
             self._cum, c0 = (lo, cum), lo
-        return cum[o - c0]
+        return c0, cum
 
     def work_hours(self, a: datetime, b: datetime) -> float:
         """Working hours between a and b (negative when b is before a)."""
@@ -121,8 +125,9 @@ class _Cal:
         da, db = a.date(), b.date()
         if da == db:
             return self._day_secs(da, a, b) / 3600
-        self._cum_secs(da)  # both ends in one index: a rebuild changes its origin
-        mid = self._cum_secs(db) - self._cum_secs(da + timedelta(days=1))
+        o, ob = da.toordinal(), db.toordinal()
+        c0, cum = self._cum_index(o, ob)  # both ends in one index
+        mid = cum[ob - c0] - cum[o + 1 - c0]
         return (self._day_secs(da, a, None) + mid + self._day_secs(db, None, b)) / 3600
 
     def work_days(self, a: datetime, b: datetime) -> float:
@@ -135,7 +140,7 @@ class _Cal:
     def add_work_hours(self, start: datetime, hours: float) -> datetime:
         """End of `hours` of work begun at start; lands on a shift end when it fills it (P6 finish). The start day
         is walked shift by shift from start, the following whole days are skipped through the cumulative index
-        (_cum_secs: same result as walking them), the last day is walked shift by shift."""
+        (_cum_index: same result as walking them), the last day is walked shift by shift."""
         if hours < 0:
             raise ValueError("hours must be 0 or more")
         left = round(hours * 60)
@@ -150,9 +155,7 @@ class _Cal:
                 left -= f - lo
         o, span, need = d.toordinal() + 1, 32, left * 60  # working seconds still to place, from the next day
         while True:
-            self._cum_secs(date.fromordinal(o))  # both ends in one index (a rebuild keeps the earlier range)
-            self._cum_secs(date.fromordinal(o + span))
-            c0, cum = self._cum
+            c0, cum = self._cum_index(o, o + span)  # both ends in one index
             base = cum[o - c0]
             if cum[o + span - c0] - base >= need:
                 break

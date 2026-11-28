@@ -3,6 +3,7 @@ their assumptions, the DCMA critical path test on the engine."""
 
 from __future__ import annotations
 
+import copy
 import functools
 from collections import Counter
 from datetime import datetime, timedelta
@@ -17,7 +18,10 @@ from p6mcp.core.calendar import _resolve_dt, _week_text
 from p6mcp.core.wbs_codes import _name_sep, _wbs_tree
 from p6mcp.core.editlog import _edit_state, _log_entries, _undone_fn
 from p6mcp.core.read import _lag_arg, _rel_code
-from p6mcp.core.engine import _Cpm, CPM_TF_TOL_H, CPM_TOL, CPM_TRUST, _ELAPSED, GAP_TOL_H, LINK_FROM, LINK_TO, _mx, _Net
+from p6mcp.core.netcache import _cached, _peek, _Ticket, _ticket
+from p6mcp.core.engine import (
+    _Cpm, _cpm_load, _cpm_run, CPM_TF_TOL_H, CPM_TOL, CPM_TRUST, _ELAPSED, GAP_TOL_H, LINK_FROM, LINK_TO, _mx, _Net,
+)
 from p6mcp.core.analysis import _dcma, _dcma_settings
 
 
@@ -1115,13 +1119,32 @@ def _cpt(con, pid: int, net: Optional[tuple] = None) -> dict:
     """DCMA critical path test with the engine: delay the earliest most critical open activity by 100
     working days and check that the project finish moves as much (90 % or more of its own shift).
     net: (cpm, res, match_rate) of the project's network as con holds it, already loaded and run by the
-    caller (res = cpm.run(), match_rate of res against cpm's stored dates); else loaded and run here."""
+    caller (res = cpm.run(), match_rate of res against cpm's stored dates); else loaded and run here.
+    Network cache (core/netcache.py): the test of the network as con holds it is kept while the database is
+    unchanged; without net it is computed once (from the cached network and base run), with net a kept one is
+    returned, else it is computed from net and not kept (net may come from another snapshot). A connection with
+    temp tables (the what-if's edited network) never uses the cache."""
+    tk = _ticket(con, pid)
+    if tk is None:
+        return _cpt_calc(con, pid, net, None)
+    if net is None:
+        return copy.deepcopy(_cached(tk, "cpt", lambda: _cpt_calc(con, pid, None, tk)))
+    kept = _peek(tk, "cpt")
+    return copy.deepcopy(kept) if kept is not None else _cpt_calc(con, pid, net, None)
+
+
+def _cpt_calc(con, pid: int, net: Optional[tuple], tk: Optional[_Ticket]) -> dict:
+    """_cpt itself: net given, or the network loaded and run here (through the cache with a ticket)."""
     out = {"count": None, "denominator": None, "pct": None, "threshold": None, "pass": None, "activity": None,
            "activity_name": None, "sample": []}  # activity keys always present (null when not run)
     if net is None:
         try:
-            base = _Cpm(con, pid)
-            r0 = base.run()
+            if tk is None:
+                base = _Cpm(con, pid)
+                r0 = base.run()
+            else:
+                base = _cpm_load(con, pid, tk)[0]
+                r0 = _cpm_run(base, tk)
         except ValueError as e:
             return {**out, "note": f"not run: {e}"}
         rate = _cpm_compare(base, r0, False)["match_rate"]

@@ -75,6 +75,33 @@ def _write_refusal() -> Optional[str]:
 
 # ----------------------------------------------------------------- helpers
 
+class _RoCon(sqlite3.Connection):
+    """A read-only connection of _connect. p6_file: the database file it reads (absolute, case normalised);
+    p6_sig: _file_sig of that file taken before the connection opened, so before any snapshot it reads (the
+    network cache, core/netcache.py, keys on them; other connections never use the cache)."""
+    p6_file: Optional[str] = None
+    p6_sig: Optional[tuple] = None
+
+
+def _file_sig(path: str) -> Optional[tuple]:
+    """What changes on disk at every commit to a database file: its size and mtime_ns, its file change counter
+    (header bytes 24 to 27: every commit in rollback-journal mode, even within one mtime tick), and the size and
+    mtime_ns of its -wal file while it holds frames (a WAL commit appends; an empty or missing -wal file is the
+    same state: the frames are in the database file). None when the file cannot be read."""
+    try:
+        st = os.stat(path)
+        with open(path, "rb") as fh:
+            head = fh.read(28)[24:]
+    except OSError:
+        return None
+    try:
+        w = os.stat(path + "-wal")
+        wal = (w.st_size, w.st_mtime_ns) if w.st_size else None
+    except OSError:
+        wal = None
+    return st.st_size, st.st_mtime_ns, head, wal
+
+
 def _connect(readonly: bool = True) -> sqlite3.Connection:
     if not _state.DB_PATH:
         raise RuntimeError(_state.SETTINGS.db_problem or _config.NO_DB_MESSAGE)
@@ -82,7 +109,9 @@ def _connect(readonly: bool = True) -> sqlite3.Connection:
         raise RuntimeError(f"The configured database was not found: {_state.DB_PATH}. Open MCP for Primavera P6 Settings to select "
                            "another one.")
     if readonly:
-        con = sqlite3.connect(_ro_uri(_state.DB_PATH), uri=True, timeout=5)
+        sig = _file_sig(_state.DB_PATH)  # before the connection opens: before any snapshot it will read
+        con = sqlite3.connect(_ro_uri(_state.DB_PATH), uri=True, timeout=5, factory=_RoCon)
+        con.p6_file, con.p6_sig = os.path.normcase(os.path.abspath(_state.DB_PATH)), sig
         con.execute("PRAGMA query_only = ON")  # second lock besides mode=ro: no statement may write
         opened = _ro_cons.get()
         if opened is not None:  # inside a tool call: closed when the tool returns

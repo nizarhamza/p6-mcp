@@ -80,6 +80,17 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   (`p6_resource_loading`), cost figures in `progress-earned-value` and `weekly-update-review`, and smaller activity
   lists (`fields=`) in `float-near-critical`, `lookahead-brief` and `weekly-update-review`. 17 core skills.
 - Server instructions: new activities come from `p6_add_activities` or `p6_import_xer`.
+- Faster repeated engine calls: the server keeps the loaded schedule network of the last 4 projects (the CPM
+  engine's network, its run, the DCMA critical path test and the link network) while the database file is
+  unchanged, so a second `p6_health_check`, `p6_cpm_validate`, `p6_schedule_whatif`, `p6_schedule_risk`,
+  `p6_export_dashboard`, `p6_trend`, `p6_driving_path`, `p6_float_origin`, `p6_redundant_links`, `p6_dangling`,
+  `p6_milestones` or `p6_update_integrity` on the same project no longer reloads and reruns it (on a project of
+  3,120 activities, a second health check takes about 0.7 s instead of 2.4 s). Results are unchanged. Any commit
+  to the file (P6, this server or another program, rollback-journal or WAL mode) or a change to the project's
+  activities, links, assignments, WBS, calendars, resources or schedule options makes the next call read the
+  database again; every write of this server, a restore and an EPPM pull or push also empty the cache.
+  `p6_diagnose` reports it (`engine_cache`: on or off, projects kept, hits, misses); the environment variable
+  `P6MCP_ENGINE_CACHE=0` turns it off.
 
 ## [3.5.0] - 2026-11-27
 

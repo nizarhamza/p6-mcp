@@ -63,7 +63,8 @@ from p6mcp.registry import FastMCP, Field, ToolAnnotations, ToolError  # noqa: F
 
 # The modules of the server, lowest layer first; every name they define is re-exported here.
 from p6mcp.core.state import (  # noqa: F401  (re-exported)
-    _cols_cache, _log_cache, _refresh, _ro_cons, _schema_cache, _shop_on,
+    _cols_cache, _engine_cache, _engine_cache_clear, _engine_lock, _engine_stats, _log_cache, _refresh, _ro_cons,
+    _schema_cache, _shop_on,
 )
 from p6mcp.core.constants import (  # noqa: F401  (re-exported)
     ACT_EXTRA, ACT_LINKS_CAP, CAL_CHECK_KINDS, CAL_CHECK_YEARS, CAL_EXC_EACH, CAL_EXC_PAGE, CAL_EXC_ROWS, CSTR_FINISH,
@@ -94,9 +95,13 @@ from p6mcp.registry import (  # noqa: F401  (re-exported)
 from p6mcp.core.db import (  # noqa: F401  (re-exported)
     _act_from, _act_row, _act_view, _alive, _all_rows, _backup, _backup_dir, _backup_file, BACKUP_NAME,
     _backup_taken_at, _baseline_pid, _bound, _brief, _brief_on, _check_page, _cols, _connect, _days, _db_dt,
-    _DB_DT_SHAPE, _db_dt_text, _dict, _env, _fmt_dt, _guard_write, _ids_sql, _insert, _next_key, _now_str, _num,
-    _p6_running, _page, _parse_dt, _prefer, _project_id, _projects_of, _prune_backups, _ro_uri, _schema_info, _slice,
-    _SQL_ALLOWED, _sql_authorizer, _SQL_SECRET_COL, _stamp_cols, _task, _update, _write_refusal,
+    _DB_DT_SHAPE, _db_dt_text, _dict, _env, _file_sig, _fmt_dt, _guard_write, _ids_sql, _insert, _next_key, _now_str,
+    _num, _p6_running, _page, _parse_dt, _prefer, _project_id, _projects_of, _prune_backups, _RoCon, _ro_uri,
+    _schema_info, _slice, _SQL_ALLOWED, _sql_authorizer, _SQL_SECRET_COL, _stamp_cols, _task, _update, _write_refusal,
+)
+from p6mcp.core.netcache import (  # noqa: F401  (re-exported)
+    _agg, _cached, _count, ENGINE_CACHE_ENV, ENGINE_CACHE_SIZE, _engine_cache_info, _engine_cache_on, _Entry, _facts,
+    _peek, _Ticket, _ticket,
 )
 from p6mcp.core.props import (  # noqa: F401  (re-exported)
     _blob_text, CHECK_SPEC, _db_task_code, _key_task, _lag_hpd, _lag_hpd_sql, _lag_info, _lag_rule, _lpl_arg, _lpl_of,
@@ -120,10 +125,10 @@ from p6mcp.core.read import (  # noqa: F401  (re-exported)
     UDF_CMP, _udf_col, _udf_filter, _udf_out, _udf_row, _udf_type, _udf_values, _wbs_of,
 )
 from p6mcp.core.engine import (  # noqa: F401  (re-exported)
-    _Cpm, CPM_TF_TOL_H, CPM_TOL, CPM_TRUST, _CS_FINISH, _CS_START, _cstr_sources, _DT_EPOCH, EARLY_CSTR, _ELAPSED,
-    _Elapsed, ENGINE_VERSION, _fbo, _FLOAT_TYPES, _float_walk, GAP_TOL_H, _h2m, LATE_CSTR, _late_origin, LINK_FROM,
-    LINK_TO, _mins, _mn, _mx, _NEG, _Net, _net_snapshot, _POS, REDUNDANT_CATEGORIES, _root_driver, _sbo, _shift_lag,
-    _shift_w, _transitive, TRANSITIVE_DEPTH, _wm,
+    _Cpm, _cpm_base_run, _cpm_load, _cpm_out, _cpm_run, CPM_TF_TOL_H, CPM_TOL, CPM_TRUST, _CS_FINISH, _CS_START,
+    _cstr_sources, _DT_EPOCH, EARLY_CSTR, _ELAPSED, _Elapsed, ENGINE_VERSION, _fbo, _FLOAT_TYPES, _float_walk,
+    GAP_TOL_H, _h2m, LATE_CSTR, _late_origin, LINK_FROM, LINK_TO, _mins, _mn, _mx, _NEG, _Net, _net_load, _net_snapshot,
+    _POS, REDUNDANT_CATEGORIES, _root_driver, _sbo, _shift_lag, _shift_w, _transitive, TRANSITIVE_DEPTH, _wm,
 )
 from p6mcp.core.analysis import (  # noqa: F401  (re-exported)
     _chk, _cmp_acts, _cmp_links, _cpli, _crit_named, _cstr_txt, _dangling_suggest, _dcma, DCMA_CHECKS, _dcma_settings,
@@ -134,7 +139,8 @@ from p6mcp.core.analysis import (  # noqa: F401  (re-exported)
 )
 from p6mcp.core.explain import (  # noqa: F401  (re-exported)
     _cal_window, CAUSE_CLASSES, _cpm_classify, _cpm_compare, _cpm_context, CPM_DIFF_LABELS, _cpm_other_fields,
-    _cpm_reloaded, _cpt, _cstr_arg, CTX_LINKS, CTX_WINDOW_WD, _data_issues, _dcma_brief, _dcma_memory, _engine_rules,
+    _cpm_reloaded, _cpt, _cpt_calc, _cstr_arg, CTX_LINKS, CTX_WINDOW_WD, _data_issues, _dcma_brief, _dcma_memory,
+    _engine_rules,
     F9_SAVE_TOL, _finish_ties, FLOAT_TEXT, _FRAG_NONE, _fragnet_add, _fragnet_ctx, _fragnet_impact, FRAGNET_PATH_CAP,
     FRAGNET_TYPES, IMPORT_WINDOW, LABEL_OF_TABLE, LAG_CAL_TEXT, _link_cycle, OOS_TEXT, _project_context, _stale_f9,
     _stale_min, STALE_SAMPLE, _stale_view, _temp_network, _whatif_apply, _whatif_assumptions, WHATIF_CAVEAT,

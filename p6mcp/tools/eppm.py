@@ -12,7 +12,7 @@ from p6mcp import config as _config
 from p6mcp.eppm import store as _eppm_store
 
 from p6mcp.core import state as _state
-from p6mcp.core.state import _cols_cache, _refresh, _schema_cache
+from p6mcp.core.state import _cols_cache, _engine_cache_clear, _refresh, _schema_cache
 from p6mcp.core.constants import REL_TYPES_REV
 from p6mcp.registry import DateTimeStr, _plan_gate, _tool
 from p6mcp.core.db import _alive, _check_page, _cols, _connect, _now_str, _parse_dt, _slice, _stamp_cols
@@ -146,6 +146,7 @@ def _eppm_pull_now(p: dict, projects: list[str], include_baseline: bool = True, 
         raise ValueError(f"The working copy could not be replaced (is another tool reading it?): {e}") from None
     _cols_cache.clear()
     _schema_cache.clear()
+    _engine_cache_clear()
     _refresh()
     return {"server": p["name"], "pulled_at": m["pulled_at"], "seconds": m["seconds"], "route": m["route"],
             "projects": m["projects"], "rows": m["rows"], "warnings": m["warnings"],
@@ -378,6 +379,7 @@ def p6_eppm_push(schedule: bool = False, new_data_date: Optional[DateTimeStr] = 
             for local, server_id in created.items():
                 con.execute("UPDATE TASKPRED SET task_pred_id = ? WHERE task_pred_id = ?", (server_id, local))
             con.commit()
+        _engine_cache_clear()
     done = [e for x in res["sent"] + pl["already_done"] for e in x["change"]["entries"]]
     record = {"at": datetime.now().isoformat(timespec="seconds"), "sent": len(res["sent"]),
               "already_done": len(pl["already_done"]), "failed": (res["failed"] or {}).get("label"),

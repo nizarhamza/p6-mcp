@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import threading
+from collections import Counter, OrderedDict
 from contextvars import ContextVar
 from typing import Optional
 
@@ -33,6 +35,20 @@ _log_cache: dict[str, tuple] = {}  # edit log file -> ((mtime_ns, size), entries
 _schema_cache: dict[str, dict] = {}  # db path -> schema.detect() (trust applied at read time)
 XER_MANIFEST: Optional[dict] = None  # XER-only mode: files, projects (Project ID renames), warnings
 EPPM_MANIFEST: Optional[dict] = None  # P6 EPPM mode: pull.json of the working copy (server, projects, rows)
+# The network cache (core/netcache.py): (database file, proj_id) -> entry, least recently used first; its lock
+# (tool calls run on threads in the HTTP and remote servers) and its counters for p6_diagnose.
+_engine_cache: "OrderedDict[tuple, object]" = OrderedDict()
+_engine_lock = threading.Lock()
+_engine_stats: Counter = Counter()
+
+
+def _engine_cache_clear() -> None:
+    """Forget every cached network: a write of this server, a restore, an EPPM pull or another database.
+    Entries built meanwhile from an older snapshot never match again (their file signature is gone)."""
+    with _engine_lock:
+        if _engine_cache:
+            _engine_stats["clears"] += 1
+        _engine_cache.clear()
 
 
 def _refresh() -> _config.Settings:
@@ -55,6 +71,7 @@ def _refresh() -> _config.Settings:
     if os.path.normcase(st.db_path) != os.path.normcase(DB_PATH):
         _cols_cache.clear()
         _schema_cache.clear()
+        _engine_cache_clear()
         _backup_done, _last_backup = False, None
     SETTINGS, DB_PATH, P6_USER, BACKUP_DIR, LOG_DIR = st, st.db_path, st.p6_user, st.backup_dir, st.edit_log_dir
     SKIP_PROC = not st.block_when_p6_running
