@@ -11,7 +11,7 @@ from time import monotonic
 from typing import Optional, get_args
 
 from p6mcp.core import state as _state
-from p6mcp.core.state import _cols_cache, _schema_cache
+from p6mcp.core.state import _cols_cache, _engine_cache_clear, _schema_cache
 from p6mcp.registry import (
     DateTimeStr, EpsOrder, LevelPriority, Limit, Offset, _plan_gate, ProjectId, ProjectList, SchedValues, _tool,
 )
@@ -171,6 +171,7 @@ def p6_restore_backup(name: str, confirm: bool = False) -> dict:
     _state._backup_done = False  # the next write backs up the restored state
     _cols_cache.clear()
     _schema_cache.clear()
+    _engine_cache_clear()
     entry = {"ts": _log_ts(), "commit": uuid.uuid4().hex[:12], "db": os.path.basename(_state.DB_PATH),
              "tool": "p6_restore_backup", "operation": "restore_backup", "project": None, "proj_id": None,
              "table": None, "keys": {"backup": name}, "before": None, "after": None, "backup_taken_at": taken,

@@ -27,6 +27,7 @@ from p6mcp.core.db import (
     _alive, _backup_dir, _check_page, _cols, _connect, _db_dt, _dict, _env, _p6_running, _page, _parse_dt, _project_id,
     _schema_info, _slice, _sql_authorizer, _write_refusal,
 )
+from p6mcp.core.netcache import _engine_cache_info
 from p6mcp.core.props import _db_task_code, _lag_rule, _sched_diff, _sched_options, _xer_project, _xer_sched
 from p6mcp.core.calendar import _cal_row, CAL_WINDOW_DAYS, _calendar, _calendars, _week_text, WEEKDAYS
 from p6mcp.core.editlog import _log_dir
@@ -414,7 +415,8 @@ def p6_sql_select(sql: str, offset: Offset = 0, limit: Limit = 200) -> dict:
 def p6_diagnose() -> dict:
     """Start here when a tool reports a configuration problem. Shows the server settings in force
     (database, tool profile, writes allowed, restart needed), the P6 schema and version detected,
-    whether P6 is running, the backup and edit log folders. Works without a database."""
+    whether P6 is running, the backup and edit log folders, and the network cache of the CPM engine
+    (engine_cache: on or off, projects kept, hits and misses). Works without a database."""
     st = _state.SETTINGS
     now_listed = {t for t in TOOL_HINTS if _policy.listed(t, st.tool_profile, st.allow_writes, _shop_on(st))}
     out: dict[str, Any] = {
@@ -429,6 +431,7 @@ def p6_diagnose() -> dict:
         "p6_running": _p6_running(),
         "openpyxl": _openpyxl_version(),  # p6_export_dashboard needs it (None: not installed)
         "shop": {"enabled": _shop_on(st), "catalog": _shop.REPO_URL},
+        "engine_cache": _engine_cache_info(),
     }
     if out["restart_required"]:
         out["restart_note"] = ("The tool profile, the write permission or the skill shop setting changed since the "

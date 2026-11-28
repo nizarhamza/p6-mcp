@@ -75,6 +75,7 @@ def _commit(con: sqlite3.Connection, plan: list[str], confirm: bool, projects: I
             names[p] = r[0] if r else None
     con.commit()
     con.close()
+    _state._engine_cache_clear()  # the network cache would miss anyway (the file changed): free it at once
     ts, commit_id = _log_ts(), uuid.uuid4().hex[:12]
     stale = {str(p): v[1] for p, v in snap.items()}
     entries = [{"ts": ts, "commit": commit_id, "db": os.path.basename(_state.DB_PATH), "tool": tool,

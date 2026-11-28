@@ -24,7 +24,7 @@ from p6mcp.core.calendar import _calendars
 from p6mcp.core.editlog import _schedule_state
 from p6mcp.core.wbs_codes import _act_agg_sql, _code_filter, _code_tree, _code_type, _merge_agg, _wbs_tree
 from p6mcp.core.read import _critical_clause
-from p6mcp.core.engine import ENGINE_VERSION, _float_walk, GAP_TOL_H, _Net
+from p6mcp.core.engine import ENGINE_VERSION, _float_walk, GAP_TOL_H, _net_load
 from p6mcp.core.reporting import (
     _available, _code_list, _cost_ev, _cum, _curve_items, _ev_map, _float_bucket, _float_edges, _float_labels,
     _group_row, _la_query, LOAD_KIND_ORDER, _measure_rows, MS_VS, _period_edges, RSRC_KINDS, _rsrc_limits, _Spread,
@@ -348,7 +348,7 @@ def p6_milestones(project: ProjectId, baseline: Optional[ProjectId] = None, base
                                     f"COALESCE({crit}, 0)) AS is_crit,", 1)
              + sel + (" AND t.status_code <> 'TK_Complete'" if open_only else ""))
         ms = [_dict(r) for r in con.execute(q + " ORDER BY t.task_id", [*cargs, pid, *(wanted or [])])]
-        net = _Net(con, pid)
+        net = _net_load(con, pid)
         bl: dict[str, dict] = {}
         if bid is not None:
             for r in con.execute("SELECT task_code, act_start_date, act_end_date, early_start_date, early_end_date, "

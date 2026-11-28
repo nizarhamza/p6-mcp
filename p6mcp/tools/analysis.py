@@ -25,7 +25,7 @@ from p6mcp.core.db import _alive, _baseline_pid, _check_page, _cols, _connect, _
 from p6mcp.core.props import _lag_info, _sched_options
 from p6mcp.core.editlog import _log_ts, _schedule_state
 from p6mcp.core.engine import (
-    ENGINE_VERSION, _float_walk, GAP_TOL_H, _Net, _net_snapshot, REDUNDANT_CATEGORIES, _root_driver, _transitive,
+    ENGINE_VERSION, _float_walk, GAP_TOL_H, _net_load, _net_snapshot, REDUNDANT_CATEGORIES, _root_driver, _transitive,
 )
 from p6mcp.core.analysis import (
     _dangling_suggest, _dcma, _dcma_settings, HC_NO_ITEMS, _hc_pick, _hc_snapshot_save, _hc_snapshots, HC_TOTALS,
@@ -91,7 +91,7 @@ def p6_health_check(project: ProjectId, baseline: Optional[ProjectId] = None, ba
     try:
         checks, n_open, n_links, ends, items = _dcma(con, pid, bid, cfg, baseline_dates, duration_basis)
         if check in (None, "key_dates"):  # a drill-down of another check does not need the network
-            kd, kd_rows = _key_dates(_Net(con, pid), None)
+            kd, kd_rows = _key_dates(_net_load(con, pid), None)
             checks["key_dates"] = kd
         if check is None and "critical_path_test" not in cfg["disabled"]:
             checks["critical_path_test"] = _cpt(con, pid)

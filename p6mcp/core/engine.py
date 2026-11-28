@@ -13,6 +13,7 @@ from p6mcp.registry import RedundantCategory
 from p6mcp.core.db import _alive, _cols, _days, _db_dt, _dict, _fmt_dt
 from p6mcp.core.props import _lag_rule, _sched_options
 from p6mcp.core.calendar import _Cal, _calendars, _lag_cal_of, _lag_hpd_of
+from p6mcp.core.netcache import _cached, _Ticket, _ticket
 
 
 # ----------------------------------------------------------------- network analysis (driving, float origin, redundant links)
@@ -210,13 +211,37 @@ class _Net:
                     out.append({"cstr_type": ty, "cstr_label": _cstr_label(ty), "cstr_date": _fmt_dt(dt)})
         return out
 
+    def copy(self) -> "_Net":
+        """A copy the caller may change: its own activity and link dicts, link indexes and code map (the
+        calendars and the PROJECT row are shared: read only)."""
+        other = object.__new__(_Net)
+        other.__dict__.update(self.__dict__)
+        other.t = {i: dict(d) for i, d in self.t.items()}
+        other.links = [dict(lk) for lk in self.links]
+        other.by_succ, other.by_pred = {}, {}
+        for lk in other.links:
+            other.by_succ.setdefault(lk["succ"], []).append(lk)
+            other.by_pred.setdefault(lk["pred"], []).append(lk)
+        other.rcals = {i: list(c) for i, c in self.rcals.items()}
+        other.code = dict(self.code)
+        return other
+
+
+def _net_load(con, pid: int, tk: Optional[_Ticket] = None) -> _Net:
+    """_Net(con, pid) as con's snapshot holds it: a copy of the cached network while the database is unchanged
+    (tk: the caller's ticket for this project, else one is taken here)."""
+    tk = tk or _ticket(con, pid)
+    if tk is None:
+        return _Net(con, pid)
+    return _cached(tk, "net", lambda: _Net(con, pid)).copy()
+
 
 def _net_snapshot(con, pid: int) -> _Net:
     own = not con.in_transaction
     if own:
         con.execute("BEGIN")
     try:
-        return _Net(con, pid)
+        return _net_load(con, pid)
     finally:
         if own:
             con.rollback()
@@ -1382,3 +1407,47 @@ class _Cpm:
         ends = [d for d in own if d["task_id"] not in succ and d["status_code"] != "TK_Complete"] or own
         fm = max(ends, key=lambda d: (res[d["task_id"]]["ef"], d["task_type"] == "TT_FinMile", d["task_code"]), default=None)
         return fm, max((res[d["task_id"]]["ef"] for d in own), default=self.dd)
+
+
+# ----------------------------------------------------------------- the network cache (core/netcache.py)
+
+def _cpm_out(base: _Cpm) -> _Cpm:
+    """A copy of a cached network that the caller may change and run: copy() (its own activity and link dicts)
+    plus its own code map, options, WBS parents, assignments and links to other projects. The calendars, the
+    PROJECT row and each activity's bad_dates list stay shared: nothing writes them."""
+    c = base.copy()
+    c.code, c.opts, c.wbs_parent = dict(base.code), dict(base.opts), dict(base.wbs_parent)
+    c.asg = [dict(a) for a in base.asg]
+    c.ext_pred, c.ext_succ = [dict(lk) for lk in base.ext_pred], [dict(lk) for lk in base.ext_succ]
+    return c
+
+
+def _cpm_load(con, pid: int, tk: Optional[_Ticket] = None) -> tuple[_Cpm, Optional[_Ticket]]:
+    """(_Cpm(con, pid) as con's snapshot holds it, ticket for _cpm_run): a copy of the cached network while the
+    database is unchanged (tk: the caller's ticket for this project, else one is taken here); the ticket is None
+    when con may not use the cache, and the network is then loaded here."""
+    tk = tk or _ticket(con, pid)
+    if tk is None:
+        return _Cpm(con, pid), None
+    tk.cpm = _cached(tk, "cpm", lambda: _Cpm(con, pid))
+    return _cpm_out(tk.cpm), tk
+
+
+def _cpm_base_run(base: _Cpm) -> tuple[dict, dict]:
+    """(res, drivers) of run(drivers) on a copy of base: the cached network itself is never run (run() keeps its
+    plan on the network)."""
+    drv: dict = {}
+    res = base.copy().run(drv)
+    return res, drv
+
+
+def _cpm_run(cpm: _Cpm, tk: Optional[_Ticket], drivers: Optional[dict] = None) -> dict[int, dict]:
+    """cpm.run(drivers) for a network from _cpm_load that the caller has not changed: with a ticket, a copy of the
+    cached base run (drivers filled as run() fills them, its entries pointing at that copy); else cpm.run(drivers)."""
+    if tk is None or tk.cpm is None:
+        return cpm.run(drivers)
+    res, drv = _cached(tk, "run", lambda: _cpm_base_run(tk.cpm))
+    out = {n: dict(r) for n, r in res.items()}
+    if drivers is not None:
+        drivers.update((n, (e[0], out, e[2])) for n, e in drv.items())
+    return out

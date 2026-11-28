@@ -18,7 +18,7 @@ from p6mcp.registry import RiskCorrelations, RiskEvents, RiskWorkers
 from p6mcp.core.db import _check_page, _connect, _days, _db_dt, _fmt_dt, _num, _prefer, _project_id, _slice
 from p6mcp.core.editlog import _schedule_state
 from p6mcp.core.read import _critical_clause
-from p6mcp.core.engine import _Cpm, CPM_TF_TOL_H, CPM_TOL, CPM_TRUST, ENGINE_VERSION, _Net
+from p6mcp.core.engine import _cpm_load, _cpm_run, CPM_TF_TOL_H, CPM_TOL, CPM_TRUST, ENGINE_VERSION, _net_load
 from p6mcp.core.analysis import HC_UNSCORED
 from p6mcp.core.explain import (
     _cpm_compare, _cpm_context, _dcma_brief, _dcma_memory, _finish_ties, _fragnet_ctx, _fragnet_impact,
@@ -65,14 +65,14 @@ def p6_cpm_validate(project: ProjectId, offset: Offset = 0, limit: Limit = 50) -
     pid = _project_id(con, project)
     con.execute("BEGIN")  # network, stored F9, update dates and links from one snapshot
     try:
-        cpm = _Cpm(con, pid)
+        cpm, tk = _cpm_load(con, pid)  # copies of the cached network while the database is unchanged
         ev = _stale_f9(con, pid, cpm)
-        net = _Net(con, pid)
+        net = _net_load(con, pid, tk)
     finally:
         con.rollback()
     state = _schedule_state(con, pid)
     t0 = monotonic()
-    res = cpm.run()
+    res = _cpm_run(cpm, tk)
     secs = round(monotonic() - t0, 2)
     cmp = _cpm_compare(cpm, res, state["stale"], not state["last_schedule_date"], ev)
     fm, end = cpm.finish(res)
@@ -163,14 +163,14 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     pid = _project_id(con, project)
     con.execute("BEGIN")
     try:
-        base = _Cpm(con, pid)
+        base, tk = _cpm_load(con, pid)
         thr_h, used = _critical_clause(con, pid, "project", None)[3:5]
         ctx = _fragnet_ctx(con, pid) if frag else None
     finally:
         con.rollback()
     state = _schedule_state(con, pid)
     d0: dict = {}
-    r0 = base.run(d0)
+    r0 = _cpm_run(base, tk, d0)
     chk = _cpm_compare(base, r0, state["stale"])
     trial = base.copy()
     if ctx is not None:
@@ -353,7 +353,7 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
     pid = _project_id(con, project)
     con.execute("BEGIN")  # network, ranges, groups, risks and UDF values from one snapshot
     try:
-        cpm = _Cpm(con, pid)
+        cpm, tk = _cpm_load(con, pid)
         assign, echo = _risk_ranges(con, pid, cpm, ranges)
         uvals, uinfo = _risk_udfs(con, pid, labels) if all(labels) else ({}, None)
         cache: dict = {}
@@ -363,7 +363,7 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
     finally:
         con.rollback()
     state = _schedule_state(con, pid)
-    full = cpm.run()  # refuses a logic loop and a missing data date
+    full = _cpm_run(cpm, tk)  # refuses a logic loop and a missing data date
     chk = _cpm_compare(cpm, full, state["stale"])
     plan, T = cpm.plan(), cpm.t
     dist: dict[int, tuple] = {}  # task_id -> (low, high, mode hours, source)
