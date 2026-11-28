@@ -97,6 +97,10 @@ Facts an assistant should get right:
 - `p6_eppm_push`: Sends the pending local changes to the P6 EPPM server after a conflict check and your yes (delete or replace)
 - `p6_eppm_schedule`: Schedules projects on the P6 EPPM server (P6's own F9), returns its log, then pulls them again (write)
 
+### P6 Professional on SQL Server or Oracle
+
+- `p6_pmdb_refresh`: Copies the chosen projects and their baselines again from the SQL Server or Oracle database into the local read-only copy (the server is only read) (writes a file)
+
 ### Edits (off by default)
 
 - `p6_update_activity`: Edits an activity: name, durations, constraint, actual dates, physical % complete (write)

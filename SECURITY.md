@@ -69,6 +69,12 @@ Planned, early and late dates and float are never written: P6 recalculates them 
   never proxied. The EPPM, SQL and proxy passwords are kept in the Windows Credential Manager, never in
   config.json (a proxy address holding a user name or password is refused), and are stored only after a
   connection test that worked.
+- P6 Professional on SQL Server or Oracle (the `pmdb` data source) connects only to the database server the user
+  configures, with the database login the user enters (a read-only login is recommended), and runs SELECT
+  statements only (on Oracle inside `SET TRANSACTION READ ONLY`): the server is never written, the tools read a
+  local copy under `%LOCALAPPDATA%\P6MCP\pmdb`, and every write tool is refused in this mode. The USERS table is
+  not copied. The password is kept in the Windows Credential Manager, never in config.json, and stored only after
+  a test or a copy that worked.
 - Skills are text only: SKILL.md and up to 5 text reference files (.md, .txt, .csv, .json); scripts are
   refused on import. A skill names tools; it gets no permission of its own: write tools keep the dry run and
   confirmation token, and `p6_shop_install` shows the whole skill and needs a confirmation too.

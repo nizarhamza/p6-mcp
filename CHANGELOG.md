@@ -7,6 +7,25 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ### Added
 
+- P6 Professional on SQL Server or Oracle (read only): a fourth data source in Settings (Database), "A P6
+  Professional database on SQL Server or Oracle". A profile holds the database type, server, port, database or
+  service name, schema (owner), database login (its password in the Windows Credential Manager, stored once a test
+  or a copy shows it works), an encryption option (SQL Server encryption required, Oracle over TCPS), the projects
+  to copy (Project IDs, or every project of an EPS, templates left out) and the baselines (each project's baseline,
+  all of them, or none). Test connection reads the P6 tables with a query that returns no row, the P6 version
+  recorded in the database (PREFER) and the number of projects, and checks the named projects and EPS. The copy
+  (Copy now in Settings, or the new tool `p6_pmdb_refresh`) reads the projects, their baselines and the tables the
+  read tools use (calendars, activity codes, UDFs, resources and roles, notebooks, steps, expenses, risks, schedule
+  options, financial periods) into a local SQLite file under `%LOCALAPPDATA%\P6MCP\pmdb`, with SELECT statements
+  only (on Oracle inside a read-only transaction, so every table comes from the same point in time); a failed copy
+  keeps the previous one. Every read tool runs on the copy unchanged; `p6_diagnose` (`pmdb_mode`, no password) and
+  the `schedule_state` of the tools give `copied_at` and its age. Every write tool is refused with a message that
+  says the database server is never written, and writes cannot be turned on in this mode. The SQL layer and the
+  table copy are the P6 EPPM SQL route's (drivers installed on demand from PyPI). Not yet tested against a real
+  SQL Server or Oracle P6 database: the tests run on simulated servers that speak each dialect (parameter style,
+  TOP / FETCH FIRST, upper case Oracle names, schema prefix, dates, decimals, LOBs, NVARCHAR text, Oracle's
+  1000-item IN lists) over the synthetic demo database, and check that every read tool of a review gives the same
+  answer on the copy as on the database itself.
 - `p6_update_activity_codes`: assigns, replaces or clears activity code values of many activities in one
   all-or-nothing change (dry run, then your confirmation). Item `{task_code, code_type, code_value}` or
   `{task_code, code_type, clear: true}`; the code type is the one the project sees (its project codes, then its EPS
@@ -72,6 +91,13 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ### Changed
 
+- P6 EPPM SQL pull: number columns of the working copy are typed (ids and counters INTEGER, hours, quantities,
+  costs and percentages REAL). SQL Server gives decimal columns as Decimal, stored as whole numbers when they were
+  whole, so a duration of 12 hours on an 8 hour calendar could have read as 1 day (integer division in SQLite).
+  Oracle BLOB and CLOB columns (calendars, notebooks) are read from their LOB objects, and id lists longer than
+  1000 items are split for Oracle.
+- Settings (Database): the disabled "SQL Server (later version)" and "Oracle (later version)" types of a database
+  entry are gone: these databases are the new data source.
 - `p6_schedule_whatif`: an `add_link` edit that would close a loop is refused at that edit, with the loop it closes
   (`A -> B -> C -> A`), instead of the engine's loop error after every edit.
 

@@ -67,6 +67,7 @@ def test_every_tool_has_a_remote_decision(server):
         if policy.is_write(t) and t not in EXPECTED_NEVER:
             assert k == "write", t
     assert kinds["p6_eppm_pull"] == "write" and kinds["p6_list_projects"] == "read"
+    assert kinds["p6_pmdb_refresh"] == "write"  # rewrites the local copy: remote edits switch + scope, as a pull
     assert kinds["p6_trend"] == "read"  # 3.5.0: read only, offered to remote clients
     # 3.8.0: activity code values and WBS moves are writes, as p6_update_activities: remote writes switch + scope
     assert kinds["p6_update_activity_codes"] == kinds["p6_move_activities"] == "write"

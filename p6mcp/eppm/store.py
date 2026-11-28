@@ -139,7 +139,10 @@ def update_manifest(profile_name: str, pushed_entries: Iterable[str] = (), push:
 
 
 def _value(v: Any) -> Any:
-    """A driver value -> what the standalone database stores (dates as 'YYYY-MM-DD HH:MM:SS' text)."""
+    """A driver value -> what the standalone database stores (dates as 'YYYY-MM-DD HH:MM:SS' text). An Oracle BLOB
+    or CLOB comes as a LOB object (oracledb's default): its content is read, bytes or text."""
+    if hasattr(v, "read") and not isinstance(v, (str, bytes, bytearray, memoryview)):
+        v = v.read()
     if isinstance(v, datetime):
         return v.strftime("%Y-%m-%d %H:%M:%S")
     if isinstance(v, date):
@@ -153,16 +156,48 @@ def _value(v: Any) -> Any:
     return v
 
 
-def _copy_table(cur, out: sqlite3.Connection, sqlcfg: dict, table: str, where: str, ids: str) -> Optional[int]:
-    """Rows of one PMDB table into the working copy; None when the table cannot be read (optional tables)."""
-    names = {t: _sql.table(sqlcfg, t) for t in ("PROJECT", "TASKRSRC")}
-    clause = where.format(S=ids, **names) if where else ""
+IN_MAX = 1000  # Oracle refuses an IN list of more than 1000 items (ORA-01795)
+
+
+def _in_lists(where: str, ids: Iterable[int]) -> str:
+    """Every 'col IN ({S})' / 'col NOT IN ({S})' of a WHERE template filled with the ids, in groups of IN_MAX."""
+    ids = list(ids)
+    groups = [",".join(str(int(i)) for i in ids[k:k + IN_MAX]) for k in range(0, len(ids), IN_MAX)] or ["NULL"]
+
+    def one(m: re.Match) -> str:
+        col, neg = m.group(1), m.group(2) or ""
+        parts = [f"{col} {neg}IN ({g})" for g in groups]
+        return parts[0] if len(parts) == 1 else "(" + (" AND " if neg else " OR ").join(parts) + ")"
+    return re.sub(r"([\w.]+) (NOT )?IN \(\{S\}\)", one, where)
+
+
+def _affinity(col: str) -> str:
+    """Column type of the copy from the P6 column name (the XER store's hints): ids and counters INTEGER, hours,
+    quantities, costs and percentages REAL, the rest untyped (values kept as the driver gave them). A driver gives
+    decimal columns as Decimal, stored as int when whole: without REAL, hours / hours per day would be an integer
+    division in SQLite (12 / 8 = 1)."""
+    from p6mcp import xerstore
+    if col.endswith(xerstore.INT_HINTS) or col in xerstore.INT_HINTS:
+        return " INTEGER"
+    if col.endswith(xerstore.NUM_HINTS) or col in xerstore.NUM_HINTS:
+        return " REAL"
+    return ""
+
+
+def _copy_table(cur, out: sqlite3.Connection, sqlcfg: dict, table: str, where: str,
+                ids: "str | Iterable[int]") -> Optional[int]:
+    """Rows of one PMDB table into the working copy; None when the table cannot be read (optional tables).
+    where: a template with {S} = the ids (IN lists) and {TABLE} = a qualified table name."""
+    if isinstance(ids, str):
+        ids = [int(i) for i in ids.split(",") if i.strip()]
+    names = {t: _sql.table(sqlcfg, t) for t in set(re.findall(r"\{([A-Z_]+)\}", where or ""))}
+    clause = _in_lists(where, ids).format(**names) if where else ""
     q = f"SELECT * FROM {_sql.table(sqlcfg, table)}" + (f" WHERE {clause}" if clause else "")
     cur.execute(q)
     cols = [d[0].lower() for d in cur.description or []]
     if not cols:
         return None
-    out.execute(f'CREATE TABLE "{table}" ({", ".join(f"{c!s}" for c in cols)})')
+    out.execute(f'CREATE TABLE "{table}" ({", ".join(f"{c!s}{_affinity(c)}" for c in cols)})')
     ins = f'INSERT INTO "{table}" VALUES ({", ".join("?" for _ in cols)})'
     n = 0
     while True:

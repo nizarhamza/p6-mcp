@@ -1123,6 +1123,9 @@ def _diag_schema(info: dict) -> dict:
         out.update(label="P6 EPPM working copy", writable=not info["missing"],
                    note="Built by p6_eppm_pull from the server, not by P6 Professional: no known P6 fingerprint, "
                         "and the P6 Professional schema check does not apply (writes: see writes).")
+    elif _state.SETTINGS.pmdb:
+        out.update(label="Local copy of a P6 Professional database on SQL Server or Oracle", writable=False,
+                   note="Built by p6_pmdb_refresh from the database server: read only, the server is never written.")
     return out
 
 

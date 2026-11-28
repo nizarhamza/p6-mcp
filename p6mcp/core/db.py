@@ -22,7 +22,7 @@ from p6mcp import schema as _schema
 
 from p6mcp.core import state as _state
 from p6mcp.core.state import _cols_cache, _ro_cons, _schema_cache
-from p6mcp.core.constants import _cstr_label, HPD_SQL, MAX_ROWS, SQL_PRAGMAS, XER_READ_ONLY
+from p6mcp.core.constants import _cstr_label, HPD_SQL, MAX_ROWS, PMDB_READ_ONLY, SQL_PRAGMAS, XER_READ_ONLY
 from p6mcp.registry import ACT_FIELDS, ACT_HOURS, DATETIME_PATTERN, Detail
 
 
@@ -62,6 +62,8 @@ def _write_refusal() -> Optional[str]:
     """Why this database may not be written now (settings and schema), None when it may."""
     if _state.SETTINGS.xer_files:
         return XER_READ_ONLY
+    if _state.SETTINGS.pmdb:
+        return PMDB_READ_ONLY
     if _state.SETTINGS.eppm:  # the working copy is ours: no schema gate, writes as the settings allow
         if not _state.EPPM_MANIFEST:
             return "Nothing pulled yet from the P6 EPPM server: pull a project with p6_eppm_pull first."

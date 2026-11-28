@@ -38,6 +38,7 @@ TOOL_KIND: dict[str, str] = {
     "p6_eppm_projects": READ, "p6_eppm_status": READ, "p6_calendar_check": READ,
     # file output (p6_eppm_pull: the local working copy, the server is only read)
     "p6_export_xer": FILE, "p6_export_dashboard": FILE, "p6_export_lookahead": FILE, "p6_eppm_pull": FILE,
+    "p6_pmdb_refresh": FILE,  # the local copy of a P6 Professional SQL Server / Oracle database (read with SELECT only)
     # write
     "p6_update_activity": WRITE, "p6_update_activities": WRITE, "p6_add_activities": WRITE,
     "p6_update_assignment": WRITE,
@@ -65,7 +66,7 @@ BASIC_TOOLS = frozenset({
 })
 # Tools that do not need a database (the rest refuse with the "No database configured" message)
 NO_DB_TOOLS = frozenset({"p6_diagnose", "p6_inspect_xer", "p6_shop_search", "p6_shop_get", "p6_shop_install",
-                         "p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status"})
+                         "p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status", "p6_pmdb_refresh"})
 # The skill shop (p6mcp.shop): GitHub reads, offered only while the setting shop_enabled is on
 SHOP_TOOLS = frozenset({"p6_shop_search", "p6_shop_get", "p6_shop_install"})
 SHOP_OFF = ("The skill shop is turned off. Turn on 'Allow the skill shop' in MCP for Primavera P6 Settings "
@@ -130,13 +131,13 @@ def refusal(tool: str, profile: str, allow_writes: bool, shop: bool = True) -> O
 # OAuth. It is exposed to prompt injection from whatever it reads, so it gets less than a local client:
 # - tools that take or write a path on this PC are never offered (the remote user has no access to that folder);
 # - destructive and config tools and the skill shop are never offered;
-# - writes, and p6_eppm_pull (it rewrites the local working copy), need the remote switch remote_allow_writes
+# - writes, p6_eppm_pull and p6_pmdb_refresh (they rewrite a local copy), need the remote switch remote_allow_writes
 #   on top of the local rules, and a grant approved with edits (scope p6:write).
 REMOTE_READ_SCOPE, REMOTE_WRITE_SCOPE = "p6:read", "p6:write"
 LOCAL_PATH_TOOLS = frozenset({"p6_import_xer", "p6_inspect_xer", "p6_export_xer", "p6_export_dashboard",
                               "p6_export_lookahead"})
 REMOTE_NEVER = LOCAL_PATH_TOOLS | SHOP_TOOLS | frozenset(t for t, k in TOOL_KIND.items() if k in (DESTRUCTIVE, CONFIG))
-REMOTE_AS_WRITE = frozenset({"p6_eppm_pull"})
+REMOTE_AS_WRITE = frozenset({"p6_eppm_pull", "p6_pmdb_refresh"})
 REMOTE_NO_PATH_ARGS = {"p6_schedule_options": ("xer_path",)}  # listed remotely, but these arguments are refused
 REMOTE_OFF = ("{tool} is not available to remote clients (claude.ai, ChatGPT): it works with files or settings on "
               "the PC, or deletes data. Use it from a local client on the PC.")

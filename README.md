@@ -12,8 +12,9 @@
 
 **MCP for Primavera P6** is a local [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that
 connects Claude, ChatGPT, Cursor, VS Code and any other MCP client to your **Oracle Primavera P6 Professional**
-schedules on Windows. It reads the P6 database itself (P6 Professional standalone, SQLite), plain **XER files**,
-or projects of a live **P6 EPPM server** (on premises or Oracle Cloud), and answers scheduling questions with real
+schedules on Windows. It reads the P6 database itself (P6 Professional standalone, SQLite), a local read-only
+copy of projects of a **P6 Professional database on SQL Server or Oracle**, plain **XER files**, or projects of a
+live **P6 EPPM server** (on premises or Oracle Cloud), and answers scheduling questions with real
 computations: critical path and driving path, total float, the **DCMA 14-point check**, look-ahead, baseline and
 update comparison, CPM what-if and Monte Carlo schedule risk. Unlike XER-only MCP servers, it can also **write
 changes back**: to the P6 database (durations, logic, constraints, actuals, units and UDFs), or to the P6 EPPM
@@ -52,6 +53,9 @@ from the schedule; the model explains it. Dates and float come from P6's last sc
 - **P6 EPPM server** (3.0): pull projects and their baselines from a live P6 EPPM server into a local working
   copy (REST API, optional read-only SQL account), run every tool on it, edit locally, push the changes after a
   conflict check and your yes, and schedule on the server with P6's own scheduler.
+- **P6 Professional on SQL Server or Oracle** (read only): the projects you choose, by Project ID or EPS, and
+  their baselines are copied into a local read-only copy with SELECT statements only; every read tool runs on it
+  and says when it was copied.
 - **Edits** (off by default): durations, constraints, actual dates, physical % complete, resource assignment
   units, activity UDF values, activity code values, WBS moves, relationships, schedule options, EPS, deletes,
   backups and restore.
@@ -175,7 +179,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 ## Tools
 
 <!-- tools:start -->
-72 tools: 42 read-only (11 of them in the Basic profile), 4 that write a file, 25 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
+73 tools: 42 read-only (11 of them in the Basic profile), 5 that write a file, 25 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
 
 **Projects and structure**
 
@@ -261,6 +265,12 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 | `p6_eppm_push` | Sends the pending local changes to the P6 EPPM server after a conflict check and your yes | Delete or replace |  |
 | `p6_eppm_schedule` | Schedules projects on the P6 EPPM server (P6's own F9), returns its log, then pulls them again | Write |  |
 
+**P6 Professional on SQL Server or Oracle**
+
+| Tool | What it does | Access | Basic |
+|---|---|---|---|
+| `p6_pmdb_refresh` | Copies the chosen projects and their baselines again from the SQL Server or Oracle database into the local read-only copy (the server is only read) | Writes a file |  |
+
 **Edits (off by default)**
 
 | Tool | What it does | Access | Basic |
@@ -323,6 +333,7 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
 | Installation | Windows installer with a Settings window; registers your MCP clients | Usually a Python package (pip, uvx) |
 | Runs on macOS or Linux | No: Windows only, like P6 Professional | Usually yes |
 | P6 EPPM server (on premises or Oracle Cloud) | Yes (3.0): pull, local edits, push you approve, server schedule | No (XER only) |
+| P6 Professional database on SQL Server or Oracle | Yes, read only: a local copy of the projects you choose | No (XER only) |
 
 "Varies" means some XER servers do it and others do not: check the one you are looking at.
 
@@ -330,7 +341,7 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
 
 ![Settings: tools and safety](docs/images/settings-tools.png)
 
-- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 68).
+- **Tool profiles**: Basic (11 read-only tools, suited to small local models) or Full (all 73).
 - **Writes are off by default.** With the Full profile and "Allow write operations", every write takes two calls:
   a dry run that shows the plan and returns a single-use confirmation token, then, after your explicit yes, the
   same call with that token. Deleting a project or an activity and restoring a backup also need a confirmation
@@ -338,6 +349,8 @@ back into P6. MCP for Primavera P6 works on the **P6 Professional database itsel
 - With a **P6 EPPM server**, edits change only the local working copy. `p6_eppm_push` reads every changed object
   on the server first and refuses on any change made there since the pull; it needs the confirmation text
   `PUSH TO <server>`, sends one object per call and stops at the first failure, with a journal of what was sent.
+- A **P6 Professional database on SQL Server or Oracle** is never written: only SELECT statements run on the
+  server (on Oracle, inside a read-only transaction), the tools read a local copy, and every write tool is refused.
 - A **backup** is taken before every write (with a retention you choose), writes are refused while **P6 is
   running**, and every write goes to the **edit log** with its parameters.
 - Writes are refused on a P6 schema version the server was not tested with, unless you trust it explicitly.
@@ -552,11 +565,34 @@ Not in this version: deleting activities, UDF edits, activity code values, WBS m
 structure changes through the working copy (do them in P6 EPPM, then pull again). Tested against P6 EPPM 25.12
 on SQL Server.
 
+## P6 Professional on SQL Server or Oracle
+
+P6 Professional connected to a SQL Server or Oracle database (instead of the standalone SQLite one) uses the same
+P6 tables, so the server reads a **local read-only copy** of the projects you choose. Under **Database > Data
+source**, choose **A P6 Professional database on SQL Server or Oracle**, click **Add database...**, then enter the
+database type, the server and port, the database name (SQL Server) or service name (Oracle), the schema (the
+owner of the P6 tables: `dbo` or `ADMUSER` by default) and a database login, ideally one with read-only rights.
+Its password goes to the Windows Credential Manager once a test or a copy shows it works; the driver (`pymssql` or
+`oracledb`) is downloaded from PyPI only when you click **Install the driver**, each file checked against the
+checksum PyPI publishes. **Encrypt the connection** asks SQL Server for encryption, or connects to Oracle over
+TCPS. **Test connection** signs in, reads the P6 tables with a query that returns no row, the P6 version recorded
+in the database and the number of projects, and checks the projects you named.
+
+Name the **projects to copy** by Project ID, or an **EPS** (every project below it, templates left out), and the
+**baselines** to take (each project's baseline, every baseline, or none). **Copy now** (or `p6_pmdb_refresh` from
+your MCP client) copies them, with the calendars, codes, UDFs, resources, notebooks, steps, expenses, risks and
+schedule options the tools read, into `%LOCALAPPDATA%\P6MCP\pmdb`; a failed copy keeps the previous one. Click
+**Use this database**, then **Save**. `p6_diagnose` and the `schedule_state` of the tools give `copied_at` and
+the age of the copy; refresh it to see changes made in P6. Write tools are refused in this mode.
+
+Not tested against a real SQL Server or Oracle P6 database yet: the tests run on simulated servers (see
+CHANGELOG).
+
 ## FAQ
 
 **What is an MCP server for Primavera P6?**
 MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant
-72 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
+73 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
 computed from the schedule rather than guessed by the model.
 
 **Can the AI change my schedule?**
@@ -571,8 +607,8 @@ with a cloud model that means its provider. For confidential projects use a loca
 **Which P6 versions and databases are supported?**
 P6 Professional standalone (SQLite), tested with 25.12; other versions are read only until tested or trusted.
 XER files from P6 Professional 24.12 and from the server's own export. P6 EPPM servers through their REST API
-(and optionally a read-only SQL account), tested with P6 EPPM 25.12 on SQL Server. P6 Professional connected
-directly to SQL Server or Oracle is not supported.
+(and optionally a read-only SQL account), tested with P6 EPPM 25.12 on SQL Server. P6 Professional on SQL
+Server or Oracle through a local read-only copy, not yet tested on a real server.
 
 **Do I need P6 installed?**
 Not for XER files: XER-only mode analyses them without P6 or a P6 database. Not for a P6 EPPM server either: the
@@ -611,6 +647,7 @@ Yes, under the Apache License 2.0.
 | Windows | Windows 11 |
 | P6 Professional standalone (SQLite) | 25.12 (schema fingerprint in `p6mcp/schema.py`); other versions are read only until tested or trusted |
 | XER files | written by P6 Professional 24.12, and by the server's own export |
+| P6 Professional on SQL Server or Oracle | not yet tested on a real server: simulated SQL Server and Oracle servers in the tests |
 | MCP clients | registration tested on sample configuration files of every client listed above; stdio and HTTP tested with the MCP Python SDK client; end-to-end use with each client is in the release checklist. Codex and the ChatGPT tunnel are not tested yet |
 | MCP SDK | mcp 2.3 (1.8 or later supported) |
 

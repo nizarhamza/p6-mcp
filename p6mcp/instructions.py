@@ -13,6 +13,7 @@ from typing import Optional
 
 HEADER = "Primavera P6 Professional database (standalone SQLite)."
 EPPM_HEADER = "Primavera P6 EPPM server, read through a local working copy of the pulled projects."
+PMDB_HEADER = "Primavera P6 Professional on SQL Server or Oracle (local read-only copy)."
 CUSTOM_HEADER = "User instructions (follow them in every answer):"
 MAX_CUSTOM = 30          # custom lines kept in the config
 MAX_CUSTOM_CHARS = 1000  # characters of one custom line
@@ -71,8 +72,8 @@ def custom_lines(cfg: Optional[dict]) -> list[str]:
 def build(cfg: Optional[dict] = None) -> str:
     """The instructions sent to clients under these settings (None: the built-in text)."""
     eppm = (cfg or {}).get("data_source") == "eppm"
-    lines = [EPPM_HEADER if eppm else HEADER] + ["- " + (ln.eppm if eppm and ln.eppm else ln.text)
-                                                  for ln in BUILTIN if enabled(ln, cfg)]
+    head = EPPM_HEADER if eppm else PMDB_HEADER if (cfg or {}).get("data_source") == "pmdb" else HEADER
+    lines = [head] + ["- " + (ln.eppm if eppm and ln.eppm else ln.text) for ln in BUILTIN if enabled(ln, cfg)]
     if eppm:
         lines.append("- " + EPPM_LINE)
     mine = custom_lines(cfg)

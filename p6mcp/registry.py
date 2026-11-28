@@ -44,7 +44,8 @@ from p6mcp import skills as _skills
 
 from p6mcp.core import state as _state
 from p6mcp.core.state import _refresh, _ro_cons, _shop_on
-from p6mcp.core.constants import CAL_CHECK_KINDS, CSTR_TYPES, EPPM_EDIT_TOOLS, MAX_ROWS, REL_TYPES, XER_READ_ONLY
+from p6mcp.core.constants import (CAL_CHECK_KINDS, CSTR_TYPES, EPPM_EDIT_TOOLS, MAX_ROWS, PMDB_READ_ONLY, REL_TYPES,
+                                  XER_READ_ONLY)
 
 
 # Parameter types shown to MCP clients (module level: the SDK evaluates the string annotations).
@@ -199,6 +200,8 @@ def _before_call(tool: str) -> _config.Settings:
     st = _refresh()
     if st.xer_files and _policy.is_write(tool):
         raise ValueError(XER_READ_ONLY)
+    if st.pmdb and _policy.is_write(tool):
+        raise ValueError(PMDB_READ_ONLY)
     if st.eppm and _policy.is_write(tool) and tool not in EPPM_EDIT_TOOLS:
         raise ValueError(_eppm_refusal(tool))
     why = _policy.refusal(tool, st.tool_profile, st.allow_writes, _shop_on(st))

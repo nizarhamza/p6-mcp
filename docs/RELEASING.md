@@ -92,6 +92,11 @@ On a clean Windows 10 or 11 user account, with no Python installed:
       SQL and by REST (`p6_cpm_validate` match rate 1.0 on both), an edit and a new relationship pending, a push
       refused on a change made in P6 EPPM meanwhile, then a push that succeeds and its reverse, `p6_eppm_schedule`
       with its log. Check in P6 EPPM that the server ends as it started.
+- [ ] P6 Professional on SQL Server or Oracle (`pmdb`), against a test database only (never a customer database),
+      once on SQL Server and once on Oracle: Install the driver, Test connection with a wrong then the right
+      password (only the right one is stored; the P6 version and project count shown), Copy now by Project ID and by
+      EPS, `p6_cpm_validate` match rate 1.0 and `p6_health_check` equal to the same project in a standalone
+      database, a write tool refused, `p6_pmdb_refresh` after a change in P6. Not yet run on a real server.
 - [ ] Remote access (with a Cloudflare test account, never a customer's): Settings, Remote access, Create the API
       token (four permissions ticked), Set up; Turn on remote access, Save: the tray shows "Remote access on" (this
       runs the **bundled** cloudflared: the 3.2.0 draft failed here, cloudflared is under `P6MCP\_internal`);

@@ -37,6 +37,7 @@ GROUPS: list[tuple[str, list[str]]] = [
     ("XER files", ["p6_inspect_xer", "p6_import_xer", "p6_export_xer"]),
     ("P6 EPPM server", ["p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status", "p6_eppm_discard",
                         "p6_eppm_push", "p6_eppm_schedule"]),
+    ("P6 Professional on SQL Server or Oracle", ["p6_pmdb_refresh"]),
     ("Edits (off by default)", ["p6_update_activity", "p6_update_activities", "p6_add_activities",
                                 "p6_update_assignment", "p6_update_assignments",
                                 "p6_update_udf", "p6_update_udfs", "p6_update_activity_codes", "p6_move_activities",
@@ -109,6 +110,8 @@ SUMMARY = {
     "p6_eppm_push": "Sends the pending local changes to the P6 EPPM server after a conflict check and your yes",
     "p6_eppm_schedule": "Schedules projects on the P6 EPPM server (P6's own F9), returns its log, then pulls them "
                         "again",
+    "p6_pmdb_refresh": "Copies the chosen projects and their baselines again from the SQL Server or Oracle database "
+                       "into the local read-only copy (the server is only read)",
     "p6_update_activity": "Edits an activity: name, durations, constraint, actual dates, physical % complete",
     "p6_update_activities": "Edits many activities in one all-or-nothing change (a progress update)",
     "p6_add_activities": "Creates activities with their relationships in one all-or-nothing change (F9 afterwards)",

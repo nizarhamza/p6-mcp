@@ -204,7 +204,7 @@ from p6mcp.tools.reporting import (  # noqa: F401  (re-exported)
     p6_resource_loading, p6_resource_summary, p6_trend, _trend_names,
 )
 from p6mcp.tools.database import (  # noqa: F401  (re-exported)
-    p6_calendar_check, p6_diagnose, p6_list_calendars, p6_schedule_options, p6_sql_select,
+    p6_calendar_check, p6_diagnose, p6_list_calendars, p6_pmdb_refresh, p6_schedule_options, p6_sql_select,
 )
 from p6mcp.tools.writes import (  # noqa: F401  (re-exported)
     p6_add_relationship, p6_add_relationships, p6_delete_activity, p6_delete_relationship, p6_delete_relationships,
@@ -234,7 +234,7 @@ from p6mcp.tools.shop import (  # noqa: F401  (re-exported)
 _FORWARD = {
     'BACKUP_DIR': _state, '_backup_done': _state, 'DB_PATH': _state, 'EPPM_MANIFEST': _state, '_last_backup': _state,
     '_last_pruned': _state, 'LOG_DIR': _state, 'P6_USER': _state, 'SETTINGS': _state, 'SKIP_PROC': _state,
-    'STARTUP': _state, 'XER_MANIFEST': _state,
+    'STARTUP': _state, 'XER_MANIFEST': _state, 'PMDB_MANIFEST': _state,
     'mcp': _registry, 'PROMPTS': _registry,
 }
 
