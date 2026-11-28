@@ -167,6 +167,16 @@ def test_switches_ask_first(qtbot, env):
     p.edits.setChecked(True)
     p.awake.setChecked(False)
     assert w.data["remote_allow_writes"] is True and w.data["remote_keep_awake"] is False
+    # file downloads and uploads: off by default, asked before turning on
+    assert not p.files.isChecked() and not w.data.get("remote_allow_files")
+    env["answers"]["value"] = False
+    p.files.setChecked(True)
+    assert not p.files.isChecked() and not w.data.get("remote_allow_files")
+    env["answers"]["value"] = True
+    p.files.setChecked(True)
+    assert w.data["remote_allow_files"] is True
+    p.files.setChecked(False)
+    assert w.data["remote_allow_files"] is False
     assert p.status.text() == "Running. Connector address: https://" + HOST + "/mcp" or "Not running" in \
         p.status.text() or "Save" in p.status.text()
 

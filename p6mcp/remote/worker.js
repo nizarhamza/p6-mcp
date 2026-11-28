@@ -2,7 +2,9 @@
 // by p6mcp.remote.cloudflare. https://p6mcp-<pc>.<sub>.workers.dev -> Workers VPC Service -> tunnel -> this PC,
 // 127.0.0.1:<remote port>. It forwards every request unchanged, adds the relay secret (the remote access server
 // refuses requests without it) and the caller's IP, and streams the answer back (SSE included). It keeps nothing:
-// no storage, no logs of request bodies.
+// no storage, no logs of request bodies. Every path is forwarded, the file handoff pages too (/files/<token>,
+// /upload/<token>, 3.7): an uploaded XER (at most 51 MB with its form envelope, under the 100 MB request limit of
+// Cloudflare's free plan) is read into memory once like any other body, so the relay needed no change for them.
 //
 // When the PC cannot be reached (remote access off, PC asleep or off, app not running), an MCP request gets a
 // JSON-RPC error that says so: claude.ai and ChatGPT show that message, where a bare HTTP 503 only shows as
@@ -30,7 +32,8 @@ export default {
     const headers = new Headers(request.headers);
     headers.set("X-P6MCP-Relay", env.RELAY_SECRET || "");
     headers.set("X-P6MCP-Client-IP", request.headers.get("CF-Connecting-IP") || "");
-    // request bodies are small (an MCP call, a token form): read once, so the JSON-RPC id is known if the PC is down
+    // request bodies are small (an MCP call, a token form; an XER upload up to 51 MB): read once, so the JSON-RPC id
+    // is known if the PC is down
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
     let rpcId;
     if (body !== undefined && url.pathname === "/mcp") {

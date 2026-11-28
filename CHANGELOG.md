@@ -21,6 +21,22 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
     entry written as an inline table or dotted keys, and checks every edit by parsing it again.
 - P6 skills for Codex, Zed, Gemini CLI and Devin in `~/.agents/skills`, the folder the four share (Install skills
   once serves them all). Continue gets no skills (its loader reads its own skills folder twice).
+- Remote file handoff for claude.ai and ChatGPT (setting **Allow file downloads and uploads** on the Remote access
+  page, `remote_allow_files`, off by default; restart remote access after turning it on):
+  - `p6_export_xer`, `p6_export_dashboard` and `p6_export_lookahead` are offered to remote clients: they write
+    into a private folder of the connection (`%LOCALAPPDATA%\P6MCP\remote\files`; remotely `file_name` replaces
+    `path` and `overwrite`) and return `download_url`, a one-time link (single use, 15 minutes) to a page whose
+    Download button sends the file once, then deletes it.
+  - `p6_remote_upload_link` (remote clients only) returns `upload_url`, a one-time page (15 minutes) where the user
+    sends one `.xer` of up to 50 MB from the browser (streamed to disk, checked as an XER), and an `upload_id` that
+    `p6_inspect_xer` and `p6_import_xer` take instead of a path for an hour, for that connection only. The import
+    stays a write: remote edits switch, a connection approved with edits, dry run and confirmation.
+  - Links carry only a 256-bit random token, stored hashed in `auth.db` and compared in constant time; ending a
+    connection voids its links; expired files are removed at start, on access and every minute; at most 10 files
+    wait per connection; the audit log records links minted, used and expired and uploads received or refused,
+    never tokens, file names or contents (request paths are logged with the token left out, and uvicorn's access
+    log is off). Rate limits for `/files` and `/upload`; the upload route alone accepts a body above 1 MB. The
+    relay Worker already forwards every path: no Repair is needed.
 
 ## [3.6.0] - 2026-11-28
 

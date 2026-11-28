@@ -46,8 +46,21 @@ Planned, early and late dates and float are never written: P6 recalculates them 
   (setting `remote_pair_port`, default 39219, running while remote access is on) that accepts it only from a page
   of the user's own connector address (Origin and Host checked) and from the browser that started the request (a
   key kept in a cookie); the user still clicks Approve. Remote clients never get delete,
-  restore, file import or export, or shop tools; they edit only with the remote edit switch and a connection
+  restore or shop tools; they edit only with the remote edit switch and a connection
   approved with edits, and the confirmation token of a dry run works only for the connection that asked for it.
+  File exports and XER import are offered to them only with the file handoff switch (setting
+  `remote_allow_files`, off by default, Settings "Allow file downloads and uploads"): an export is written in a
+  private folder of the connection (`%LOCALAPPDATA%\P6MCP\remote\files`, never a path the client names) and
+  handed over through a one-time link `https://<connector host>/files/<token>`; an XER comes in through a one-time
+  upload page `https://<connector host>/upload/<token>` (one `.xer`, at most 50 MB, streamed to that folder and
+  checked as an XER), then the XER tools take its `upload_id`, which only the same connection can use. A link
+  carries a 256-bit random token and nothing else, works once and for 15 minutes; tokens are stored as SHA-256
+  hashes and compared in constant time; the download page sends the file only on its button (POST), so a link
+  preview cannot spend it; files are sent as attachments with `no-store`. Ending a connection voids its links;
+  expired files are deleted at start, on access and every minute; an uploaded XER is kept an hour; at most 10
+  files wait per connection. Import from an uploaded XER is still a write (remote edit switch, `p6:write`, dry run
+  and confirmation). The audit log records link minted, used and expired and uploads received or refused, never
+  a token, a file name or file contents, and request paths are logged with the token left out.
   Password columns read as empty in their `p6_sql_select`, local paths are reduced to file names, request rates
   are limited, and every request, sign-in and tool call goes to an audit log (no values, tokens or query
   strings). The Cloudflare API token is used once during setup and never stored; the tunnel token and relay

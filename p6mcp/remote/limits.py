@@ -3,13 +3,14 @@
 Rate limits (per caller IP, as the relay or Cloudflare reports it): token buckets refilled continuously. The login
 endpoints are tight (a person connects an app a few times, a client refreshes its token once an hour); /mcp is
 generous (an AI app makes a few calls a second at most); /authorize/wait allows the browser page's polling (one
-request every 2 s) with room to spare.
+request every 2 s) with room to spare. The file handoff pages (/files/<token>, /upload/<token>) take a page view
+and a POST per file: tight, a link guesser gets a few tries a minute against 256-bit tokens.
 
 IP allowlist (setting remote_ip_allowlist, off by default): /mcp and the client endpoints of OAuth (/token,
 /register, /revoke) accept only Anthropic's published outbound ranges and OpenAI's connector ranges
 (https://openai.com/chatgpt-connectors.json, refreshed daily, the last good copy kept). The browser pages
-(/authorize, /authorize/wait) and the metadata are not filtered: the user's own browser opens them. Defence in
-depth only: the OAuth token is the control.
+(/authorize, /authorize/wait, the file handoff pages) and the metadata are not filtered: the user's own browser
+opens them. Defence in depth only: the OAuth token is the control.
 """
 
 from __future__ import annotations
@@ -29,7 +30,8 @@ log = logging.getLogger("p6mcp.remote.limits")
 
 # (requests per minute, burst) per caller IP
 LIMITS = {"/authorize/wait": (120, 30), "/authorize": (10, 10), "/register": (10, 5), "/token": (30, 10),
-          "/revoke": (30, 10), "/mcp": (600, 120)}
+          "/revoke": (30, 10), "/mcp": (600, 120),
+          "/files": (30, 10), "/upload": (20, 6)}  # file handoff pages: a page view and one POST per file
 # https://platform.claude.com/docs/en/api/ip-addresses (outbound, "will not change without notice"), 2026-11-25
 ANTHROPIC = ("160.79.104.0/21", "153.61.208.0/20")
 OPENAI_URL = "https://openai.com/chatgpt-connectors.json"

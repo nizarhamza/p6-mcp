@@ -95,6 +95,7 @@ DEFAULTS: dict[str, Any] = {
     "remote_port": 39218,         # local port of the remote access server (127.0.0.1 only)
     "remote_pair_port": 39219,    # 3.3: loopback port of the tray app for the Connect button of the browser page
     "remote_allow_writes": False,  # edits from remote clients, independent from allow_writes
+    "remote_allow_files": False,  # 3.7: file handoff (one-time download links of exports, XER upload page)
     "remote_keep_awake": True,    # keep the PC awake while remote access is on
     "remote_ip_allowlist": False,  # accept only the published Anthropic and OpenAI ranges
     "remote_extra_redirect_uris": [],  # Advanced: OAuth callback URLs accepted besides claude.ai and chatgpt.com
@@ -292,8 +293,8 @@ def _check_remote(out: dict) -> list[str]:
     errs = []
     if out["remote_mode"] not in REMOTE_MODES:
         errs.append(f"remote_mode must be one of {list(REMOTE_MODES)}, got {out['remote_mode']!r}")
-    for key in ("remote_enabled", "remote_privacy_ack", "remote_allow_writes", "remote_keep_awake",
-                "remote_ip_allowlist"):
+    for key in ("remote_enabled", "remote_privacy_ack", "remote_allow_writes", "remote_allow_files",
+                "remote_keep_awake", "remote_ip_allowlist"):
         if not isinstance(out[key], bool):
             errs.append(f"{key} must be true or false, got {out[key]!r}")
     port = out["remote_port"]
@@ -573,6 +574,7 @@ class Settings:
     remote_public_host: Optional[str] = None
     remote_port: int = 39218
     remote_allow_writes: bool = False
+    remote_allow_files: bool = False
     log_level: str = "INFO"
     config_path: str = ""
     config_error: Optional[str] = None
@@ -707,7 +709,7 @@ def load(override: Optional[dict] = None) -> Settings:
         transport=cfg["transport"], http_port=cfg["http_port"], log_level=cfg["log_level"],
         remote_enabled=cfg["remote_enabled"], remote_mode=cfg["remote_mode"],
         remote_public_host=cfg["remote_public_host"], remote_port=cfg["remote_port"],
-        remote_allow_writes=cfg["remote_allow_writes"],
+        remote_allow_writes=cfg["remote_allow_writes"], remote_allow_files=cfg["remote_allow_files"],
         config_path=path, config_error=err, migrated=tuple(steps), raw=cfg)
 
 

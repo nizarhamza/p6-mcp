@@ -54,9 +54,10 @@ class StubVerifier:
 
 # ----------------------------------------------------------------- policy
 
-EXPECTED_NEVER = {"p6_delete_activity", "p6_delete_project", "p6_eppm_push", "p6_restore_backup", "p6_export_xer",
-                  "p6_export_dashboard", "p6_export_lookahead", "p6_import_xer", "p6_inspect_xer", "p6_shop_search",
+EXPECTED_NEVER = {"p6_delete_activity", "p6_delete_project", "p6_eppm_push", "p6_restore_backup", "p6_shop_search",
                   "p6_shop_get", "p6_shop_install", "p6_use_database"}
+# file handoff (remote_allow_files, off by default): exports through a one-time download link, XER by upload_id
+EXPECTED_FILES = {"p6_export_xer", "p6_export_dashboard", "p6_export_lookahead", "p6_import_xer", "p6_inspect_xer"}
 
 
 def test_every_tool_has_a_remote_decision(server):
@@ -71,6 +72,8 @@ def test_every_tool_has_a_remote_decision(server):
     assert kinds["p6_trend"] == "read"  # 3.5.0: read only, offered to remote clients
     # 3.6.0: activity code values and WBS moves are writes, as p6_update_activities: remote writes switch + scope
     assert kinds["p6_update_activity_codes"] == kinds["p6_move_activities"] == "write"
+    assert policy.REMOTE_FILE_TOOLS == EXPECTED_FILES and kinds["p6_import_xer"] == "write"
+    assert {kinds[t] for t in EXPECTED_FILES - {"p6_import_xer"}} == {"read"}
     full = dict(profile="full", allow_writes=True)
     for t in ("p6_update_activity_codes", "p6_move_activities"):
         assert not policy.remote_listed(t, **full, remote_writes=False)
@@ -88,6 +91,10 @@ def test_remote_listing():
     assert not policy.remote_listed("p6_update_activity", "full", False, True)  # local writes off: not listed
     assert not policy.remote_listed("p6_delete_project", **full, remote_writes=True)
     assert not policy.remote_listed("p6_export_dashboard", **full, remote_writes=True)
+    assert policy.remote_listed("p6_export_dashboard", **full, remote_writes=False, files=True)
+    assert not policy.remote_listed("p6_import_xer", **full, remote_writes=False, files=True)  # still a write
+    assert policy.remote_listed("p6_import_xer", **full, remote_writes=True, files=True)
+    assert not policy.remote_listed("p6_inspect_xer", "basic", True, True, files=True)  # Full profile only
     assert not policy.remote_listed("p6_sql_select", "basic", True, True)  # Basic profile still applies
 
 
@@ -102,6 +109,11 @@ def test_remote_refusal_rules():
     assert "not available to remote clients" in r("p6_delete_project", "full", True, True, WRITE)
     assert "xer_path" in r("p6_schedule_options", "full", True, False, READ, args={"xer_path": "C:\\a.xer"})
     assert r("p6_schedule_options", "full", True, False, READ, args={"project": "DEMO-A"}) is None
+    assert "Allow file downloads and uploads" in r("p6_export_xer", "full", True, True, READ)
+    assert r("p6_export_xer", "full", True, False, READ, files=True) is None
+    assert r("p6_import_xer", "full", True, False, WRITE, files=True) == policy.REMOTE_WRITES_OFF
+    assert r("p6_import_xer", "full", True, True, READ, files=True) == policy.REMOTE_SCOPE_OFF
+    assert r("p6_import_xer", "full", True, True, WRITE, files=True) is None
 
 
 def test_confirmation_token_is_bound_to_its_connection():
@@ -272,7 +284,8 @@ def test_tool_list_and_read_call(live):
         return names, _body(res)
     names, body = _session(live, "tok-read", steps)
     assert names == set(remote.remote_tools(live["st"]))
-    assert not names & EXPECTED_NEVER and "p6_update_activity" in names
+    assert not names & (EXPECTED_NEVER | EXPECTED_FILES) and "p6_update_activity" in names
+    assert "p6_remote_upload_link" not in names  # file handoff is off by default
     assert any(r.get("proj_short_name", r.get("project")) == "DEMO-A" or "DEMO-A" in json.dumps(r)
                for r in body["rows"])
 
