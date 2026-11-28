@@ -13,6 +13,7 @@ ICON = os.path.join(BRAND, "ico", "p6mcp.ico")
 
 # the core skills bundled for offline first starts (p6mcp.core_skills): both exes offer them as MCP prompts
 datas = [(os.path.join(ROOT, "p6mcp", "locales", "*.json"), os.path.join("p6mcp", "locales")),
+         (os.path.join(ROOT, "p6mcp", "locales", "tools", "*.json"), os.path.join("p6mcp", "locales", "tools")),
          (os.path.join(ROOT, "p6mcp", "data", "core_skills", "*.json"), os.path.join("p6mcp", "data", "core_skills")),
          (os.path.join(ROOT, "p6mcp", "remote", "worker.js"), os.path.join("p6mcp", "remote"))]  # relay Worker
 for dist in ("mcp", "pydantic", "pydantic_core", "uvicorn", "starlette", "anyio", "keyring", "jsonschema",

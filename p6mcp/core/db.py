@@ -24,6 +24,7 @@ from p6mcp.core import state as _state
 from p6mcp.core.state import _cols_cache, _ro_cons, _schema_cache
 from p6mcp.core.constants import _cstr_label, HPD_SQL, MAX_ROWS, PMDB_READ_ONLY, SQL_PRAGMAS, XER_READ_ONLY
 from p6mcp.registry import ACT_FIELDS, ACT_HOURS, DATETIME_PATTERN, Detail
+from p6mcp.messages import _t
 
 
 _SQL_ALLOWED = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION,
@@ -66,7 +67,7 @@ def _write_refusal() -> Optional[str]:
         return PMDB_READ_ONLY
     if _state.SETTINGS.eppm:  # the working copy is ours: no schema gate, writes as the settings allow
         if not _state.EPPM_MANIFEST:
-            return "Nothing pulled yet from the P6 EPPM server: pull a project with p6_eppm_pull first."
+            return _t("Nothing pulled yet from the P6 EPPM server: pull a project with p6_eppm_pull first.")
         return _policy.write_refusal(_state.SETTINGS.tool_profile, _state.SETTINGS.allow_writes)
     why = _policy.write_refusal(_state.SETTINGS.tool_profile, _state.SETTINGS.allow_writes)
     if why:
@@ -108,8 +109,8 @@ def _connect(readonly: bool = True) -> sqlite3.Connection:
     if not _state.DB_PATH:
         raise RuntimeError(_state.SETTINGS.db_problem or _config.NO_DB_MESSAGE)
     if not os.path.isfile(_state.DB_PATH):
-        raise RuntimeError(f"The configured database was not found: {_state.DB_PATH}. Open MCP for Primavera P6 Settings to select "
-                           "another one.")
+        raise RuntimeError(_t("The configured database was not found: {path}. Open MCP for Primavera P6 Settings "
+                              "to select another one.", path=_state.DB_PATH))
     if readonly:
         sig = _file_sig(_state.DB_PATH)  # before the connection opens: before any snapshot it will read
         con = sqlite3.connect(_ro_uri(_state.DB_PATH), uri=True, timeout=5, factory=_RoCon)
@@ -227,7 +228,7 @@ def _guard_write() -> Optional[str]:
     if _state.SETTINGS.eppm:  # P6 never opens the working copy of a P6 EPPM server
         return None
     if _p6_running():
-        return "P6 (PM.exe) is running. Close P6 completely, then retry."
+        return _t("P6 (PM.exe) is running. Close P6 completely, then retry.")
     return None
 
 
@@ -239,7 +240,8 @@ def _next_key(con: sqlite3.Connection, table: str, id_col: str) -> int:
         (f"{table}_{id_col}",),
     ).fetchone()
     if row is None:
-        raise RuntimeError(f"No NEXTKEY entry found for {table}.{id_col}; run p6_diagnose.")
+        raise RuntimeError(_t("No NEXTKEY entry found for {table}.{id_col}; run p6_diagnose.", table=table,
+                              id_col=id_col))
     max_id = con.execute(f"SELECT COALESCE(MAX({id_col}),0) FROM {table}").fetchone()[0]
     new_id = max(int(row["key_seq_num"]), int(max_id) + 1)
     con.execute(
@@ -254,7 +256,7 @@ def _project_id(con, project: str) -> int:
         (project,),
     ).fetchone()
     if not r:
-        raise ValueError(f"Project not found: {project}")
+        raise ValueError(_t("Project not found: {project}", project=project))
     return r[0]
 
 
@@ -267,7 +269,8 @@ def _task(con, project: str, task_code: str) -> sqlite3.Row:
         (pid, task_code),
     ).fetchone()
     if not r:
-        raise ValueError(f"Activity {task_code} not found in project {project}")
+        raise ValueError(_t("Activity {task_code} not found in project {project}", task_code=task_code,
+                            project=project))
     return r
 
 
@@ -289,7 +292,7 @@ def _act_view(r: sqlite3.Row) -> dict:
 def _brief_on(detail: str) -> bool:
     """detail= of the activity tools: 'full' (every key, the fixed shape) or 'brief' (no null values)."""
     if detail not in get_args(Detail):
-        raise ValueError(f"detail must be one of {list(get_args(Detail))}")
+        raise ValueError(_t("detail must be one of {allowed}", allowed=list(get_args(Detail))))
     return detail == "brief"
 
 
@@ -307,7 +310,7 @@ def _act_row(fields: Optional[Sequence[str]] = None, detail: str = "full") -> Ca
     fields = [fields] if isinstance(fields, str) else list(fields)
     bad = [f for f in fields if f not in ACT_FIELDS]
     if bad:
-        raise ValueError(f"Unknown field(s) {bad}; allowed: {list(ACT_FIELDS)}")
+        raise ValueError(_t("Unknown field(s) {bad}; allowed: {allowed}", bad=bad, allowed=list(ACT_FIELDS)))
     keep = list(dict.fromkeys(["task_code", *fields]))
 
     def row_fn(r: sqlite3.Row) -> dict:
@@ -341,7 +344,7 @@ def _parse_dt(value: str, field: str) -> tuple[datetime, bool]:
                 return datetime.strptime(v, fmt), fmt != "%Y-%m-%d"
             except ValueError:
                 pass
-    raise ValueError(f"{field}: {value!r} is not a date. Use 'YYYY-MM-DD HH:MM'.")
+    raise ValueError(_t("{field}: {value!r} is not a date. Use 'YYYY-MM-DD HH:MM'.", field=field, value=value))
 
 
 _DB_DT_SHAPE = re.compile(r"\d{4}-\d\d-\d\d(?: \d\d:\d\d(?::\d\d)?)?\Z")
@@ -383,7 +386,7 @@ def _baseline_pid(con, pid: int, baseline: Optional[str]) -> Optional[int]:
         r = con.execute("SELECT proj_id FROM PROJECT WHERE proj_short_name = ? "
                         "AND COALESCE(project_flag, 'Y') = 'Y'" + _alive(con, "PROJECT"), (baseline,)).fetchone()
         if not r:
-            raise ValueError(f"Project or baseline not found: {baseline}")
+            raise ValueError(_t("Project or baseline not found: {baseline}", baseline=baseline))
         return r[0]
     if "sum_base_proj_id" not in _cols(con, "PROJECT"):
         return None
@@ -398,9 +401,9 @@ def _baseline_pid(con, pid: int, baseline: Optional[str]) -> Optional[int]:
 def _check_page(offset: int, limit: int) -> tuple[int, int]:
     offset, limit = int(offset), int(limit)
     if offset < 0:
-        raise ValueError("offset must be 0 or more")
+        raise ValueError(_t("offset must be 0 or more"))
     if limit < 1:
-        raise ValueError("limit must be 1 or more")
+        raise ValueError(_t("limit must be 1 or more"))
     return offset, min(limit, MAX_ROWS)
 
 
@@ -474,12 +477,12 @@ def _backup_taken_at(path: str) -> str:
 def _backup_file(name: str) -> str:
     """Path of a backup named as p6_list_backups shows it (a bare file name in the backup folder)."""
     if not name or os.path.basename(name) != name or not name.lower().endswith(".db"):
-        raise ValueError("name: a .db file name from p6_list_backups (no folder)")
+        raise ValueError(_t("name: a .db file name from p6_list_backups (no folder)"))
     path = os.path.join(_backup_dir(), name)
     if not os.path.isfile(path):
-        raise ValueError(f"Backup not found in {_backup_dir()}: {name}")
+        raise ValueError(_t("Backup not found in {folder}: {name}", folder=_backup_dir(), name=name))
     if os.path.abspath(path) == os.path.abspath(_state.DB_PATH):
-        raise ValueError("That file is the database itself")
+        raise ValueError(_t("That file is the database itself"))
     return path
 
 
@@ -491,7 +494,8 @@ def _projects_of(path: str) -> dict[str, tuple]:
         tables = {r[0].upper() for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         missing = {"PROJECT", "TASK", "TASKPRED", "PROJWBS"} - tables
         if missing:
-            raise ValueError(f"{os.path.basename(path)} is not a P6 database (no {sorted(missing)})")
+            raise ValueError(_t("{path} is not a P6 database (no {missing})", path=os.path.basename(path),
+                                missing=sorted(missing)))
         cols = {r[1].lower() for r in con.execute("PRAGMA table_info(PROJECT)")}
         sel = ", ".join(c if c in cols else f"NULL AS {c}" for c in ("last_recalc_date", "last_schedule_date"))
         alive = " AND delete_session_id IS NULL" if "delete_session_id" in cols else ""

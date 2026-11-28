@@ -26,6 +26,7 @@ from p6mcp.core.read import (
     _act_details, _critical_clause, _rel_page, _udf_filter, _udf_out, _udf_type, _udf_values, _wbs_of,
 )
 from p6mcp.core.reporting import _bl_planned_by_wbs
+from p6mcp.messages import _t
 
 
 # ----------------------------------------------------------------- read tools
@@ -42,7 +43,7 @@ def p6_list_projects(include_baselines: bool = False, exclude_templates: bool = 
     every EPS below it. order: 'project' (Project ID) or 'eps' (EPS tree order as p6_list_eps
     order='tree', then Project ID; projects outside every EPS node last)."""
     if order not in get_args(ProjOrder):
-        raise ValueError(f"order must be one of {list(get_args(ProjOrder))}")
+        raise ValueError(_t("order must be one of {orders}", orders=list(get_args(ProjOrder))))
     eps_id = eps  # the EPS ID asked (eps then holds the EPS tree)
     con = _connect()
     want = ["proj_id", "proj_short_name", "last_recalc_date", "plan_start_date", "scd_end_date"]
@@ -56,7 +57,7 @@ def p6_list_projects(include_baselines: bool = False, exclude_templates: bool = 
         top = next((n for n in eps if n["eps_id"] == eps_id), None)
         if top is None:
             con.rollback()
-            raise ValueError(f"EPS {eps_id!r} not found: {[n['eps_id'] for n in eps]}")
+            raise ValueError(_t("EPS {eps_id!r} not found: {known}", eps_id=eps_id, known=[n['eps_id'] for n in eps]))
         under, k = [top], eps.index(top) + 1
         while k < len(eps) and eps[k]["depth"] > top["depth"]:  # tree order: the subtree follows its node
             under.append(eps[k])
@@ -104,7 +105,7 @@ def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Opt
     or relative to the project node ('5.1'); max_depth counts levels below the start node. root repeats
     the start node (unplaced = activities outside the tree, when it is the project node)."""
     if max_depth is not None and int(max_depth) < 0:
-        raise ValueError("max_depth must be 0 or more")
+        raise ValueError(_t("max_depth must be 0 or more"))
     con = _connect()
     pid = _project_id(con, project)
     con.execute("BEGIN")  # tree, rollups and the stored count from one snapshot
@@ -112,7 +113,7 @@ def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Opt
         sep = _name_sep(con, pid)
         nodes = _wbs_tree(con, pid, sep)
         if not nodes:
-            raise ValueError(f"Project {project} has no project WBS node.")
+            raise ValueError(_t("Project {project} has no project WBS node.", project=project))
         own: dict[int, dict] = {}
         bpl: dict[int, dict] = {}
         bid = _baseline_pid(con, pid, baseline)
@@ -144,7 +145,8 @@ def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Opt
             rel = [n["wbs_code"][len(top) + len(sep):] for n in nodes[1:]]
             near = (difflib.get_close_matches(p, rel, n=10)
                     or [r for r, n in zip(rel, nodes[1:], strict=False) if n["depth"] == 1][:10])
-            raise ValueError(f"WBS code {parent!r} not found in {project}. Close codes: {near}")
+            raise ValueError(_t("WBS code {parent!r} not found in {project}. Close codes: {near}",
+                                parent=parent, project=project, near=near))
     d0 = nodes[i]["depth"]
     end = next((k for k in range(i + 1, len(nodes)) if nodes[k]["depth"] <= d0), len(nodes))
     sub = [n for n in nodes[i:end] if max_depth is None or n["depth"] - d0 <= int(max_depth)]
@@ -177,7 +179,7 @@ def p6_list_wbs(project: ProjectId, parent: Optional[str] = None, max_depth: Opt
     if rollups and i == 0:
         res["root"]["unplaced"] = sum(v["n"] for k, v in own.items() if k not in ids)
     if stored != len(nodes):
-        res["note"] = f"{stored - len(nodes)} WBS rows not reachable from the project node."
+        res["note"] = _t("{n} WBS rows not reachable from the project node.", n=stored - len(nodes))
     return res
 
 
@@ -217,7 +219,7 @@ def p6_query_activities(
     udfs {label: value} (None when empty). detail='brief' leaves the null values out of the rows (fields=
     still applies; udfs kept whole)."""
     if status is not None and status not in get_args(Status):
-        raise ValueError(f"status must be one of {list(get_args(Status))}")
+        raise ValueError(_t("status must be one of {statuses}", statuses=list(get_args(Status))))
     row_fn = _act_row(fields, detail)
     if isinstance(udfs, str):
         udfs = [udfs]
@@ -292,11 +294,11 @@ def p6_get_activity(project: ProjectId, task_code: ActivityId, detail: DetailArg
         pg = _rel_page(con, t, dr, 0, ACT_LINKS_CAP)
         out[key], out[key[:-1] + "_count"] = pg["rows"], pg["total"]
     if max(out["predecessor_count"], out["successor_count"]) > ACT_LINKS_CAP:
-        out["links_note"] = f"Only the first {ACT_LINKS_CAP} of each list: page with p6_get_relationships."
+        out["links_note"] = _t("Only the first {n} of each list: page with p6_get_relationships.", n=ACT_LINKS_CAP)
     details, cut = _act_details(con, t["task_id"])
     out.update(details)
     if cut:
-        out["details_note"] = f"Only the first {ACT_LINKS_CAP} rows of: {', '.join(cut)}."
+        out["details_note"] = _t("Only the first {n} rows of: {tables}.", n=ACT_LINKS_CAP, tables=", ".join(cut))
     out["lag_rule"] = _lag_info(con, t["proj_id"])
     out["schedule_state"] = _schedule_state(con, t["proj_id"])
     if brief:
@@ -321,18 +323,20 @@ def p6_list_udfs(table: str = "TASK", project: Optional[ProjectId] = None, name_
     used = UDFs with at least one value. Values: p6_query_activities(udfs=..., udf_filter=...)."""
     con = _connect()
     if not _cols(con, "UDFTYPE") or not _cols(con, "UDFVALUE"):
-        raise ValueError("This database has no UDFTYPE / UDFVALUE tables")
+        raise ValueError(_t("This database has no UDFTYPE / UDFVALUE tables"))
     table = str(table or "TASK").strip().upper()
     con.execute("BEGIN")  # page, used count and subjects from one snapshot
     try:
         subjects = [r[0] for r in con.execute("SELECT DISTINCT table_name FROM UDFTYPE WHERE table_name IS NOT NULL"
                                               + _alive(con, "UDFTYPE") + " ORDER BY table_name")]
         if table not in subjects:
-            raise ValueError(f"No UDF on table {table!r}; tables with UDFs: {subjects}")
+            raise ValueError(_t("No UDF on table {table!r}; tables with UDFs: {subjects}",
+                                table=table, subjects=subjects))
         vflt, vargs, pid = "", [], None
         if project:
             if table not in UDF_PROJECT_TABLES:
-                raise ValueError(f"project= applies to {list(UDF_PROJECT_TABLES)} UDFs, not {table} (global)")
+                raise ValueError(_t("project= applies to {tables} UDFs, not {table} (global)",
+                                    tables=list(UDF_PROJECT_TABLES), table=table))
             pid = _project_id(con, project)
             vflt, vargs = " AND v.proj_id = ?", [pid]
         ycols = _cols(con, "UDFTYPE")
@@ -384,7 +388,7 @@ def p6_get_relationships(project: ProjectId, task_code: ActivityId, direction: D
     direction: pred, succ or both. Lag in hours (lag_h) and days (lag_d); lag_rule tells which
     calendar converts lag days (project schedule option, predecessor calendar by default)."""
     if direction not in get_args(Direction):
-        raise ValueError("direction must be pred, succ or both")
+        raise ValueError(_t("direction must be pred, succ or both"))
     con = _connect()
     t = _task(con, project, task_code)
     res = _rel_page(con, t, direction, offset, limit)
@@ -417,12 +421,13 @@ def p6_critical_path(project: ProjectId, mode: CpMode = "project", float_thresho
     if min_float_days is not None:
         lo = _num(min_float_days)
         if lo is None or not math.isfinite(lo):
-            raise ValueError("min_float_days must be a number of days")
+            raise ValueError(_t("min_float_days must be a number of days"))
         if used == "longest_path":
-            raise ValueError("min_float_days applies to total float, not to the longest path")
+            raise ValueError(_t("min_float_days applies to total float, not to the longest path"))
         cond, args = f"({cond}) AND t.total_float_hr_cnt > ? * {HPD_SQL}", [*args, lo]
-        definition += f"; total float > {lo:g} d (days of each activity's calendar)"
-    definition += "; LOE and WBS summary activities left out"
+        definition = _t("{definition}; total float > {days:g} d (days of each activity's calendar)",
+                        definition=definition, days=lo)
+    definition = _t("{definition}; LOE and WBS summary activities left out", definition=definition)
     tcols = _cols(con, "TASK")
     types, open_ = f" AND t.task_type NOT IN {SUMMARY_TYPES}", " AND t.status_code <> 'TK_Complete'"
     status = "" if include_completed else open_
@@ -449,7 +454,8 @@ def p6_critical_path(project: ProjectId, mode: CpMode = "project", float_thresho
                counts={"open": c[0], "total_float": c[1] or 0, "longest_path": c[2] if lp == "NULL" else c[2] or 0,
                        "negative_float": c[3] or 0, "excluded_summary": x},
                schedule_state=_schedule_state(con, pid),
-               note="Float and the longest path come from the last F9; completed activities carry no total float.")
+               note=_t("Float and the longest path come from the last F9; completed activities carry no total "
+                       "float."))
     return res
 
 
@@ -496,15 +502,15 @@ def p6_float_paths(project: ProjectId, path: Optional[PathNo] = None, include_co
         res["source"] = "float_path"
     else:
         if path is not None:
-            raise ValueError(f"P6 stored no float paths for {project}: enable multiple float paths in the "
-                             "schedule options and press F9, or call without path=.")
+            raise ValueError(_t("P6 stored no float paths for {project}: enable multiple float paths in the schedule "
+                                "options and press F9, or call without path=.", project=project))
         if "driving_path_flag" not in tcols:
-            raise ValueError("This database stores neither float paths nor driving_path_flag.")
+            raise ValueError(_t("This database stores neither float paths nor driving_path_flag."))
         q = (_act_from(con) + status + f" AND t.task_type NOT IN {SUMMARY_TYPES} AND t.driving_path_flag = 'Y' "
              "ORDER BY COALESCE(t.act_start_date, t.early_start_date), t.task_code, t.task_id")
         res = _page(con, q, [pid], offset, limit, row_fn)
         res.update(paths=[], source="driving_path_flag",
-                   note="P6 stored no float paths for this project: longest path activities (LOE and WBS summary "
-                        "left out) listed by start.")
+                   note=_t("P6 stored no float paths for this project: longest path activities (LOE and WBS "
+                           "summary left out) listed by start."))
     res["schedule_state"] = _schedule_state(con, pid)
     return res

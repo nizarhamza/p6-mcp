@@ -143,6 +143,40 @@ stay outside this repository.
   Windows display language, `is_rtl()` mirrors the layout (Arabic only needs its catalog). Strings: straight
   quotes, no long dashes (test). Every key used by the UI must exist in en.json and every catalog must have the
   same keys and placeholders (`tests/test_i18n.py`).
+- Tool messages (plan item P5, English and French; `p6mcp/messages.py`, catalog `p6mcp/locales/tools/fr.json`,
+  tests `tests/test_tool_messages.py`, checker `tools/tool_messages.py`). A text a person reads in a tool reply or
+  error (errors and refusals, plan lines, `next`, notes, caveats, warnings, reasons, definitions, explanations,
+  p6_diagnose advice) is built with `_t("template", name=value)`: a `Msg`, a str whose value is the English text
+  (so the edit log, plan digests, caches, comparisons and tests see English) that keeps its template and values.
+  `registry._in_language` (in `_gated`: result and exception, in place) and the remote wrapper (`fail`, before and
+  after `shaping`) render every Msg in `messages.language()`: env `P6MCP_TOOL_LANGUAGE` (conftest pins `en`), else
+  config `language` (re-read on every call, so a change in Settings applies without restart; `auto` = Windows
+  display language; a language without a tool catalog = English). The catalog maps the English template to the
+  French one (same fields: name, conversion, spec); a missing or broken entry gives English. Rules: the template is
+  a literal (or a module constant `NAME = "..."`, also as `module.NAME`) and a `str.format` template (literal
+  braces doubled); whole sentences per variant, never fragments glued with `+` or an f-string (that gives plain
+  English); `_join(sep, parts)` keeps each part translatable (punctuation separators only); `str(e)` keeps a Msg.
+  Stay English: keys, field names, enum / status / check / cause codes, P6 names (Activity ID, Project ID, WBS,
+  EPS, constraint and type labels), units, tool and parameter names, tool descriptions and schemas,
+  `INSTRUCTIONS`, the `confirmation_text` to type (`_confirm_text`; `next` quotes it), edit log and audit entries,
+  Excel workbooks and their `cards`, HTTP pages (their own i18n keys), `logging`. After adding or changing a
+  message: `python tools/tool_messages.py --missing fr` lists what to translate, `--check` (and the test) must
+  report nothing, `--prune fr` drops stale entries. `test_no_raw_english_text_in_the_tool_layer` scans raise
+  sites, message keys (`TEXT_KEYS`), plan / notes / warnings / reasons lists and refusal returns of the tool layer;
+  deliberate English goes in its `ALLOWED` (file, function) set. French house style: straight quotes, no long
+  dashes, a space before ":" ";" "?" "!", accents kept. Glossary (P6 Professional's French terms where they
+  exist): activité, relation (prédécesseur / successeur), décalage, référence (baseline), date des données, dernier
+  F9, ordonnancer / réordonnancer (appuyez sur F9), options d'ordonnancement, planning, mise à jour, périmé (stale),
+  marge totale / libre, chemin critique, quasi critique, chemin de marge, chemin pilotant, durée initiale /
+  restante, début réel / fin réelle, au plus tôt / au plus tard, dates planifiées, % physique, % d'avancement,
+  contrainte, date Must Finish By, calendrier, semaine de travail, jour chômé, jours ouvrés / calendaires, jalon,
+  LOE, récapitulatif WBS, extrémité ouverte, hors séquence, boucle, ressource, affectation, unités, coût, dépense,
+  valeur acquise, courbe en S, look-ahead, code d'activité, UDF, essai à blanc (dry run), plan, appliquer, jeton de
+  confirmation, oui explicite, journal des modifications, sauvegarde, restaurer, copie de travail, modifications en
+  attente, écritures, lecture seule, compétence, boutique de compétences, simulation (what-if), réserve (caveat),
+  contrôle de qualité, contrôle DCMA, seuil, moteur CPM, mode XER seul, client distant, client MCP, introuvable;
+  Settings labels as in the French UI catalog ("Paramètres de MCP for Primavera P6", 'Autoriser les opérations
+  d'écriture', profil d'outils Complet / Basique...).
 - `p6mcp/settings_app/`: PySide6 Settings window (`python -m p6mcp.settings_app`, `p6mcp-settings`):
   `window.SettingsWindow` edits `self.data` (config dict) and writes only on Save (`config.save`); pages
   `DatabasePage` (test runs on the thread pool through `common.Job`), `ServerPage` (transport, port check,

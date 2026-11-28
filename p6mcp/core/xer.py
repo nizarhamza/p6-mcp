@@ -17,6 +17,7 @@ from p6mcp.registry import Removable, XerTable
 from p6mcp.core.db import _alive, _cols, _ids_sql, _insert, _next_key, _now_str, _prefer, _project_id, _stamp_cols
 from p6mcp.core.props import _blob_text, _project_row, SCHED_XER_COLS, _xer_project, _xer_sched_export
 from p6mcp.core.wbs_codes import _guid
+from p6mcp.messages import _t
 
 
 # ----------------------------------------------------------------- XER import / export
@@ -162,7 +163,7 @@ def _xer_read_meta(path: str) -> tuple[list[str], dict[str, list[dict]], dict]:
         elif line.startswith("%E"):
             end = True
     if not header:
-        raise ValueError(f"{path} is not an XER file (no ERMHDR line).")
+        raise ValueError(_t("{path} is not an XER file (no ERMHDR line).", path=path))
     meta.update(replacement_chars=text.count("\ufffd"),
                 non_ascii_bytes=len(body.translate(None, bytes(range(128)))),
                 has_end_marker=end, field_count_mismatch=dict(mismatch), rows_before_fields=dict(early),
@@ -202,7 +203,7 @@ def _xer_preflight(header: list[str], x: dict, meta: dict, xer_project: Optional
                                                 if t not in XER_TABLES and t != "SCHEDOPTIONS"},
                            "dropped_columns": {}, "db_preview": None}
 
-    def add(level: str, check: str, items: Sequence, note: str = "") -> None:
+    def add(level: str, check: str, items: Sequence, note: str = "") -> None:  # note: a tool message (_t)
         if items:
             out[level].append({"check": check, "count": len(items), "sample": [str(i) for i in items[:15]],
                                **({"note": note} if note else {})})
@@ -214,64 +215,64 @@ def _xer_preflight(header: list[str], x: dict, meta: dict, xer_project: Optional
     code = {t.get("task_id"): t.get("task_code") for t in tasks}
     node_ids = {w.get("wbs_id") for w in wbs if w.get("proj_node_flag") == "Y"}
     fc = meta.get("field_count_mismatch", {})
-    add("errors", "project_wbs_node_missing", [] if node_ids else [xp["proj_short_name"]], "no project WBS node")
+    add("errors", "project_wbs_node_missing", [] if node_ids else [xp["proj_short_name"]], _t("no project WBS node"))
     add("errors", "task_wbs_missing", [t.get("task_code") for t in tasks if t.get("wbs_id") not in wbs_ids],
-        "would be imported without a WBS")
+        _t("would be imported without a WBS"))
     add("errors", "task_calendar_missing", [t.get("task_code") for t in tasks if t.get("clndr_id") not in cal_ids],
-        "would be imported without a calendar")
+        _t("would be imported without a calendar"))
     add("errors", "duplicate_task_code", sorted(str(c) for c, n in Counter(code.values()).items() if n > 1),
-        "Activity IDs must be unique in a project")
+        _t("Activity IDs must be unique in a project"))
     add("errors", "taskrsrc_task_missing", [f"taskrsrc {r.get('taskrsrc_id')}: task {r.get('task_id')}" for r in asg
-                                            if r.get("task_id") not in task_ids], "assignment of an activity not in the file")
+                                            if r.get("task_id") not in task_ids], _t("assignment of an activity not in the file"))
     add("errors", "field_count_mismatch", [f"{t}: {n} rows" for t, n in fc.items() if t in XER_TABLES],
-        "rows with more or fewer values than fields")
+        _t("rows with more or fewer values than fields"))
     add("warnings", "field_count_mismatch_not_imported", [f"{t}: {n} rows" for t, n in fc.items() if t not in XER_TABLES])
     add("warnings", "rows_before_fields", [f"{t}: {n} rows" for t, n in meta.get("rows_before_fields", {}).items()],
-        "%R lines before the %F line of their table are not read")
-    add("warnings", "duplicate_table_blocks", meta.get("duplicate_table_blocks", []), "the rows of every block are read")
-    add("warnings", "end_marker_missing", [] if meta.get("has_end_marker", True) else ["%E"], "the file may be truncated")
+        _t("%R lines before the %F line of their table are not read"))
+    add("warnings", "duplicate_table_blocks", meta.get("duplicate_table_blocks", []), _t("the rows of every block are read"))
+    add("warnings", "end_marker_missing", [] if meta.get("has_end_marker", True) else ["%E"], _t("the file may be truncated"))
     add("warnings", "undecodable_bytes", [meta["replacement_chars"]] if meta.get("replacement_chars") else [],
-        f"characters not readable as {meta.get('encoding')}: check names and notes")
+        _t("characters not readable as {encoding}: check names and notes", encoding=meta.get("encoding")))
     add("warnings", "resource_missing",
         [f"activity {t.get('task_code')}" for t in tasks if t.get("rsrc_id") is not None and t["rsrc_id"] not in rsrc_ids]
         + [f"taskrsrc {r.get('taskrsrc_id')}" for r in asg if r.get("rsrc_id") is not None and r["rsrc_id"] not in rsrc_ids],
-        "the resource is cleared")
+        _t("the resource is cleared"))
     add("warnings", "wbs_parent_missing", [w.get("wbs_short_name") for w in wbs if w.get("wbs_id") not in node_ids
-                                           and w.get("parent_wbs_id") not in wbs_ids], "attached to the project node")
+                                           and w.get("parent_wbs_id") not in wbs_ids], _t("attached to the project node"))
     cal_ok = cal_ids | {None}
     add("warnings", "calendar_missing",
         [f"base of {c.get('clndr_name')}" for c in cals if c.get("base_clndr_id") not in cal_ok]
         + [f"resource {r.get('rsrc_short_name')}" for r in rsrc if r.get("clndr_id") not in cal_ok]
-        + (["project"] if xp.get("clndr_id") not in cal_ok else []), "cleared on import")
+        + (["project"] if xp.get("clndr_id") not in cal_ok else []), _t("cleared on import"))
     links = Counter((r.get("pred_task_id"), r.get("task_id"), r.get("pred_type")) for r in x.get("TASKPRED", []))
     add("warnings", "duplicate_link", [f"{code.get(p, p)} -> {code.get(s, s)} {REL_TYPES_REV.get(k, k)}"
-                                       for (p, s, k), n in links.items() if n > 1], "P6 keeps one link per type")
+                                       for (p, s, k), n in links.items() if n > 1], _t("P6 keeps one link per type"))
     cleared = Counter()
     for t in XER_TABLES:
         for k in sorted(fields.get(t, ())):
             if k.endswith("_id") and k not in XER_FK and k not in XER_SKIP_COLS and k not in ("fk_id", XER_PK.get(t)):
                 cleared[f"{t}.{k}"] = sum(1 for r in x[t] if r.get(k) is not None)
     add("warnings", "foreign_ids_cleared", [f"{k}: {n}" for k, n in cleared.items() if n],
-        "ids of data an XER does not carry (roles, accounts, curves...) are cleared")
+        _t("ids of data an XER does not carry (roles, accounts, curves...) are cleared"))
     add("warnings", "tables_not_imported", [f"{t}: {n} rows" for t, n in out["unhandled_tables"].items()])
     add("info", "activity_codes_other_types", [f"{c.get('short_name')} (type {c.get('actv_code_type_id')})"
                                                for c in all_codes if id(c) not in kept_codes],
-        "codes of another project's code types or of a type not in the file: not imported")
+        _t("codes of another project's code types or of a type not in the file: not imported"))
     add("info", "schedule_options",["SCHEDOPTIONS"] if x.get("SCHEDOPTIONS") else [],
-        "written to the project's schedule options (PROJPROP scheduling) unless import_schedule_options=False "
-        "(default off in baseline mode); compare with p6_schedule_options")
+        _t("written to the project's schedule options (PROJPROP scheduling) unless import_schedule_options=False "
+           "(default off in baseline mode); compare with p6_schedule_options"))
     add("info", "external_links", [f"{code.get(r.get('pred_task_id'), r.get('pred_task_id'))} -> "
                                    f"{code.get(r.get('task_id'), r.get('task_id'))}" for r in x.get("TASKPRED", [])
                                    if r.get("task_id") not in task_ids or r.get("pred_task_id") not in task_ids],
-        "relationships with an activity outside the file are skipped")
+        _t("relationships with an activity outside the file are skipped"))
     types_, codes_ = ids("ACTVTYPE"), ids("ACTVCODE")
     add("info", "activity_codes_unmapped", [f"task {r.get('task_id')}" for r in x.get("TASKACTV", [])
                                             if r.get("task_id") not in task_ids or r.get("actv_code_type_id") not in types_
-                                            or r.get("actv_code_id") not in codes_], "skipped")
+                                            or r.get("actv_code_id") not in codes_], _t("skipped"))
     utab = {u.get("udf_type_id"): u.get("table_name") for u in x.get("UDFTYPE", [])}
     pks = {t: ids(t) for t in UDF_FK_TABLES}
     add("info", "udf_values_unmapped", [f"{utab.get(v.get('udf_type_id'))} {v.get('fk_id')}" for v in x.get("UDFVALUE", [])
-                                        if v.get("fk_id") not in pks.get(utab.get(v.get("udf_type_id")), ())], "skipped")
+                                        if v.get("fk_id") not in pks.get(utab.get(v.get("udf_type_id")), ())], _t("skipped"))
     memo_types, risks = ids("MEMOTYPE"), ids("PROJRISK")
     add("info", "activity_details_unmapped",
         [f"{t} {r.get(XER_PK.get(t, 'risk_id'))}: task {r.get('task_id')}" for t in ("TASKMEMO", "TASKPROC", "PROJCOST",
@@ -281,18 +282,18 @@ def _xer_preflight(header: list[str], x: dict, meta: dict, xer_project: Optional
            if r.get("task_id") in task_ids and r.get("memo_type_id") not in memo_types]
         + [f"TASKRISK task {r.get('task_id')}: risk {r.get('risk_id')}" for r in x.get("TASKRISK", [])
            if r.get("task_id") in task_ids and r.get("risk_id") not in risks],
-        "notebooks, steps, expenses or risk links of an activity, topic or risk not in the file: skipped")
+        _t("notebooks, steps, expenses or risk links of an activity, topic or risk not in the file: skipped"))
     add("info", "project_baseline_not_imported", [] if xp.get("sum_base_proj_id") is None else [xp["sum_base_proj_id"]],
-        "the project baseline link (sum_base_proj_id) is not carried over")
+        _t("the project baseline link (sum_base_proj_id) is not carried over"))
     add("info", "encoding", [] if meta.get("encoding") == "utf-8" else [
-        f"{meta.get('encoding')}, first non UTF-8 byte at offset {meta.get('utf8_error_at')}"], "the file is not UTF-8")
+        f"{meta.get('encoding')}, first non UTF-8 byte at offset {meta.get('utf8_error_at')}"], _t("the file is not UTF-8"))
     if con is None:
-        out["note"] = "No database: dropped_columns, code lengths and db_preview not checked."
+        out["note"] = _t("No database: dropped_columns, code lengths and db_preview not checked.")
         return out
     absent = [t for t in XER_TABLES if x.get(t) and (not _cols(con, t) or (
         t in XER_DETAIL_TABLES and t in XER_PK and not _has_next_key(con, t, XER_PK[t])))]
     add("warnings", "tables_not_in_database", [f"{t}: {len(x[t])} rows" for t in absent],
-        "this database has no such table (or no NEXTKEY counter for it): the rows are not imported")
+        _t("this database has no such table (or no NEXTKEY counter for it): the rows are not imported"))
     out["dropped_columns"] = {t: sorted(fields[t] - _cols(con, t)) for t in XER_TABLES
                               if fields.get(t) and _cols(con, t) and fields[t] - _cols(con, t)}
     long = []
@@ -301,8 +302,8 @@ def _xer_preflight(header: list[str], x: dict, meta: dict, xer_project: Optional
                            ("rsrc_short_len", rsrc, "rsrc_short_name")):
         n = _prefer(con, key)
         long += [f"{col} {r.get(col)!r} ({len(r.get(col))} > {n})" for r in rows if n and len(r.get(col) or "") > n]
-    add("warnings", "codes_too_long", long, "longer than this database allows (PREFER); for the Project ID "
-                                            "pass new_short_name")
+    add("warnings", "codes_too_long", long, _t("longer than this database allows (PREFER); for the Project ID "
+                                               "pass new_short_name"))
     out["project_id_in_db"] = con.execute("SELECT 1 FROM PROJECT WHERE proj_short_name = ?" + _alive(con, "PROJECT"),
                                           (xp["proj_short_name"],)).fetchone() is not None
     if preview:
@@ -385,14 +386,15 @@ class _XerImport:
     def can(self, table: str) -> bool:
         """True when this database can take the rows of table: the table exists and, for a table with its own
         id, NEXTKEY has its counter. Otherwise its rows are skipped with one warning."""
+        n = len(self.x.get(table) or ())
         if not _cols(self.con, table):
-            why = "is not in this database"
+            why = _t("{table} is not in this database: {n} XER row(s) not imported.", table=table, n=n)
         elif table in XER_PK and not _has_next_key(self.con, table, XER_PK[table]):
-            why = "has no NEXTKEY counter in this database"
+            why = _t("{table} has no NEXTKEY counter in this database: {n} XER row(s) not imported.", table=table, n=n)
         else:
             return True
         if self.x.get(table):
-            self.warnings.append(f"{table} {why}: {len(self.x[table])} XER row(s) not imported.")
+            self.warnings.append(why)
             self.count(table, "skipped_unmapped", 0)
         return False
 
@@ -543,20 +545,20 @@ def _import_target(con, mode: str, project: Optional[str], xp: dict) -> Optional
         return None
     name = project or (xp["proj_short_name"] if mode == "update" else None)
     if not name:
-        raise ValueError("baseline mode needs project= (the project the baseline belongs to)")
+        raise ValueError(_t("baseline mode needs project= (the project the baseline belongs to)"))
     return _project_row(con, name)
 
 
 def _removable(remove_missing, mode: str) -> list[str]:
     rm = [str(t).upper() for t in ([remove_missing] if isinstance(remove_missing, str) else remove_missing or [])]
     if "TASK" in rm:
-        raise ValueError("Activities are never deleted by an import: delete them in P6 (remove_missing takes "
-                         f"{list(get_args(Removable))}).")
+        raise ValueError(_t("Activities are never deleted by an import: delete them in P6 (remove_missing takes "
+                            "{allowed}).", allowed=list(get_args(Removable))))
     bad = [t for t in rm if t not in get_args(Removable)]
     if bad:
-        raise ValueError(f"remove_missing takes {list(get_args(Removable))}, not {bad}")
+        raise ValueError(_t("remove_missing takes {allowed}, not {bad}", allowed=list(get_args(Removable)), bad=bad))
     if rm and mode != "update":
-        raise ValueError("remove_missing only applies to mode='update'")
+        raise ValueError(_t("remove_missing only applies to mode='update'"))
     return list(dict.fromkeys(rm))
 
 
@@ -583,7 +585,7 @@ def _missing_rows(imp: _XerImport, pid: int) -> tuple[dict, dict[str, list[int]]
     kept = [r for r in asg if r["task_id"] not in gone]
     report = {
         "TASK": {"count": len(acts), "sample": [f"{r['task_code']} {r['task_name']} ({r['status_code']})" for r in acts[:15]],
-                 "note": "activities are never deleted by an import: delete them in P6 if they are obsolete"},
+                 "note": _t("activities are never deleted by an import: delete them in P6 if they are obsolete")},
         "TASKPRED": {"count": len(rels), "by_type": dict(Counter(r["pred_type"] for r in rels)),
                      "sample": [f"{r['pred_code']} -> {r['succ_code']} {REL_TYPES_REV.get(r['pred_type'], r['pred_type'])}"
                                 f" lag {float(r['lag_hr_cnt'] or 0):g} h" for r in rels[:15]],
@@ -635,12 +637,12 @@ def _export_target(path: str, ext: str = ".xer") -> str:
     """Absolute export path: a file ending with ext (.xer, .xlsx) in an existing folder (never the
     database, a backup or a log)."""
     if not path or not path.lower().endswith(ext):
-        raise ValueError(f"Export path must end with {ext}: {path!r}")
+        raise ValueError(_t("Export path must end with {ext}: {path!r}", ext=ext, path=path))
     path = os.path.abspath(path)
     if not os.path.isdir(os.path.dirname(path)):
-        raise ValueError(f"Folder not found: {os.path.dirname(path)!r}")
+        raise ValueError(_t("Folder not found: {folder!r}", folder=os.path.dirname(path)))
     if os.path.isdir(path):
-        raise ValueError(f"{path!r} is a folder")
+        raise ValueError(_t("{path!r} is a folder", path=path))
     return path
 
 
@@ -768,7 +770,7 @@ def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[s
         cols = [r[1].lower() for r in con.execute(f"PRAGMA table_info({t})")
                 if r[1].lower() not in ("delete_session_id", "delete_date")]
         if not cols:
-            warn.append(f"{t} is not in this database: not exported.")
+            warn.append(_t("{table} is not in this database: not exported.", table=t))
             continue
         alias = " v" if t == "UDFVALUE" else ""
         rows = con.execute(f"SELECT {', '.join(cols)} FROM {t}{alias} WHERE {where[t]}"
@@ -792,8 +794,8 @@ def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[s
         if os.path.exists(tmp):
             os.remove(tmp)
     for t, keys in lossy.items():
-        warn.append(f"{t}: {len(keys)} row(s) with characters outside cp1252, written as '?' "
-                    f"(first: {', '.join(keys[:10])}).")
+        warn.append(_t("{table}: {n} row(s) with characters outside cp1252, written as '?' (first: {first}).",
+                       table=t, n=len(keys), first=", ".join(keys[:10])))
     deps = {"TASK": ["PROJWBS", "CALENDAR"], "TASKPRED": ["TASK"], "TASKRSRC": ["TASK", "RSRC"],
             "TASKACTV": ["TASK", "ACTVTYPE", "ACTVCODE"], "UDFVALUE": ["UDFTYPE"],
             "PROJWBS": ["PROJECT"], "RSRCRATE": ["RSRC"], "ACTVCODE": ["ACTVTYPE"],
@@ -802,7 +804,8 @@ def _export_xer(con: sqlite3.Connection, project: str, path: str, tables: list[s
     for t, needs in deps.items():
         miss = [n for n in needs if t in tables and n not in tables]
         if miss:
-            warn.append(f"{t} exported without {miss}: P6 may not resolve those references on import.")
+            warn.append(_t("{table} exported without {missing}: P6 may not resolve those references on import.",
+                           table=t, missing=miss))
     return {"path": path, "xer_version": xer_version, "rows": counts, "warnings": warn}
 
 

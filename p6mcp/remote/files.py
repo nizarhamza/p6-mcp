@@ -41,6 +41,7 @@ from typing import Any, Callable, Optional
 from p6mcp import config, i18n, policy
 from p6mcp.remote import audit, public_url
 from p6mcp.remote.store import Store, token_hash
+from p6mcp.messages import _t
 
 log = logging.getLogger("p6mcp.remote.files")
 
@@ -135,7 +136,7 @@ class Handoff:
     def _room(self, con, grant: str) -> None:
         n = con.execute("SELECT COUNT(*) FROM files WHERE grant_id = ? AND exp >= ?", (grant, _now())).fetchone()[0]
         if n >= MAX_PER_CONNECTION:
-            raise ValueError(FULL.format(n=n))
+            raise ValueError(_t(FULL, n=n))
 
     def _link(self, row, token: str) -> bool:
         return bool(row and row["link"]) and hmac.compare_digest(row["link"], token_hash(token))
@@ -146,7 +147,7 @@ class Handoff:
         ext = policy.REMOTE_DOWNLOAD_TOOLS[tool]
         if file_name is not None and (not isinstance(file_name, str) or re.search(r"[\\/:]", file_name)
                                       or file_name.strip().strip(".") == ""):
-            raise ValueError(FILE_NAME_BAD.format(ext=ext))
+            raise ValueError(_t(FILE_NAME_BAD, ext=ext))
         default = safe_name(f"{project or 'export'}{DEFAULT_SUFFIX.get(tool, '')}", ext, "export" + ext)
         name = safe_name(file_name, ext, default)
         fid = secrets.token_urlsafe(12)
@@ -180,18 +181,18 @@ class Handoff:
         with closing(self.store._con()) as con:
             row = self._row(con, id=fid, kind="download")
             if row is None or row["grant_id"] != grant or row["state"] != "writing":
-                raise ValueError("This export belongs to another connection or is already handed over.")
+                raise ValueError(_t("This export belongs to another connection or is already handed over."))
             path = self._path(row)
             if not os.path.isfile(path):
-                raise ValueError("The export wrote no file.")
+                raise ValueError(_t("The export wrote no file."))
             size, exp = os.path.getsize(path), _now() + LINK_TTL
             con.execute("UPDATE files SET link = ?, state = 'ready', size = ?, exp = ? WHERE id = ?",
                         (token_hash(token), size, exp, fid))
         _event("link_minted", kind="download", grant=grant, ext=row["ext"], size=size)
         return {"download_url": f"{public_url(host)}/files/{token}", "file_name": row["name"], "size_bytes": size,
                 "expires_at": _iso(exp), "expires_in_s": LINK_TTL, "single_use": True,
-                "download_note": ("Give this link to the user: it opens a download page in their browser, works once "
-                                  "and expires in 15 minutes. Export again for a new link.")}
+                "download_note": _t("Give this link to the user: it opens a download page in their browser, works "
+                                    "once and expires in 15 minutes. Export again for a new link.")}
 
     def peek(self, token: str, kind: str):
         """The live row of a link (no side effect), or None."""
@@ -247,10 +248,10 @@ class Handoff:
         _event("link_minted", kind="upload", grant=grant)
         return {"upload_url": f"{public_url(host)}/upload/{token}", "upload_id": uid, "expires_at": _iso(exp),
                 "expires_in_s": LINK_TTL, "max_bytes": UPLOAD_MAX, "single_use": True,
-                "next": ("Give upload_url to the user: they open it in their browser and send one .xer file (up to "
-                         f"{UPLOAD_MAX // 1048576} MB) within 15 minutes. Once they say it is sent, call "
-                         f"p6_inspect_xer with upload_id=\"{uid}\" (then p6_import_xer with the same upload_id, dry "
-                         "run first). The file stays usable for an hour.")}
+                "next": (_t("Give upload_url to the user: they open it in their browser and send one .xer file (up to "
+                            "{mb} MB) within 15 minutes. Once they say it is sent, call p6_inspect_xer with "
+                            "upload_id=\"{uid}\" (then p6_import_xer with the same upload_id, dry run first). The "
+                            "file stays usable for an hour.", mb=UPLOAD_MAX // 1048576, uid=uid))}
 
     def claim_upload(self, token: str):
         row = self.peek(token, "upload")
@@ -294,10 +295,10 @@ class Handoff:
             with closing(self.store._con()) as con:
                 row = self._row(con, id=uid, kind="upload")
         if row is None or row["grant_id"] != grant or row["state"] != "received" or row["exp"] < _now():
-            raise ValueError(NOT_FOUND.format(id=uid[:40]))
+            raise ValueError(_t(NOT_FOUND, id=uid[:40]))
         path = self._path(row)
         if not os.path.isfile(path):
-            raise ValueError(NOT_FOUND.format(id=uid))
+            raise ValueError(_t(NOT_FOUND, id=uid))
         return path
 
     # ------------------------------------------------------------- cleanup

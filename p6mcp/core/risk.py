@@ -19,6 +19,7 @@ from p6mcp.core.db import _alive, _cols, _num
 from p6mcp.core.wbs_codes import _code_filter, _name_sep, _wbs_tree
 from p6mcp.core.read import _udf_type
 from p6mcp.core.engine import _Cpm, CPM_TOL
+from p6mcp.messages import _t
 
 
 # ----------------------------------------------------------------- schedule risk (Monte Carlo on the CPM engine)
@@ -27,15 +28,15 @@ RISK_DEFAULT = (85.0, 100.0, 135.0)  # triangular min, mode, max in % of the rem
 RISK_ITERATIONS = (100, 5000)  # iterations asked are clamped to this range
 RISK_WORK = 1_500_000  # at most iterations x activities recomputed per iteration (a run stays near 30 s)
 RISK_SOURCES = ("udf", "task", "code", "wbs", "default")  # where an activity's range comes from, by precedence
-RISK_CAVEAT = ("An estimate built on assumed duration ranges, not a forecast: each open activity's remaining duration "
-               "is drawn on its own (no correlation between activities is modelled), discrete risk events, resource "
-               "limits and changes of logic are not modelled, and the network, calendars and constraints are those of "
-               "the last F9.")
-RISK_CAVEAT_MODEL = ("An estimate built on assumed duration ranges, correlations and risk events, not a forecast: "
-                     "durations are correlated only within the groups given (one shared factor per group), risk events "
-                     "fire independently of each other and of the durations and only add or remove remaining duration, "
-                     "resource limits and changes of logic are not modelled, and the network, calendars and "
-                     "constraints are those of the last F9.")
+RISK_CAVEAT = (_t("An estimate built on assumed duration ranges, not a forecast: each open activity's remaining "
+                  "duration is drawn on its own (no correlation between activities is modelled), discrete risk "
+                  "events, resource limits and changes of logic are not modelled, and the network, calendars and "
+                  "constraints are those of the last F9."))
+RISK_CAVEAT_MODEL = (_t("An estimate built on assumed duration ranges, correlations and risk events, not a forecast: "
+                        "durations are correlated only within the groups given (one shared factor per group), risk "
+                        "events fire independently of each other and of the durations and only add or remove "
+                        "remaining duration, resource limits and changes of logic are not modelled, and the network, "
+                        "calendars and constraints are those of the last F9."))
 RISK_POOL_MIN_WORK = 200_000  # iterations x recomputed activities from which worker processes pay off (measured)
 RISK_POOL_CHUNKS = 2  # slices of the iterations per worker
 RISK_WORKERS_DEFAULT = max(1, min(4, (os.cpu_count() or 1) - 1))
@@ -49,9 +50,10 @@ def _risk_pcts(item: Any, where: str) -> tuple[float, float, float]:
     try:
         v = tuple(float(item[k]) for k in ("min_pct", "mode_pct", "max_pct"))
     except (KeyError, TypeError, ValueError):
-        raise ValueError(f"{where}: min_pct, mode_pct and max_pct are required numbers") from None
+        raise ValueError(_t("{where}: min_pct, mode_pct and max_pct are required numbers", where=where)) from None
     if not all(math.isfinite(x) for x in v) or not 0 <= v[0] <= v[1] <= v[2]:
-        raise ValueError(f"{where}: need 0 <= min_pct <= mode_pct <= max_pct (percent of the remaining duration)")
+        raise ValueError(_t("{where}: need 0 <= min_pct <= mode_pct <= max_pct (percent of the remaining duration)",
+                            where=where))
     return v
 
 
@@ -63,17 +65,21 @@ def _risk_ids(con, pid: int, cpm: _Cpm, r: Mapping, where: str, allowed: Sequenc
     sel = [k for k in allowed if r.get(k)]
     if len(sel) != 1:
         names = ", ".join(allowed[:-1]) + " or " + allowed[-1]
-        raise ValueError(f"{where}: give exactly one of {names}" + (" (with code_value)" if allowed[-1] == "code_type"
-                                                                     else ""))
+        if allowed[-1] == "code_type":
+            raise ValueError(_t("{where}: give exactly one of {names} (with code_value)", where=where, names=names))
+        raise ValueError(_t("{where}: give exactly one of {names}", where=where, names=names))
     k = sel[0]
     if k in ("task_code", "task_codes"):
         codes = [str(r[k])] if k == "task_code" else r[k]
         if not isinstance(codes, (list, tuple)) or not all(isinstance(c, str) and c for c in codes):
-            raise ValueError(f"{where}: task_codes is a list of Activity IDs")
+            raise ValueError(_t("{where}: task_codes is a list of Activity IDs", where=where))
         missing = [str(c) for c in codes if str(c) not in cpm.code]
         if missing:
-            what = f"activity {missing[0]}" if len(missing) == 1 else f"activities {missing[:10]}"
-            raise ValueError(f"{where}: {what} not found in project {cpm.prj['proj_short_name']}")
+            if len(missing) == 1:
+                raise ValueError(_t("{where}: activity {code} not found in project {project}", where=where,
+                                    code=missing[0], project=cpm.prj['proj_short_name']))
+            raise ValueError(_t("{where}: activities {codes} not found in project {project}", where=where,
+                                codes=missing[:10], project=cpm.prj['proj_short_name']))
         return {cpm.code[str(c)] for c in codes}, "task", 0
     if k == "wbs":
         sep = cache.get("sep")
@@ -82,17 +88,18 @@ def _risk_ids(con, pid: int, cpm: _Cpm, r: Mapping, where: str, allowed: Sequenc
             cache["nodes"] = _wbs_tree(con, pid, sep)
         nodes = cache["nodes"]
         if not nodes:
-            raise ValueError(f"{where}: the project has no project WBS node")
+            raise ValueError(_t("{where}: the project has no project WBS node", where=where))
         top, p = nodes[0]["wbs_code"], str(r["wbs"]).strip()
         j = next((j for j, n in enumerate(nodes) if n["wbs_code"] in (p, top + sep + p)), None)
         if j is None:
-            raise ValueError(f"{where}: WBS code {r['wbs']!r} not found (p6_list_wbs lists the codes)")
+            raise ValueError(_t("{where}: WBS code {wbs!r} not found (p6_list_wbs lists the codes)",
+                                where=where, wbs=r['wbs']))
         d0 = nodes[j]["depth"]
         end = next((x for x in range(j + 1, len(nodes)) if nodes[x]["depth"] <= d0), len(nodes))
         sub = {n["wbs_id"] for n in nodes[j:end]}
         return {t for t, d in cpm.t.items() if d["wbs_id"] in sub}, "wbs", d0
     if not r.get("code_value"):
-        raise ValueError(f"{where}: code_type needs code_value")
+        raise ValueError(_t("{where}: code_type needs code_value", where=where))
     cond, cargs, _ = _code_filter(con, pid, r["code_type"], r["code_value"], True)
     return {x[0] for x in con.execute("SELECT t.task_id FROM TASK t WHERE t.proj_id = ?" + _alive(con, "TASK", "t")
                                       + cond, [pid, *cargs])}, "code", 0
@@ -104,23 +111,25 @@ def _risk_ranges(con, pid: int, cpm: _Cpm, ranges: Optional[Sequence]) -> tuple[
     if ranges is None:
         return {}, []
     if not isinstance(ranges, (list, tuple)):
-        raise ValueError("ranges: a list of ranges")
+        raise ValueError(_t("ranges: a list of ranges"))
     keys, cache, seen = set(RiskRange.__annotations__), {}, set()
     hits: dict[int, list] = {}  # task_id -> [(rank, index, source, pcts)]
     echo = []
     for i, r in enumerate(ranges):
         where = f"ranges[{i}]"
         if not isinstance(r, Mapping):
-            raise ValueError(f"{where}: an object with min_pct, mode_pct, max_pct and one selector")
+            raise ValueError(_t("{where}: an object with min_pct, mode_pct, max_pct and one selector", where=where))
         if set(r) - keys:
-            raise ValueError(f"{where}: unknown keys {sorted(set(r) - keys)}; keys: {sorted(keys)}")
+            raise ValueError(_t("{where}: unknown keys {bad}; keys: {keys}", where=where, bad=sorted(set(r) - keys),
+                                keys=sorted(keys)))
         if len([k for k in ("task_code", "wbs", "code_type") if r.get(k)]) != 1:
-            raise ValueError(f"{where}: give exactly one of task_code, wbs or code_type (with code_value)")
+            raise ValueError(_t("{where}: give exactly one of task_code, wbs or code_type (with code_value)",
+                                where=where))
         pcts = _risk_pcts(r, where)
         if r.get("task_code"):
             code = str(r["task_code"])
             if code in seen and code in cpm.code:
-                raise ValueError(f"{where}: activity {code} has two ranges")
+                raise ValueError(_t("{where}: activity {code} has two ranges", where=where, code=code))
             seen.add(code)
         ids, src, depth = _risk_ids(con, pid, cpm, r, where, ("task_code", "wbs", "code_type"), cache)
         rank = {"task": (0, 0), "code": (1, 0), "wbs": (2, -depth)}[src]
@@ -141,8 +150,8 @@ def _risk_udfs(con, pid: int, labels: Sequence[str]) -> tuple[dict[int, tuple], 
     types = [_udf_type(con, "TASK", u) for u in labels]
     for y in types:
         if UDF_VALUE.get(y["logical_data_type"]) != "udf_number":
-            raise ValueError(f"UDF {y['udf_type_label']!r} holds {UDF_KINDS.get(y['logical_data_type'])}, not a number "
-                             "of days")
+            raise ValueError(_t("UDF {label!r} holds {kind}, not a number of days",
+                                label=y['udf_type_label'], kind=UDF_KINDS.get(y['logical_data_type'])))
     vals: dict[int, list] = {}
     for k, y in enumerate(types):
         for tid, v in con.execute("SELECT v.fk_id, v.udf_number FROM UDFVALUE v JOIN TASK t ON t.task_id = v.fk_id "
@@ -170,19 +179,21 @@ def _risk_correlations(con, pid: int, cpm: _Cpm, items: Optional[Sequence], cach
     if items is None:
         return {}, [], []
     if not isinstance(items, (list, tuple)):
-        raise ValueError("correlations: a list of groups")
+        raise ValueError(_t("correlations: a list of groups"))
     keys = set(RiskCorrelation.__annotations__)
     member: dict[int, int] = {}
     coef, echo = [], []
     for g, r in enumerate(items):
         where = f"correlations[{g}]"
         if not isinstance(r, Mapping):
-            raise ValueError(f"{where}: an object with coefficient and one selector")
+            raise ValueError(_t("{where}: an object with coefficient and one selector", where=where))
         if set(r) - keys:
-            raise ValueError(f"{where}: unknown keys {sorted(set(r) - keys)}; keys: {sorted(keys)}")
+            raise ValueError(_t("{where}: unknown keys {bad}; keys: {keys}", where=where, bad=sorted(set(r) - keys),
+                                keys=sorted(keys)))
         c = _num(r.get("coefficient"))
         if c is None or isinstance(r.get("coefficient"), bool) or not 0 <= float(c) <= 1:
-            raise ValueError(f"{where}: coefficient is a number from 0 (independent) to 1 (fully correlated)")
+            raise ValueError(_t("{where}: coefficient is a number from 0 (independent) to 1 (fully correlated)",
+                                where=where))
         ids, _, _ = _risk_ids(con, pid, cpm, r, where, ("task_codes", "wbs", "code_type"), cache)
         earlier = 0
         for t in ids:
@@ -225,7 +236,7 @@ def _p6_risks(con, pid: int, cpm: _Cpm) -> dict[str, dict]:
 
 def _risk_days(v: Any, where: str) -> tuple[float, float, float]:
     """add_days as (min, likely, max): a number x is (x, x, x)."""
-    bad = f"{where}: add_days is a number of days or {{min, likely, max}} with min <= likely <= max"
+    bad = _t("{where}: add_days is a number of days or {{min, likely, max}} with min <= likely <= max", where=where)
     if isinstance(v, Mapping):
         if set(v) != {"min", "likely", "max"}:
             raise ValueError(bad)
@@ -246,31 +257,34 @@ def _risk_events(con, pid: int, cpm: _Cpm, items: Optional[Sequence], use_p6: bo
     assigned activities; the P6 risks no item quantifies are listed, not simulated."""
     p6 = _p6_risks(con, pid, cpm) if use_p6 else {}
     if items is not None and not isinstance(items, (list, tuple)):
-        raise ValueError("risks: a list of risk events")
+        raise ValueError(_t("risks: a list of risk events"))
     keys, ikeys = set(RiskEvent.__annotations__), set(RiskImpact.__annotations__)
     events: list[dict] = []
     seen: set = set()
     for k, r in enumerate(items or ()):
         where = f"risks[{k}]"
         if not isinstance(r, Mapping):
-            raise ValueError(f"{where}: an object with id, probability and impact")
+            raise ValueError(_t("{where}: an object with id, probability and impact", where=where))
         if set(r) - keys:
-            raise ValueError(f"{where}: unknown keys {sorted(set(r) - keys)}; keys: {sorted(keys)}")
+            raise ValueError(_t("{where}: unknown keys {bad}; keys: {keys}", where=where, bad=sorted(set(r) - keys),
+                                keys=sorted(keys)))
         rid = r.get("id")
         if not isinstance(rid, str) or not rid.strip():
-            raise ValueError(f"{where}: id is required (a short text)")
+            raise ValueError(_t("{where}: id is required (a short text)", where=where))
         rid = rid.strip()
         if rid in seen:
-            raise ValueError(f"{where}: risk {rid} is given twice")
+            raise ValueError(_t("{where}: risk {rid} is given twice", where=where, rid=rid))
         seen.add(rid)
         p = None if isinstance(r.get("probability"), bool) else _num(r.get("probability"))
         if p is None or not 0 <= float(p) <= 1:
-            raise ValueError(f"{where}: probability is a number from 0 to 1")
+            raise ValueError(_t("{where}: probability is a number from 0 to 1", where=where))
         imp = r.get("impact")
         if not isinstance(imp, Mapping) or "add_days" not in imp:
-            raise ValueError(f"{where}: impact needs add_days and a selector (task_codes, wbs or code_type)")
+            raise ValueError(_t("{where}: impact needs add_days and a selector (task_codes, wbs or code_type)",
+                                where=where))
         if set(imp) - ikeys:
-            raise ValueError(f"{where}.impact: unknown keys {sorted(set(imp) - ikeys)}; keys: {sorted(ikeys)}")
+            raise ValueError(_t("{where}.impact: unknown keys {bad}; keys: {keys}",
+                                where=where, bad=sorted(set(imp) - ikeys), keys=sorted(ikeys)))
         days = _risk_days(imp["add_days"], f"{where}.impact")
         sel = {x: imp[x] for x in ("task_codes", "wbs", "code_type", "code_value") if imp.get(x)}
         if sel or rid not in p6:
@@ -285,9 +299,9 @@ def _risk_events(con, pid: int, cpm: _Cpm, items: Optional[Sequence], use_p6: bo
         block = {"found": len(p6), "simulated": sum(1 for e in events if e["source"] == "p6"),
                  "not_quantified": [{"risk_code": c, "name": x["name"], "activities": len(x["task_ids"]),
                                      "p6_values": x["p6_values"]} for c, x in p6.items() if c not in seen],
-                 "note": ("P6 stores the probability and schedule impact of a risk as levels of its risk scoring "
-                          "matrix, not numbers: a P6 risk is simulated only when risks= gives its probability and "
-                          "add_days under its Risk ID (its assigned activities when the impact has no selector).")}
+                 "note": (_t("P6 stores the probability and schedule impact of a risk as levels of its risk scoring "
+                             "matrix, not numbers: a P6 risk is simulated only when risks= gives its probability and "
+                             "add_days under its Risk ID (its assigned activities when the impact has no selector)."))}
     return events, block
 
 
@@ -441,7 +455,7 @@ def _risk_workers(workers: Any) -> int:
     if workers is None:
         return RISK_WORKERS_DEFAULT
     if isinstance(workers, bool) or not isinstance(workers, (int, float)) or workers != int(workers) or workers < 1:
-        raise ValueError("workers must be a whole number, 1 or more (1 = no worker process)")
+        raise ValueError(_t("workers must be a whole number, 1 or more (1 = no worker process)"))
     return min(int(workers), max(1, os.cpu_count() or 1))
 
 
@@ -452,8 +466,8 @@ def _risk_iterate(sim: _RiskSim, n_iter: int, workers: int) -> tuple[dict, dict]
     runs every iteration in this process, with a note."""
     work = n_iter * max(1, len(sim.sub))
     if workers <= 1 or work < RISK_POOL_MIN_WORK:
-        note = None if workers <= 1 else (f"no worker process: {work:,} activity passes, worker processes start "
-                                          f"from {RISK_POOL_MIN_WORK:,}")
+        note = None if workers <= 1 else (_t("no worker process: {work:,} activity passes, worker processes start "
+                                             "from {min_work:,}", work=work, min_work=RISK_POOL_MIN_WORK))
         return sim.iterate(0, n_iter), {"workers": 1, "note": note}
     n_chunks = min(n_iter, workers * RISK_POOL_CHUNKS)
     cuts = [n_iter * k // n_chunks for k in range(n_chunks + 1)]
@@ -467,8 +481,9 @@ def _risk_iterate(sim: _RiskSim, n_iter: int, workers: int) -> tuple[dict, dict]
     except Exception as e:  # noqa: BLE001  (a broken pool must not fail the run: the iterations run here instead)
         if ex is not None:
             ex.shutdown(wait=False, cancel_futures=True)
-        return sim.iterate(0, n_iter), {"workers": 1, "note": f"worker processes failed ({type(e).__name__}: {e}): "
-                                                               "every iteration ran in the server process"}
+        return sim.iterate(0, n_iter), {"workers": 1, "note": _t("worker processes failed ({name}: {e}): every "
+                                                                 "iteration ran in the server process",
+                                                                 name=type(e).__name__, e=e)}
     ex.shutdown(wait=False)  # every slice is back: the workers exit on their own (waiting costs about a second)
     out: dict = {"ends": [], "crit": Counter(), "ms": {m: [] for m in sim.mids}, "fired": []}
     for p in parts:

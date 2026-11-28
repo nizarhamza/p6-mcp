@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from typing import Any, Callable, Optional
+from p6mcp.messages import _t
 
 STATUS = {"not started": "TK_NotStart", "in progress": "TK_Active", "completed": "TK_Complete"}
 TASK_TYPE = {"task dependent": "TT_Task", "resource dependent": "TT_Rsrc", "level of effort": "TT_LOE",
@@ -161,7 +162,7 @@ def baseline(sess, out: sqlite3.Connection, bl_oid: int, project_oid: int, warni
     info = sess.read("baselineProject", fields(sess, "baselineProject", BASELINE_PROJECT, cache),
                      f"ObjectId :eq: {int(bl_oid)}")
     if not info:
-        raise ValueError(f"baseline {bl_oid} is not readable")
+        raise ValueError(_t("baseline {id} is not readable", id=bl_oid))
     b = info[0]
     wbs = read("wbs", WBS, f"ProjectObjectId :eq: {int(bl_oid)}")
     acts = read("activity", ACTIVITY, f"ProjectObjectId :eq: {int(bl_oid)}")
@@ -190,7 +191,8 @@ def baseline(sess, out: sqlite3.Connection, bl_oid: int, project_oid: int, warni
     inside = {value(a.get("ObjectId"), "id") for a in acts}
     keep = [r for r in rels if value(r.get("PredecessorActivityObjectId"), "id") in inside]
     if len(keep) < len(rels):
-        warnings.append(f"baseline {b.get('Id')}: {len(rels) - len(keep)} link(s) to other projects left out")
+        warnings.append(_t("baseline {baseline}: {n} link(s) to other projects left out",
+                           baseline=b.get("Id"), n=len(rels) - len(keep)))
     counts["TASKPRED"] = insert(out, "TASKPRED", RELATIONSHIP, keep)
     counts["TASKRSRC"] = insert(out, "TASKRSRC", ASSIGNMENT, asg)
     counts["CALENDAR"] = _calendars(sess, out, {value(a.get("CalendarObjectId"), "id") for a in acts}, b.get("Id"),
@@ -224,8 +226,9 @@ def _calendars(sess, out: sqlite3.Connection, used: set, label: str, warnings: l
                     tuple(row[k] for k in keys))
         added += 1
     if guessed:
-        warnings.append(f"baseline {label}: calendar(s) {', '.join(guessed)} have no working time in the copy "
-                        "(hours per day only)")
+        warnings.append(_t("baseline {label}: calendar(s) {guessed} have no working time in the copy (hours per day "
+                           "only)", label=label, guessed=", ".join(guessed)))
     if added < len(missing):
-        warnings.append(f"baseline {label}: {len(missing) - added} calendar(s) not readable")
+        warnings.append(_t("baseline {label}: {n} calendar(s) not readable",
+                           label=label, n=len(missing) - added))
     return added

@@ -31,6 +31,7 @@ from p6mcp.core.reporting import _period_edges
 from p6mcp.core.risk import (
     RISK_CAVEAT_MODEL, _risk_correlations, _risk_events, _risk_iterate, _risk_workers, _RiskSim,
 )
+from p6mcp.messages import _t
 
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
@@ -89,8 +90,8 @@ def p6_cpm_validate(project: ProjectId, offset: Offset = 0, limit: Limit = 50) -
             size += len(json.dumps(r, indent=2, default=str)) + 4
             if size > SQL_PAGE_BYTES and i:  # a page stays under the client budget: the next page continues
                 out.update(rows=out["rows"][:i], returned=i, next_offset=offset + i,
-                           page_note=f"page ended after {i} rows (about {SQL_PAGE_BYTES} bytes with their context): "
-                                     "pass next_offset for the next page")
+                           page_note=_t("page ended after {n} rows (about {bytes} bytes with their context): pass "
+                                        "next_offset for the next page", n=i, bytes=SQL_PAGE_BYTES))
                 break
     for r in out["rows"]:
         r.pop("_tid", None)
@@ -104,11 +105,11 @@ def p6_cpm_validate(project: ProjectId, offset: Offset = 0, limit: Limit = 50) -
                                                       "sched_float_type", "sched_use_project_end_date_for_float",
                                                       "sched_use_expect_end_flag", "sched_open_critical_flag")},
                seconds=secs, schedule_state=state, engine_version=ENGINE_VERSION,
-               rules="P6 25.12 rules measured on 107 parity cases (engine version 23): every status placed, "
-                     "out-of-sequence modes, lag from progressed predecessors, calendars per activity and lag rule, "
-                     "planned start and resume dates, constraints and pairs, ALAP, LOE, WBS summary, resource dependent "
-                     "activities on their resources' calendars, expected finish, open ends, total float per "
-                     "sched_float_type, free float, longest path, float paths; resource leveling not modelled")
+               rules=_t("P6 25.12 rules measured on 107 parity cases (engine version 23): every status placed, "
+                        "out-of-sequence modes, lag from progressed predecessors, calendars per activity and lag rule, "
+                        "planned start and resume dates, constraints and pairs, ALAP, LOE, WBS summary, resource "
+                        "dependent activities on their resources' calendars, expected finish, open ends, total float "
+                        "per sched_float_type, free float, longest path, float paths; resource leveling not modelled"))
     return out
 
 
@@ -150,14 +151,14 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     assumptions and DCMA blocks; the changed rows and float_change cover the existing activities.
     Changes to make for real: the write tools, then F9 in P6."""
     if compare_to not in get_args(CompareTo):
-        raise ValueError("compare_to must be current or engine")
+        raise ValueError(_t("compare_to must be current or engine"))
     if not isinstance(edits, (list, tuple)) or not edits:
-        raise ValueError("edits: a list of at least one edit")
+        raise ValueError(_t("edits: a list of at least one edit"))
     cut, near = _num(max_cut_pct), _num(near_critical_days)
     if cut is None or not 0 <= cut <= 100:
-        raise ValueError("max_cut_pct must be a number from 0 to 100")
+        raise ValueError(_t("max_cut_pct must be a number from 0 to 100"))
     if near is None or near < 0:
-        raise ValueError("near_critical_days must be 0 or more")
+        raise ValueError(_t("near_critical_days must be 0 or more"))
     frag = any(isinstance(e, Mapping) and e.get("op") == "add_activity" for e in edits)
     con = _connect()
     pid = _project_id(con, project)
@@ -178,12 +179,12 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     done, trace = [], []
     for i, e in enumerate(edits):
         if not isinstance(e, Mapping):
-            raise ValueError(f"edit {i}: an object with op")
+            raise ValueError(_t("edit {i}: an object with op", i=i))
         k = len(trace)
         try:
             done.append(_whatif_apply(trial, e, trace))
         except ValueError as err:
-            raise ValueError(f"edit {i} ({e.get('op')}): {err}") from None
+            raise ValueError(_t("edit {i} ({op}): {err}", i=i, op=e.get("op"), err=str(err))) from None
         for t in trace[k:]:
             t["edit"] = done[-1]
     d1: dict = {}
@@ -207,9 +208,9 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     ms = []
     for code in keys:
         if code not in base.code:
-            raise ValueError(f"milestones: activity {code} " + (
-                "is a fragnet activity: its dates are in fragnet.activities" if code in trial.code
-                else f"not found in project {project}"))
+            raise ValueError(_t("milestones: activity {code} is a fragnet activity: its dates are in "
+                                "fragnet.activities", code=code) if code in trial.code else
+                             _t("milestones: activity {code} not found in project {project}", code=code, project=project))
         n = base.code[code]
         b, a = before[n], r1[n]
         ms.append({"task_code": code, "task_name": T[n]["task_name"], "finish_before": b["ef"] and _fmt_dt(b["ef"]),
@@ -244,9 +245,10 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     tf_key = lambda r: (r["total_float_d_after"] if r["total_float_d_after"] is not None else 0, r["task_code"])  # noqa: E731
     became = sorted((row(n) for n in opn if crit_a(n) and not crit_b(n)), key=tf_key)
     joined = sorted((row(n) for n in opn if r1[n]["longest"] and not lp_before(n)), key=tf_key)
-    float_change = {"definition": (f"total float <= {lim:g} h" if used == "total_float" else
-                                   "on the longest path (the project's critical definition)")
-                    + "; open activities, LOE and WBS summary left out",
+    float_change = {"definition": _t("total float <= {limit:g} h; open activities, LOE and WBS summary left out",
+                                     limit=lim) if used == "total_float" else
+                    _t("on the longest path (the project's critical definition); open activities, LOE and WBS summary "
+                       "left out"),
                     "critical_before": sum(bool(crit_b(n)) for n in opn),
                     "critical_after": sum(bool(crit_a(n)) for n in opn),
                     "negative_float_before": sum(neg(before[n]["tf_h"]) for n in opn),
@@ -268,17 +270,19 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
             "newly_failed": [k for k in fa if k not in fb], "no_longer_failed": [k for k in fb if k not in fa],
             "changed": [k for k in ca if k in cb and any(ca[k].get(f) != cb[k].get(f) for f in ("count", "pct", "value", "pass"))],
             "threshold_source": src,
-            "note": "p6_health_check's DCMA checks (project settings, project baseline, remaining durations) run in "
-                    "memory, no snapshot saved: before = " + ("P6's last F9 as stored" if compare_to == "current" else
-                                                              "the engine on the unchanged network")
-                    + ", after = the edited network with the engine's dates (critical path test rerun on it)"}
+            "note": _t("p6_health_check's DCMA checks (project settings, project baseline, remaining durations) run "
+                       "in memory, no snapshot saved: before = P6's last F9 as stored, after = the edited network "
+                       "with the engine's dates (critical path test rerun on it)") if compare_to == "current" else
+                    _t("p6_health_check's DCMA checks (project settings, project baseline, remaining durations) run "
+                       "in memory, no snapshot saved: before = the engine on the unchanged network, after = the "
+                       "edited network with the engine's dates (critical path test rerun on it)")}
     else:
         assumptions["dcma"] = None
     out = _slice(changed, offset, limit)
     if ctx is not None:
         out["fragnet"] = _fragnet_impact(base, trial, before, fin_before, r1, d1, crit_a, milestones,
-                                         "P6's last F9 as stored" if compare_to == "current"
-                                         else "the engine on the unchanged network")
+                                         _t("P6's last F9 as stored") if compare_to == "current"
+                                         else _t("the engine on the unchanged network"))
     out.update(project=project, edits=done, compare_to=compare_to,
                project_finish={"before": fin_before and _fmt_dt(fin_before), "after": _fmt_dt(fin_after),
                                "delta_cd": delta(fin_before, fin_after), "delta_wd": wd(fin_before, fin_after),
@@ -287,9 +291,10 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
                assumptions=assumptions, caveat=WHATIF_CAVEAT,
                engine={"match_rate": chk["match_rate"], "trusted": chk["match_rate"] is not None
                                       and chk["match_rate"] >= CPM_TRUST, "open_mismatched": chk["counts"]["open_mismatched"]},
-               engine_version=ENGINE_VERSION, schedule_state=state, note="In memory only: nothing was written. "
-               + ("" if compare_to == "engine" else "Before = P6's last F9; with an engine mismatch, compare_to='engine' "
-                                                    "isolates the edits."))
+               engine_version=ENGINE_VERSION, schedule_state=state,
+               note=_t("In memory only: nothing was written. ") if compare_to == "engine" else
+               _t("In memory only: nothing was written. Before = P6's last F9; with an engine mismatch, "
+                  "compare_to='engine' isolates the edits."))
     return out
 
 
@@ -343,10 +348,10 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
     try:
         n_req, seed = int(iterations), int(seed)
     except (TypeError, ValueError):
-        raise ValueError("iterations and seed must be whole numbers") from None
+        raise ValueError(_t("iterations and seed must be whole numbers")) from None
     labels = [udf_optimistic, udf_most_likely, udf_pessimistic]
     if any(labels) and not all(labels):
-        raise ValueError("udf_optimistic, udf_most_likely and udf_pessimistic go together: give all three or none")
+        raise ValueError(_t("udf_optimistic, udf_most_likely and udf_pessimistic go together: give all three or none"))
     dflt = RISK_DEFAULT if default_range is None else _risk_pcts(default_range, "default_range")
     n_workers = _risk_workers(workers)
     con = _connect()
@@ -411,7 +416,7 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
         d["task_code"] for d in T.values() if d["cstr_type"] and d["status_code"] != "TK_Complete")))
     for code in keys:
         if code not in cpm.code:
-            raise ValueError(f"milestones: activity {code} not found in project {project}")
+            raise ValueError(_t("milestones: activity {code} not found in project {project}", code=code, project=project))
     mids = [cpm.code[c] for c in keys]
     sim = _RiskSim(cpm, plan, base, base_drv, dist, affected, sub, own_sub, fixed_end, fixed_top, counted, mids, seed,
                    member, coef, events)
@@ -486,8 +491,9 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
                engine={"match_rate": chk["match_rate"], "trusted": chk["match_rate"] is not None
                        and chk["match_rate"] >= CPM_TRUST, "open_mismatched": chk["counts"]["open_mismatched"],
                        "warning": None if chk["match_rate"] is not None and chk["match_rate"] >= CPM_TRUST else (
-                           f"The engine matches the last F9 on {chk['match_rate']} of the open activities (needs "
-                           f"{CPM_TRUST}): the simulated dates may not follow P6's; see p6_cpm_validate.")},
+                           _t("The engine matches the last F9 on {match_rate} of the open activities (needs "
+                              "{CPM_TRUST}): the simulated dates may not follow P6's; see p6_cpm_validate.",
+                              match_rate=chk['match_rate'], CPM_TRUST=CPM_TRUST))},
                distribution={"default": dict(zip(("min_pct", "mode_pct", "max_pct"), dflt, strict=False)), "ranges": echo,
                              "udfs": uinfo, "counts": {"drawn": len(dist), **{s: sum(1 for x in dist.values()
                                                                                       if x[3] == s) for s in RISK_SOURCES},
@@ -506,8 +512,10 @@ def p6_schedule_risk(project: ProjectId, iterations: RiskIterations = 1000, seed
                caveat=RISK_CAVEAT_MODEL if correlations or risks else RISK_CAVEAT, iterations_note=None,
                parallel={"workers_requested": n_workers, **par}, schedule_state=state)
     if n_iter < min(max(n_req, RISK_ITERATIONS[0]), RISK_ITERATIONS[1]):
-        out["iterations_note"] = (f"{n_iter} iterations instead of {n_req}: {len(sub)} activities are recomputed per "
-                                  f"iteration and a run is capped at {RISK_WORK:,} activity passes")
+        out["iterations_note"] = _t("{n} iterations instead of {requested}: {acts} activities are recomputed per "
+                                    "iteration and a run is capped at {cap:,} activity passes", n=n_iter,
+                                    requested=n_req, acts=len(sub), cap=RISK_WORK)
     elif n_iter != n_req:
-        out["iterations_note"] = f"iterations clamped to {RISK_ITERATIONS[0]}..{RISK_ITERATIONS[1]}"
+        out["iterations_note"] = _t("iterations clamped to {min}..{max}", min=RISK_ITERATIONS[0],
+                                    max=RISK_ITERATIONS[1])
     return out

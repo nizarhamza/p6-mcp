@@ -22,6 +22,8 @@ import urllib.request
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
+from p6mcp.messages import _t
+
 MODES = ("system", "none", "custom")
 KEYS = ("proxy", "proxy_url", "proxy_user")  # profile settings (the password is in the Credential Manager)
 
@@ -29,24 +31,24 @@ KEYS = ("proxy", "proxy_url", "proxy_user")  # profile settings (the password is
 def check_url(url: object) -> Optional[str]:
     """Why a proxy URL is refused, None when it is accepted (http://host:port)."""
     if not isinstance(url, str) or not url.strip():
-        return "the proxy address must be text such as http://proxy.example.com:8080"
+        return _t("the proxy address must be text such as http://proxy.example.com:8080")
     try:
         parts = urlsplit(url.strip())
         port = parts.port
     except ValueError:
-        return f"the proxy address {url!r} is not a valid address (http://host:port)"
+        return _t("the proxy address {url!r} is not a valid address (http://host:port)", url=url)
     if parts.username is not None or parts.password is not None or "@" in parts.netloc:
-        return ("the proxy address must not hold a user name or a password: enter the proxy user in its own field; "
-                "its password goes to the Windows Credential Manager")
+        return _t("the proxy address must not hold a user name or a password: enter the proxy user in its own "
+                  "field; its password goes to the Windows Credential Manager")
     if parts.scheme.lower() != "http":
-        return ("the proxy address must start with http:// (the connection to the P6 EPPM server stays encrypted "
-                "through the proxy)")
+        return _t("the proxy address must start with http:// (the connection to the P6 EPPM server stays encrypted "
+                  "through the proxy)")
     if not parts.hostname:
-        return "the proxy address has no host name (http://host:port)"
+        return _t("the proxy address has no host name (http://host:port)")
     if port is None:
-        return "the proxy address needs a port (http://host:port, often 8080 or 3128)"
+        return _t("the proxy address needs a port (http://host:port, often 8080 or 3128)")
     if parts.path not in ("", "/") or parts.query or parts.fragment:
-        return "the proxy address must be http://host:port, with nothing after the port"
+        return _t("the proxy address must be http://host:port, with nothing after the port")
     return None
 
 
@@ -110,26 +112,27 @@ def resolve(base_url: str, profile: Optional[dict] = None) -> dict:
     out: dict = {"mode": mode, "url": None, "source": None, "bypassed": False,
                  "user": (profile.get("proxy_user") or None)}
     if mode == "none":
-        out["note"] = "Direct connection (the profile says no proxy)."
+        out["note"] = _t("Direct connection (the profile says no proxy).")
     elif mode == "custom":
         out.update(url=(profile.get("proxy_url") or "").strip() or None, source="profile")
     else:
         url, source, bypassed = _system(scheme, host)
         out.update(url=url, source=source if url else None, bypassed=bypassed)
         if bypassed:
-            out.update(url=None, note=f"Direct connection: {host} is in the {source} proxy bypass list.")
+            out.update(url=None, note=_t("Direct connection: {host} is in the {source} proxy bypass list.", host=host,
+                                         source=source))
         elif not url:
             pac = _pac()
-            out["note"] = "Direct connection: Windows sets no proxy for this address."
+            out["note"] = _t("Direct connection: Windows sets no proxy for this address.")
             if pac:
                 out["pac"] = pac
-                out["note"] = (f"Windows uses a proxy setup script ({pac}), which this app does not run: the calls go "
-                               "direct. If the server can only be reached through a proxy, enter its address in the "
-                               "server settings (Proxy: This proxy).")
+                out["note"] = _t("Windows uses a proxy setup script ({pac}), which this app does not run: the calls "
+                                 "go direct. If the server can only be reached through a proxy, enter its address in "
+                                 "the server settings (Proxy: This proxy).", pac=pac)
     if out["url"] and is_loopback(host):
-        out.update(url=None, bypassed=True, note="Direct connection: the server is on this PC (never proxied).")
+        out.update(url=None, bypassed=True, note=_t("Direct connection: the server is on this PC (never proxied)."))
     if out["url"]:
-        out["note"] = f"Through the proxy {out['url']} ({out['source']})."
+        out["note"] = _t("Through the proxy {url} ({source}).", url=out["url"], source=out["source"])
     return out
 
 

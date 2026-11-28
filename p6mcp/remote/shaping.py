@@ -17,6 +17,8 @@ import ntpath
 import re
 from typing import Any, Optional
 
+from p6mcp.messages import _t
+
 MAX_CHARS = 100_000
 _WHOLE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/])")
 _INNER = re.compile(r"(?:(?<![\w])[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/])[^\s\"'<>|*?]*")
@@ -94,7 +96,7 @@ def fit(obj: Any, limit: int = MAX_CHARS) -> Any:
 
         def page(k: int) -> dict:
             return dict(obj, rows=rows[:k], returned=k, next_offset=offset + k,
-                        remote_note=PAGE_NOTE.format(n=k, limit=limit, next=offset + k))
+                        remote_note=_t(PAGE_NOTE, n=k, limit=limit, next=offset + k))
 
         lo, hi = 0, len(rows) - 1  # largest k in [1, len - 1] whose page fits (len rows did not)
         while lo < hi:
@@ -105,7 +107,7 @@ def fit(obj: Any, limit: int = MAX_CHARS) -> Any:
                 hi = mid - 1
         if lo >= 1:
             return page(lo)
-    raise TooLarge(TOO_LARGE.format(size=n, limit=limit))
+    raise TooLarge(_t(TOO_LARGE, size=n, limit=limit))
 
 
 def shape(obj: Any, limit: int = MAX_CHARS, roots: Optional[list[tuple[str, str]]] = None) -> Any:

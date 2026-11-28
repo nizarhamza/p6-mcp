@@ -14,6 +14,7 @@ from p6mcp.core.db import _alive, _cols, _days, _db_dt, _dict, _fmt_dt
 from p6mcp.core.props import _lag_rule, _sched_options
 from p6mcp.core.calendar import _Cal, _calendars, _lag_cal_of, _lag_hpd_of
 from p6mcp.core.netcache import _cached, _Ticket, _ticket
+from p6mcp.messages import _join, _t
 
 
 # ----------------------------------------------------------------- network analysis (driving, float origin, redundant links)
@@ -106,7 +107,7 @@ class _Net:
 
     def task(self, code: str) -> dict:
         if code not in self.code:
-            raise ValueError(f"Activity {code} not found in project {self.prj['proj_short_name']}")
+            raise ValueError(_t("Activity {code} not found in project {proj_short_name}", code=code, proj_short_name=self.prj['proj_short_name']))
         return self.t[self.code[code]]
 
     @staticmethod
@@ -258,21 +259,22 @@ def _root_driver(net: _Net, d: dict, hidden: list) -> dict:
             or any(g is not None and abs(g) <= GAP_TOL_H
                    for g in (net.bound_gap(lk, "e") for lk in net.by_pred.get(d["task_id"], [])))):
         return {**base, "type": "as_late_as_possible", "cstr_type": "CS_ALAP", "cstr_label": _cstr_label("CS_ALAP"),
-                "detail": "As Late As Possible: moved later by its free float, onto its successors or its late dates"}
+                "detail": _t("As Late As Possible: moved later by its free float, onto its successors or its late "
+                             "dates")}
     if net.dd and d["es"] and d["cal"] and not d["cal"].error and d["cal"].work_hours(net.dd, d["es"]) <= GAP_TOL_H:
         return {**base, "type": "data_date", "data_date": _fmt_dt(net.dd)}
     if hidden:
         return {**base, "type": "completed_predecessor", "predecessors": hidden[:10],
-                "detail": "driven by completed activities (pass include_completed=True to follow them)"}
+                "detail": _t("driven by completed activities (pass include_completed=True to follow them)")}
     if d["as_"] is not None and d["status_code"] != "TK_NotStart":
         return {**base, "type": "actual_date", "actual_start": d["act_start_date"],
-                "detail": "in progress: remaining work placed by P6 from its progress"}
+                "detail": _t("in progress: remaining work placed by P6 from its progress")}
     if not net.by_succ.get(d["task_id"]):
-        return {**base, "type": "open_start", "detail": "no predecessor"}
+        return {**base, "type": "open_start", "detail": _t("no predecessor")}
     gaps = [g for g in (net.gap(lk) for lk in net.by_succ[d["task_id"]]) if g is not None]
     return {**base, "type": "unexplained", "min_gap_h": round(min(gaps), 2) if gaps else None,
-            "detail": "no predecessor link with a zero gap, no constraint or data date at its start (leveling, "
-                      "expected finish or an option this server does not model)"}
+            "detail": _t("no predecessor link with a zero gap, no constraint or data date at its start (leveling, "
+                         "expected finish or an option this server does not model)")}
 
 
 def _late_origin(net: _Net, d: dict) -> list[dict]:
@@ -283,12 +285,12 @@ def _late_origin(net: _Net, d: dict) -> list[dict]:
     who = {"task_code": d["task_code"], "task_name": d["task_name"]}
     if net.must and net.zero(d["cal"], d["lf"], net.must):
         return [{"type": "project_must_finish", **who, "date": net.prj["plan_end_date"],
-                 "detail": "PROJECT.plan_end_date (Must Finish By)"}]
+                 "detail": _t("PROJECT.plan_end_date (Must Finish By)")}]
     if net.end and net.zero(d["cal"], d["lf"], net.end) or net.zero(d["cal"], d["lf"], d["ef"]):
         return [{"type": "open_end", **who, "date": d["late_end_date"],
-                 "detail": "no controlling successor: late finish at the project finish (or its own early finish)"}]
+                 "detail": _t("no controlling successor: late finish at the project finish (or its own early finish)")}]
     return [{"type": "unexplained", **who, "date": d["late_end_date"],
-             "detail": "no successor link with a zero late gap, no constraint, must finish or project finish date"}]
+             "detail": _t("no successor link with a zero late gap, no constraint, must finish or project finish date")}]
 
 
 def _cstr_sources(net: _Net, d: dict) -> list[dict]:
@@ -340,15 +342,25 @@ def _float_walk(net: _Net, d0: dict, max_depth: int = 500) -> dict:
         if len(path) > 12:
             path.append("...")
             break
-    words = {"activity_constraint": "a constraint", "project_must_finish": "the project must finish date "
-             + str(net.prj["plan_end_date"]), "open_end": "the project finish (open end)", "unexplained": "an unexplained source"}
-    expl = (f"Total float {_days(d0['total_float_hr_cnt'], d0['hpd'])} d of {code} comes from "
-            + (" and ".join(sorted({words[s['type']] + (f" ({s['cstr_label']} {s['cstr_date']} on {s['task_code']})"
-                                                         if s['type'] == 'activity_constraint' else '') for s in sources}))
-               or "nothing found") + ", through " + " ".join(path) + ".")
+    def word(s: dict):
+        if s["type"] == "activity_constraint":
+            return _t("a constraint ({label} {date} on {code})", label=s["cstr_label"], date=s["cstr_date"],
+                      code=s["task_code"])
+        if s["type"] == "project_must_finish":
+            return _t("the project must finish date {date}", date=str(net.prj["plan_end_date"]))
+        return _t("the project finish (open end)") if s["type"] == "open_end" else _t("an unexplained source")
+    found = sorted({word(s) for s in sources}, key=str)  # by the English text, as before
+    what = found[0] if found else _t("nothing found")
+    for w in found[1:]:
+        what = _t("{first} and {second}", first=what, second=w)
+    parts = [_t("Total float {tf} d of {code} comes from {sources}, through {path}.",
+                tf=_days(d0["total_float_hr_cnt"], d0["hpd"]), code=code, sources=what, path=" ".join(path))]
     for c in own:
-        expl += (f" Its own constraint {c['cstr_label']} {c['cstr_date']} "
-                 + ("controls its late dates." if c["controls"] else "does NOT control its late dates."))
+        parts.append(_t(" Its own constraint {label} {date} controls its late dates.", label=c["cstr_label"],
+                        date=c["cstr_date"]) if c["controls"] else
+                     _t(" Its own constraint {label} {date} does NOT control its late dates.", label=c["cstr_label"],
+                        date=c["cstr_date"]))
+    expl = _join("", parts)
     return {"level": level, "via": via, "sources": sources, "cut": cut, "origin": origin, "own": own,
             "explanation": expl}
 
@@ -408,7 +420,8 @@ def _transitive(net: _Net) -> dict[int, str]:
             codes = [net.t[a]["task_code"]] + [net.t[x["succ"]]["task_code"] for x in chain]
             for lk in lks:
                 if v + 1e-9 >= lk["lag"]:  # the chain's lags reach the direct lag (no 5 minute slack)
-                    out[lk["id"]] = f"implied by the FS chain {' -> '.join(codes)} (lags {v:g} h >= {lk['lag']:g} h)"
+                    out[lk["id"]] = _t("implied by the FS chain {chain} (lags {lags:g} h >= {lag:g} h)",
+                                       chain=" -> ".join(codes), lags=v, lag=lk["lag"])
     return out
 
 
@@ -684,13 +697,13 @@ class _Cpm:
     def duration_fixed(self, d: dict) -> Optional[str]:
         """Why a change of d's remaining duration cannot move its finish (None when it can)."""
         if d["status_code"] == "TK_Complete":
-            return "completed"
+            return _t("completed")
         if d["task_type"] in ("TT_Mile", "TT_FinMile"):
-            return "milestone"
+            return _t("milestone")
         if self.use_expect and d.get("expect_end_date"):
-            return "expected finish date used by the schedule options"
+            return _t("expected finish date used by the schedule options")
         if "CS_MANDFIN" in (d["cstr_type"], d["cstr_type2"]):
-            return "mandatory finish constraint"
+            return _t("mandatory finish constraint")
         return None
 
     def _from_expect(self, d: dict) -> bool:
@@ -740,7 +753,7 @@ class _Cpm:
                     heapq.heappush(ready, lk["succ"])
         if len(out) < len(self.t):
             loop = sorted(self.t[i]["task_code"] for i in self.t if i not in set(out))[:10]
-            raise ValueError(f"The network has a loop (P6 refuses to schedule it): {loop}")
+            raise ValueError(_t("The network has a loop (P6 refuses to schedule it): {loop}", loop=loop))
         return out, by_s, by_p
 
     # ------------------------------------------------------------------ passes
@@ -768,7 +781,7 @@ class _Cpm:
         predecessor (lk, lag calendar, effective lag, link index), links to other projects by own activity,
         driving assignments of resource dependent activities and the assignment lag of task dependent ones."""
         if self.dd is None:
-            raise ValueError("The project has no data date (PROJECT.last_recalc_date): schedule it once in P6")
+            raise ValueError(_t("The project has no data date (PROJECT.last_recalc_date): schedule it once in P6"))
         order, by_s, _ = self.order()
         T = self.t
         by_s2, by_p2, links = {}, {}, []

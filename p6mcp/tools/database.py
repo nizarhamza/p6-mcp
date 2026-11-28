@@ -32,12 +32,15 @@ from p6mcp.core.db import (
 )
 from p6mcp.core.netcache import _engine_cache_info
 from p6mcp.core.props import _db_task_code, _lag_rule, _sched_diff, _sched_options, _xer_project, _xer_sched
-from p6mcp.core.calendar import _cal_row, CAL_WINDOW_DAYS, _calendar, _calendars, _week_text, WEEKDAYS
+from p6mcp.core.calendar import _cal_row, CAL_WINDOW_DAYS, _calendar, _calendars, _week_text
 from p6mcp.core.editlog import _log_dir
 from p6mcp.core.reporting import _cal_check_read, _diag_schema, _holidays, _week_diff
 from p6mcp.core.xer import _xer_read
 from p6mcp.core.dashboard import _openpyxl_version
+from p6mcp.messages import _join, _t
 
+
+_DAYS = (_t("Mon"), _t("Tue"), _t("Wed"), _t("Thu"), _t("Fri"), _t("Sat"), _t("Sun"))  # WEEKDAYS in messages
 
 @_tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def p6_list_calendars(project: Optional[ProjectId] = None, name_contains: Optional[str] = None,
@@ -57,12 +60,12 @@ def p6_list_calendars(project: Optional[ProjectId] = None, name_contains: Option
     win = span = None
     if from_date or to_date:
         if not (from_date and to_date):
-            raise ValueError("give both from_date and to_date")
+            raise ValueError(_t("give both from_date and to_date"))
         win = (_parse_dt(from_date, "from_date")[0].date(), _parse_dt(to_date, "to_date")[0].date())
         if win[1] < win[0]:
-            raise ValueError("to_date is before from_date")
+            raise ValueError(_t("to_date is before from_date"))
         if (win[1] - win[0]).days > CAL_WINDOW_DAYS:
-            raise ValueError(f"window longer than {CAL_WINDOW_DAYS} days")
+            raise ValueError(_t("window longer than {days} days", days=CAL_WINDOW_DAYS))
     args: dict[str, Any] = {}
     counts = "SELECT t.clndr_id, COUNT(*) AS n FROM TASK t WHERE 1=1" + _alive(con, "TASK", "t")
     where = "WHERE 1=1" + _alive(con, "CALENDAR", "c")
@@ -98,8 +101,9 @@ def p6_list_calendars(project: Optional[ProjectId] = None, name_contains: Option
     res = _page(con, sql, args, offset, limit, row)
     res["project"] = project
     if any(r.get("exception_dates_truncated") for r in res["rows"]):
-        res["note"] = (f"exception dates capped at {CAL_EXC_EACH} per calendar and {CAL_EXC_PAGE} per page "
-                       "(exception_dates_truncated): narrow with project=, from_date/to_date or name_contains.")
+        res["note"] = _t("exception dates capped at {each} per calendar and {page} per page "
+                         "(exception_dates_truncated): narrow with project=, from_date/to_date or name_contains.",
+                         each=CAL_EXC_EACH, page=CAL_EXC_PAGE)
     return res
 
 
@@ -126,10 +130,11 @@ def p6_calendar_check(project: ProjectId, kinds: Optional[CalCheckKinds] = None,
     want = list(CAL_CHECK_KINDS) if kinds is None else list(dict.fromkeys([kinds] if isinstance(kinds, str) else kinds))
     bad = [k for k in want if k not in CAL_CHECK_KINDS]
     if bad or not want:
-        raise ValueError(f"kinds: choose from {list(CAL_CHECK_KINDS)}" + (f" (unknown: {bad})" if bad else ""))
+        raise ValueError(_t("kinds: choose from {kinds} (unknown: {bad})", kinds=list(CAL_CHECK_KINDS), bad=bad) if bad
+                         else _t("kinds: choose from {kinds}", kinds=list(CAL_CHECK_KINDS)))
     for k, v in (("from_year", from_year), ("to_year", to_year)):
         if v is not None and not 1900 <= int(v) <= 2200:
-            raise ValueError(f"{k} must be a year from 1900 to 2200")
+            raise ValueError(_t("{name} must be a year from 1900 to 2200", name=k))
     _check_page(offset, limit)
     con = _connect()
     pid = _project_id(con, project)
@@ -143,21 +148,26 @@ def p6_calendar_check(project: ProjectId, kinds: Optional[CalCheckKinds] = None,
     # span of whole years
     a = _db_dt(prj["last_recalc_date"]) or _db_dt(prj["plan_start_date"])
     b = _db_dt(prj["scd_end_date"]) or _db_dt(prj["plan_end_date"]) or _db_dt(d["last"])
-    basis = (f"{'data date' if prj['last_recalc_date'] else 'project start'} {a.date()} to "
-             f"{'scheduled finish' if prj['scd_end_date'] else 'planned finish' if prj['plan_end_date'] else 'latest activity finish'}"
-             f" {b.date()}") if a and b else None
+    basis = None
+    if a and b:
+        start = _t("data date") if prj["last_recalc_date"] else _t("project start")
+        finish = (_t("scheduled finish") if prj["scd_end_date"] else _t("planned finish") if prj["plan_end_date"]
+                  else _t("latest activity finish"))
+        basis = _t("{start} {start_date} to {finish} {finish_date}", start=start, start_date=a.date(), finish=finish,
+                   finish_date=b.date())
     y0 = int(from_year) if from_year is not None else a.year if a else None
     y1 = int(to_year) if to_year is not None else b.year if b else None
     if y0 is None or y1 is None:
-        raise ValueError(f"{project} has no data date, start or finish: pass from_year and to_year")
+        raise ValueError(_t("{project} has no data date, start or finish: pass from_year and to_year", project=project))
     if y1 < y0:
         if to_year is not None or from_year is not None:
-            raise ValueError("to_year is before from_year")
+            raise ValueError(_t("to_year is before from_year"))
         y1 = y0  # finish before the data date: the data date's year
     if y1 - y0 + 1 > CAL_CHECK_YEARS:
         if from_year is not None and to_year is not None:
-            raise ValueError(f"at most {CAL_CHECK_YEARS} years (from_year to to_year)")
-        notes.append(f"Span cut to {CAL_CHECK_YEARS} years ({y0} to {y0 + CAL_CHECK_YEARS - 1}).")
+            raise ValueError(_t("at most {years} years (from_year to to_year)", years=CAL_CHECK_YEARS))
+        notes.append(_t("Span cut to {years} years ({first} to {last}).",
+                        years=CAL_CHECK_YEARS, first=y0, last=y0 + CAL_CHECK_YEARS - 1))
         y1 = y0 + CAL_CHECK_YEARS - 1
     years = range(y0, y1 + 1)
 
@@ -180,9 +190,9 @@ def p6_calendar_check(project: ProjectId, kinds: Optional[CalCheckKinds] = None,
     proj = cals.get(prj["clndr_id"])
     proj = proj if proj is not None and not proj.error else None
     if prj["clndr_id"] is None:
-        notes.append("The project has no calendar: holidays and work weeks are not compared.")
+        notes.append(_t("The project has no calendar: holidays and work weeks are not compared."))
     elif proj is None:
-        notes.append("The project calendar is missing or unreadable: holidays and work weeks are not compared.")
+        notes.append(_t("The project calendar is missing or unreadable: holidays and work weeks are not compared."))
 
     found: list[dict] = []
 
@@ -197,71 +207,81 @@ def p6_calendar_check(project: ProjectId, kinds: Optional[CalCheckKinds] = None,
                       "resource_assignments": asg.get(cid, 0) if cid is not None else 0})
 
     if None in acts:
-        add("calendar_missing", None, f"{acts[None][0]} activities of the project have no calendar.")
+        add("calendar_missing", None, _t("{n} activities of the project have no calendar.", n=acts[None][0]))
     t0, t1 = datetime(y0, 1, 1), datetime(y1 + 1, 1, 1)
     for cid in chain:
         r, cal = raw.get(cid), cals.get(cid)
         if r is None or cal is None:
-            add("calendar_missing", cid, f"Calendar {cid} is not in the database; used as {', '.join(roles[cid])} "
-                "calendar.")
+            add("calendar_missing", cid, _t("Calendar {clndr_id} is not in the database; used as {roles} calendar.",
+                                            clndr_id=cid, roles=", ".join(roles[cid])))
             continue
         if r["base_clndr_id"] is not None and r["base_clndr_id"] != cid and r["base_clndr_id"] not in raw:
-            add("base_missing", cid, f"Base calendar {r['base_clndr_id']} is not in the database: its exceptions "
-                "(and, for a resource calendar, its work week) are not applied.")
+            add("base_missing", cid, _t("Base calendar {base} is not in the database: its exceptions (and, for a "
+                                        "resource calendar, its work week) are not applied.", base=r["base_clndr_id"]))
         if cal.error:
-            add("unreadable", cid, f"Calendar data cannot be read ({cal.error}): it has no working time here.")
+            add("unreadable", cid, _t("Calendar data cannot be read ({error}): it has no working time here.",
+                                      error=cal.error))
             continue
         if roles[cid] == ["base"]:
             continue  # a base calendar is checked through the calendars built on it
         work_h = cal.work_hours(t0, t1)
         if work_h <= 0:
-            add("no_working_time", cid, f"No working time from {y0} to {y1}"
-                + (f": open activities on it that cannot be scheduled: {acts[cid][1]}." if acts.get(cid, (0, 0))[1]
-                   else "."))
+            add("no_working_time", cid,
+                _t("No working time from {first} to {last}: open activities on it that cannot be scheduled: {n}.",
+                   first=y0, last=y1, n=acts[cid][1]) if acts.get(cid, (0, 0))[1] else
+                _t("No working time from {first} to {last}.", first=y0, last=y1))
             continue
         hours = [sum(f - s for s, f in sh) / 60 for sh in cal.week]
         day_h, n_days = sorted({h for h in hours if h}), sum(1 for h in hours if h)
         hpd = r["day_hr_cnt"]
         if not hpd:
-            add("day_hours_stale", cid, "Hours per day is empty: 8 h per day is used to show durations and float.")
+            add("day_hours_stale", cid, _t("Hours per day is empty: 8 h per day is used to show durations and float."))
         elif day_h and all(abs(float(hpd) - h) > 1e-6 for h in day_h) \
                 and abs(float(hpd) - sum(hours) / n_days) > 1e-6:
-            add("day_hours_stale", cid, f"Hours per day is {float(hpd):g} but the work days have "
-                f"{', '.join(f'{h:g}' for h in day_h)} h (average {sum(hours) / n_days:g} h): durations and float "
-                "in days use the stored value.")
+            add("day_hours_stale", cid, _t("Hours per day is {hpd:g} but the work days have {days} h (average "
+                                           "{average:g} h): durations and float in days use the stored value.",
+                                           hpd=float(hpd), days=", ".join(f"{h:g}" for h in day_h),
+                                           average=sum(hours) / n_days))
         if r["week_hr_cnt"] is not None and abs(float(r["week_hr_cnt"]) - sum(hours)) > 1e-6:
-            add("week_hours_stale", cid, f"Stored hours per week {float(r['week_hr_cnt']):g}, the work week has "
-                f"{sum(hours):g} h.")
+            add("week_hours_stale", cid, _t("Stored hours per week {stored:g}, the work week has {week:g} h.",
+                                            stored=float(r["week_hr_cnt"]), week=sum(hours)))
         for y in years:
             if not any(x.year == y for x in cal.exc):
-                add("no_exceptions_in_year", cid, f"No exception date (holiday or changed hours) in {y}.", year=y)
+                add("no_exceptions_in_year", cid, _t("No exception date (holiday or changed hours) in {year}.",
+                                                     year=y), year=y)
         if proj is None or cid == prj["clndr_id"]:
             continue
         diff = _week_diff(cal, proj)
         if diff:
-            add("work_week_differs", cid, f"Work week differs from the project calendar {proj.name!r}: "
-                + "; ".join(diff) + ".")
+            add("work_week_differs", cid, _t("Work week differs from the project calendar {calendar!r}: {diff}.",
+                                             calendar=proj.name, diff=_join("; ", diff)))
         for x in _holidays(proj, y0, y1):
             if cal.is_workday(x):
-                add("project_holiday_worked", cid, f"{WEEKDAYS[x.weekday()]} {x} is a holiday of the project calendar "
-                    f"{proj.name!r}; this calendar works {cal.day_hours(x):g} h that day.", when=x)
+                add("project_holiday_worked", cid, _t("{day} {date} is a holiday of the project calendar {calendar!r}; "
+                                                      "this calendar works {hours:g} h that day.",
+                                                      day=_DAYS[x.weekday()], date=x, calendar=proj.name,
+                                                      hours=cal.day_hours(x)), when=x)
         for x in _holidays(cal, y0, y1):
             if proj.is_workday(x):
-                add("holiday_not_in_project", cid, f"{WEEKDAYS[x.weekday()]} {x} is a holiday of this calendar; the "
-                    f"project calendar {proj.name!r} works {proj.day_hours(x):g} h that day.", when=x)
+                add("holiday_not_in_project", cid, _t("{day} {date} is a holiday of this calendar; the project "
+                                                      "calendar {calendar!r} works {hours:g} h that day.",
+                                                      day=_DAYS[x.weekday()], date=x, calendar=proj.name,
+                                                      hours=proj.day_hours(x)), when=x)
     # open resource dependent activities whose assigned resources have no usable calendar
     by_task: dict = {}
     for t in d["rd"]:
         rc = cals.get(t["rsrc_clndr_id"])
-        why = ("resource not found" if t["found"] is None else "no calendar" if t["rsrc_clndr_id"] is None
-               else f"calendar {t['rsrc_clndr_id']} not found" if rc is None else "calendar unreadable" if rc.error
-               else None)
+        why = (_t("resource not found") if t["found"] is None else _t("no calendar") if t["rsrc_clndr_id"] is None
+               else _t("calendar {clndr_id} not found", clndr_id=t["rsrc_clndr_id"]) if rc is None
+               else _t("calendar unreadable") if rc.error else None)
         if why:
-            by_task.setdefault(t["task_id"], [t, []])[1].append(f"{t['rsrc_short_name'] or t['rsrc_id']} ({why})")
+            by_task.setdefault(t["task_id"], [t, []])[1].append(
+                _t("{resource} ({why})", resource=t["rsrc_short_name"] or t["rsrc_id"], why=why))
     for t, res in by_task.values():
-        add("rsrc_dep_no_calendar", t["clndr_id"], "Resource dependent activity; assigned resources without a usable "
-            f"calendar: {', '.join(res)}. This server's CPM engine schedules those assignments on the activity "
-            "calendar.", task=t)
+        add("rsrc_dep_no_calendar", t["clndr_id"], _t("Resource dependent activity; assigned resources without a "
+                                                      "usable calendar: {resources}. This server's CPM engine "
+                                                      "schedules those assignments on the activity calendar.",
+                                                      resources=_join(", ", res)), task=t)
 
     kind_rank = {k: i for i, k in enumerate(CAL_CHECK_KINDS)}
     found.sort(key=lambda f: (SEVERITY_RANK[f["severity"]], kind_rank[f["kind"]], (f["calendar"] or "").lower(),
@@ -292,11 +312,13 @@ def p6_calendar_check(project: ProjectId, kinds: Optional[CalCheckKinds] = None,
     res.update(project=project, span={"from_year": y0, "to_year": y1, "basis": "from_year / to_year" if (
         from_year is not None or to_year is not None) else basis},
                calendars=listed[:MAX_ROWS], counts=counts, by_severity=by_sev, schedule_state=d["state"],
-               note=" ".join(notes + [
-                   "Holidays = exception dates without working time on a weekday the calendar's work week works; "
-                   "a calendar's exceptions include its base calendar's. Compared with the project calendar only. "
-                   "Hours per day convert hours to days; stored hours per week are never used in arithmetic here."]
-                   + ([f"calendars lists the first {MAX_ROWS} of {len(listed)}."] if len(listed) > MAX_ROWS else [])))
+               note=_join(" ", notes + [
+                   _t("Holidays = exception dates without working time on a weekday the calendar's work week works; "
+                      "a calendar's exceptions include its base calendar's. Compared with the project calendar only. "
+                      "Hours per day convert hours to days; stored hours per week are never used in arithmetic "
+                      "here.")]
+                   + ([_t("calendars lists the first {shown} of {n}.", shown=MAX_ROWS, n=len(listed))]
+                      if len(listed) > MAX_ROWS else [])))
     return res
 
 
@@ -308,7 +330,7 @@ def p6_schedule_options(project: Optional[ProjectId] = None, xer_path: Optional[
     and p6_import_xer does not import them. The key activity is shown as an Activity ID. lag_rule
     gives the calendar used for lag days. xer_project picks the project when the XER has several."""
     if not project and not xer_path:
-        raise ValueError("give project, xer_path or both")
+        raise ValueError(_t("give project, xer_path or both"))
     con = _connect()
     db_opts, db_src, lag = {}, None, (None, None)
     if project:
@@ -325,11 +347,11 @@ def p6_schedule_options(project: Optional[ProjectId] = None, xer_path: Optional[
     rows = _sched_diff(db_opts, xer_opts, lambda v: _db_task_code(con, v), xcodes.get)
     keys = lambda o: set(o) - {"levelprioritylist"}  # noqa: E731
     both = keys(db_opts) & keys(xer_opts)
-    notes = ["Read only: nothing is written.",
-             "P6 schedules with the options stored in the database; options it does not store take P6 "
-             "defaults, which are not shown (the lag rule default is the predecessor calendar)."]
+    notes = [_t("Read only: nothing is written."),
+             _t("P6 schedules with the options stored in the database; options it does not store take P6 defaults, "
+                "which are not shown (the lag rule default is the predecessor calendar).")]
     if xer_path and not xer_opts:
-        notes.append("The XER has no SCHEDOPTIONS row for this project.")
+        notes.append(_t("The XER has no SCHEDOPTIONS row for this project."))
     return {"project": project, "db_source": db_src, "xer": xer_info, "options": rows,
             "summary": {"compared": len(both), "different": sum(1 for o in rows if o["same"] is False),
                         "only_in_db": len(keys(db_opts) - keys(xer_opts)),
@@ -352,7 +374,7 @@ def p6_sql_select(sql: str, offset: Offset = 0, limit: Limit = 200) -> dict:
     while q.endswith(";"):
         q = q[:-1].rstrip()
     if not q.lower().startswith(("select", "with", "pragma table_info")):
-        raise ValueError("Only SELECT / WITH / PRAGMA table_info statements are allowed.")
+        raise ValueError(_t("Only SELECT / WITH / PRAGMA table_info statements are allowed."))
     offset, limit = _check_page(offset, limit)
     con = _connect()
     con.execute("BEGIN")  # page and count from one snapshot
@@ -371,11 +393,11 @@ def p6_sql_select(sql: str, offset: Offset = 0, limit: Limit = 200) -> dict:
             rows = [_dict(r) for r in cur.fetchmany(limit + 1)]
         except sqlite3.DatabaseError as e:
             if "interrupt" in str(e).lower():
-                raise ValueError(f"Query stopped after {SQL_QUERY_SECONDS} s: add conditions, or use a p6_ tool "
-                                 "made for the question.") from e
+                raise ValueError(_t("Query stopped after {seconds} s: add conditions, or use a p6_ tool "
+                                    "made for the question.", seconds=SQL_QUERY_SECONDS)) from e
             if "not authorized" in str(e).lower():
-                raise ValueError("Only reading is allowed in p6_sql_select (no write, ATTACH, schema change or "
-                                 "setting PRAGMA).") from e
+                raise ValueError(_t("Only reading is allowed in p6_sql_select (no write, ATTACH, schema change or "
+                                    "setting PRAGMA).")) from e
             raise
         more, rows = len(rows) > limit, rows[:limit]
         total = None
@@ -403,14 +425,14 @@ def p6_sql_select(sql: str, offset: Offset = 0, limit: Limit = 200) -> dict:
     notes = []
     if keep < len(rows):
         rows, more = rows[:keep], True
-        notes.append(f"page ended after {keep} rows (about {SQL_PAGE_BYTES} bytes): select fewer columns, or follow "
-                     "next_offset.")
+        notes.append(_t("page ended after {keep} rows (about {bytes} bytes): select fewer columns, or follow "
+                        "next_offset.", keep=keep, bytes=SQL_PAGE_BYTES))
     res = _env(total, offset, rows, more=more)
     if total is None:
-        notes.append(f"total not counted (PRAGMA, more than {SQL_COUNT_CAP} rows, or over {SQL_COUNT_SECONDS} s "
-                     "to count); follow next_offset until it is null.")
+        notes.append(_t("total not counted (PRAGMA, more than {cap} rows, or over {seconds} s to count); follow "
+                        "next_offset until it is null.", cap=SQL_COUNT_CAP, seconds=SQL_COUNT_SECONDS))
     if notes:
-        res["note"] = " ".join(notes)
+        res["note"] = _join(" ", notes)
     return res
 
 
@@ -442,26 +464,26 @@ def p6_diagnose() -> dict:
         "engine_cache": _engine_cache_info(),
     }
     if ov:
-        out["data_source"]["note"] = ("This server process was switched with p6_use_database: config.json and MCP for "
-                                      "Primavera P6 Settings keep the saved choice, and a restart of the server, or "
-                                      "p6_use_database(source=\"saved\"), returns to it.")
+        out["data_source"]["note"] = _t("This server process was switched with p6_use_database: config.json and MCP "
+                                        "for Primavera P6 Settings keep the saved choice, and a restart of the "
+                                        "server, or p6_use_database(source=\"saved\"), returns to it.")
     if out["restart_required"]:
-        out["restart_note"] = ("The tool profile, the write permission or the skill shop setting changed since the "
-                               "server started: restart your MCP client to refresh its tool list.")
+        out["restart_note"] = _t("The tool profile, the write permission or the skill shop setting changed since "
+                                 "the server started: restart your MCP client to refresh its tool list.")
     if _state.XER_MANIFEST is not None:
         out["xer_mode"] = {"files": [{"file": os.path.basename(f["path"]), "path": f["path"],
                                       "xer_version": f.get("xer_version"), "projects": f["projects"],
                                       "warnings": f["warnings"][:10]} for f in _state.XER_MANIFEST["files"]],
-                           "note": "Read only. A Project ID already used by an earlier file gets a ~2 suffix."}
+                           "note": _t("Read only. A Project ID already used by an earlier file gets a ~2 suffix.")}
     if st.eppm:
         m = _state.EPPM_MANIFEST or {}
         out["eppm_mode"] = {"server": st.eppm, "working_copy": _eppm_store.store_path(st.eppm) if m else None,
                             "pulled_at": m.get("pulled_at"), "route": m.get("route"),
                             "projects": [p["project_id"] for p in m.get("projects", [])],
                             "warnings": m.get("warnings", [])[:10],
-                            "note": "Tools read the working copy (p6_eppm_pull). Edits change only that copy: "
-                                    "p6_eppm_push sends them, p6_eppm_schedule schedules on the server; "
-                                    "p6_eppm_status lists the pending changes."}
+                            "note": _t("Tools read the working copy (p6_eppm_pull). Edits change only that copy: "
+                                       "p6_eppm_push sends them, p6_eppm_schedule schedules on the server; "
+                                       "p6_eppm_status lists the pending changes.")}
         prof = _config.eppm_profile(st.raw, st.eppm)
         if prof:  # how the REST calls go out (no password: the proxy user only); the SQL route is never proxied
             from p6mcp.eppm import proxy as _eppm_proxy
@@ -477,8 +499,9 @@ def p6_diagnose() -> dict:
                                                         "baselines": prof.get("baselines", "current")},
             "local_copy": _pmdb.store_path(st.pmdb) if m else None, "copy": _pmdb.summary(m, prof),
             "rows": (m or {}).get("rows"), "warnings": (m or {}).get("warnings", [])[:10],
-            "note": "Read only: the tools read a local copy made by p6_pmdb_refresh (only SELECT statements run on "
-                    "the database server, never a write). Refresh it to see changes made in P6 since copied_at."}
+            "note": _t("Read only: the tools read a local copy made by p6_pmdb_refresh (only SELECT statements run "
+                       "on the database server, never a write). Refresh it to see changes made in P6 since "
+                       "copied_at.")}
     if not _state.DB_PATH:
         out["database_problem"] = st.db_problem or _config.NO_DB_MESSAGE
         return out
@@ -508,13 +531,15 @@ def p6_diagnose() -> dict:
 # p6_use_database layers a data source selection over config.json for this server process only (_state.OVERRIDE,
 # read by _refresh at every call): the file and the Settings app keep their choice, a restart returns to it.
 
-SOURCE_LABELS = {"database": "P6 Professional SQLite database", "xer": "XER files (read only)",
-                 "eppm": "P6 EPPM server (local working copy)",
-                 "pmdb": "P6 Professional on SQL Server or Oracle (local read-only copy)"}
+SOURCE_LABELS = {"database": _t("P6 Professional SQLite database"), "xer": _t("XER files (read only)"),
+                 "eppm": _t("P6 EPPM server (local working copy)"),
+                 "pmdb": _t("P6 Professional on SQL Server or Oracle (local read-only copy)")}
 READ_ONLY_SOURCES = ("xer", "pmdb")
-ENV_WINS = ("P6_DB_PATH is set in the environment of this server (the MCP client's configuration): the environment "
-            "wins over the settings, so this server always uses that database. Remove P6_DB_PATH from the client's "
-            "configuration to choose the data source in MCP for Primavera P6 Settings.")
+SETTINGS_CHANGED = _t("The settings changed since the dry run: the plan is different now. Nothing was written. Run the "
+                      "dry run again, show the new plan to the user and confirm it.")
+ENV_WINS = (_t("P6_DB_PATH is set in the environment of this server (the MCP client's configuration): the environment "
+               "wins over the settings, so this server always uses that database. Remove P6_DB_PATH from the client's "
+               "configuration to choose the data source in MCP for Primavera P6 Settings."))
 
 
 def _env_db() -> Optional[str]:
@@ -546,10 +571,11 @@ def _choice(st: _config.Settings) -> dict:
 
 def _describe(c: dict) -> str:
     if c["source"] == "environment":
-        return "the database of P6_DB_PATH (environment)"
+        return _t("the database of P6_DB_PATH (environment)")
     if c["source"] is None:
-        return "no data source (no settings file)"
-    return SOURCE_LABELS.get(c["source"], c["source"]) + (f" {c['profile']!r}" if c["profile"] is not None else "")
+        return _t("no data source (no settings file)")
+    label = SOURCE_LABELS.get(c["source"], c["source"])
+    return label if c["profile"] is None else _t("{label} {profile!r}", label=label, profile=c["profile"])
 
 
 def _source_state() -> dict:
@@ -595,26 +621,31 @@ def _source_target(source: str, name: Optional[str], entry: dict, data: dict) ->
 
 def _source_problem(source: str, name: Optional[str], entry: dict, data: dict) -> Optional[str]:
     """Why this profile cannot be switched to (None = it can)."""
-    settings = "MCP for Primavera P6 Settings (Database)"
+    settings = _t("MCP for Primavera P6 Settings (Database)")
     if source == "xer":
         files = data.get("xer_files") or []
         if not data.get("xer_confirmed"):
-            return f"The XER files were not loaded and checked: open {settings} and click Load."
+            return _t("The XER files were not loaded and checked: open {settings} and click Load.", settings=settings)
         missing = [f for f in files if not os.path.isfile(f)]
-        return f"XER file not found: {missing[0]}." if missing else None
-    what = {"database": "Database", "eppm": "P6 EPPM server", "pmdb": "Database server"}[source]
+        return _t("XER file not found: {missing}.", missing=missing[0]) if missing else None
     if not entry.get("confirmed"):
-        return (f"{what} {name!r} was set up but its connection was not tested and confirmed: open {settings}, click "
-                "Test connection and confirm it.")
+        return (_t("Database {name!r} was set up but its connection was not tested and confirmed: open {settings}, "
+                   "click Test connection and confirm it.", name=name, settings=settings) if source == "database" else
+                _t("P6 EPPM server {name!r} was set up but its connection was not tested and confirmed: open "
+                   "{settings}, click Test connection and confirm it.", name=name, settings=settings)
+                if source == "eppm" else
+                _t("Database server {name!r} was set up but its connection was not tested and confirmed: open "
+                   "{settings}, click Test connection and confirm it.", name=name, settings=settings))
     if source == "database":
         path = os.path.abspath(entry.get("path") or "")
-        return None if os.path.isfile(path) else f"Database {name!r}: the file was not found ({path})."
+        return None if os.path.isfile(path) else _t("Database {name!r}: the file was not found ({path}).",
+                                                    name=name, path=path)
     if source == "eppm" and _eppm_store.read_manifest(name) is None:
-        return (f"P6 EPPM server {name!r} has no working copy yet: pull projects first (make it the data source in "
-                f"{settings}, then p6_eppm_pull).")
+        return (_t("P6 EPPM server {name!r} has no working copy yet: pull projects first (make it the data source in "
+                   "{settings}, then p6_eppm_pull).", name=name, settings=settings))
     if source == "pmdb" and _pmdb.read_manifest(name) is None:
-        return (f"Database server {name!r} has no local copy yet: copy the projects first (Copy now in {settings}, "
-                "or p6_pmdb_refresh while it is the saved data source).")
+        return (_t("Database server {name!r} has no local copy yet: copy the projects first (Copy now in {settings}, "
+                   "or p6_pmdb_refresh while it is the saved data source).", name=name, settings=settings))
     return None
 
 
@@ -637,51 +668,52 @@ def _source_find(data: dict, source: str, profile: Optional[str]) -> tuple[str, 
     found = [e for e in _source_entries(data) if e[0] == source]
     label = SOURCE_LABELS[source]
     if not found:
-        raise ValueError(f"No {label} is set up in MCP for Primavera P6 Settings (Database): set it up and confirm it "
-                         "there first.")
+        raise ValueError(_t("No {label} is set up in MCP for Primavera P6 Settings (Database): set it up and confirm "
+                            "it there first.", label=label))
     if source == "xer":
         return found[0]
     names = [n for _s, n, _e in found]
     if profile is None or not str(profile).strip():
         if len(found) == 1:
             return found[0]
-        raise ValueError(f"profile: name the {label} to use, one of {names}.")
+        raise ValueError(_t("profile: name the {label} to use, one of {names}.", label=label, names=names))
     hit = [e for e in found if e[1] == profile] or [e for e in found if str(e[1]).lower() == profile.strip().lower()]
     if not hit:
-        raise ValueError(f"No {label} named {profile!r}: the ones set up are {names} (call p6_use_database without "
-                         "arguments to list them).")
+        raise ValueError(_t("No {label} named {profile!r}: the ones set up are {names} (call p6_use_database without "
+                            "arguments to list them).", label=label, profile=profile, names=names))
     return hit[0]
 
 
 def _source_writes(source: str, data: dict) -> str:
     if source in READ_ONLY_SOURCES:
-        return "read only: every write tool is refused"
+        return _t("Writes: read only: every write tool is refused")
     if not data.get("allow_writes"):
-        return "write tools refused (writes are turned off in the settings)"
+        return _t("Writes: write tools refused (writes are turned off in the settings)")
     if source == "eppm":
-        return "edits change the local working copy only (p6_eppm_push sends them to the server)"
-    return "as the settings allow (two-step flow; a P6 schema that is not known or trusted is read only)"
+        return _t("Writes: edits change the local working copy only (p6_eppm_push sends them to the server)")
+    return _t("Writes: as the settings allow (two-step flow; a P6 schema that is not known or trusted is read only)")
 
 
 def _source_notes() -> list[str]:
     st, kind = _state.SETTINGS, _choice(_state.SETTINGS)["source"]
-    notes = [("This server process serves every client of the HTTP server: every later request of every connected "
-              "client uses this source." if _state.TRANSPORT == "http" else
-              "Other MCP clients and the remote access server run their own server process: they keep the saved "
-              "choice."),
-             "The tool list is the one the server started with: a tool the active source does not allow is refused "
-             "when called (writes on a read-only source, P6 EPPM tools outside a P6 EPPM working copy).",
-             "Dates and float still come from the last F9 stored in this source; staleness, backups and the edit log "
-             "follow its database file."]
+    notes = [(_t("This server process serves every client of the HTTP server: every later request of every connected "
+                 "client uses this source.") if _state.TRANSPORT == "http" else
+              _t("Other MCP clients and the remote access server run their own server process: they keep the saved "
+                 "choice.")),
+             _t("The tool list is the one the server started with: a tool the active source does not allow is refused "
+                "when called (writes on a read-only source, P6 EPPM tools outside a P6 EPPM working copy)."),
+             _t("Dates and float still come from the last F9 stored in this source; staleness, backups and the edit "
+                "log follow its database file.")]
     if _state.DB_PATH and not _write_refusal() and not any(_policy.is_write(t) for t in LISTED):
-        notes.append("Writes are allowed on this source, but the write tools were not offered when the server "
-                     "started: save this source in MCP for Primavera P6 Settings and restart the MCP client to use them.")
+        notes.append(_t("Writes are allowed on this source, but the write tools were not offered when the server "
+                        "started: save this source in MCP for Primavera P6 Settings and restart the MCP client to use "
+                        "them."))
     startup = _choice(_state.STARTUP)["source"]
     if kind != startup:
-        notes.append("The server instructions your MCP client received at startup describe the source it started "
-                     f"with ({SOURCE_LABELS.get(startup, startup)}).")
+        notes.append(_t("The server instructions your MCP client received at startup describe the source it started "
+                        "with ({source}).", source=SOURCE_LABELS.get(startup, startup)))
     if st.eppm:
-        notes.append("P6 EPPM: p6_eppm_status lists the pending changes of this working copy.")
+        notes.append(_t("P6 EPPM: p6_eppm_status lists the pending changes of this working copy."))
     return notes
 
 
@@ -705,8 +737,8 @@ def p6_use_database(source: Optional[SourceKind] = None, profile: Optional[str] 
             err = str(e)
     if source is None:
         out = {**state, "profiles": _source_rows(data or {}, state, env), "transport": _state.TRANSPORT,
-               "note": "Nothing changed. Switch with source= and profile= (a dry run first); the switch is for this "
-                       "server process only, never saved."}
+               "note": _t("Nothing changed. Switch with source= and profile= (a dry run first); the switch is for "
+                          "this server process only, never saved.")}
         if env:
             out["environment"] = ENV_WINS
         if err:
@@ -715,39 +747,44 @@ def p6_use_database(source: Optional[SourceKind] = None, profile: Optional[str] 
     if env:
         raise ValueError(ENV_WINS)
     if data is None:
-        raise ValueError(f"The settings cannot be read ({err}): fix them in MCP for Primavera P6 Settings first." if err
-                         else "There is no settings file: set up a data source in MCP for Primavera P6 Settings first.")
+        raise ValueError(_t("The settings cannot be read ({err}): fix them in MCP for Primavera P6 Settings first.", err=err) if err
+                         else _t("There is no settings file: set up a data source in MCP for Primavera P6 Settings "
+                                 "first."))
     if source not in (*SOURCE_LABELS, "saved"):
-        raise ValueError(f"source must be one of {[*SOURCE_LABELS, 'saved']}")
+        raise ValueError(_t("source must be one of {sources}", sources=[*SOURCE_LABELS, "saved"]))
     active, saved = state["active"], state["saved"]
     if source == "saved":
         if _state.OVERRIDE is None:
             return {**state, "already_active": True,
-                    "note": "This server process already uses the saved data source: nothing to switch back."}
-        plan = [f"Return this server process to the saved data source: {_describe(saved)} (config.json)",
-                f"Stop using {_describe(active)}, used since {state['since']} (p6_use_database)"]
+                    "note": _t("This server process already uses the saved data source: nothing to switch back.")}
+        plan = [_t("Return this server process to the saved data source: {saved} (config.json)",
+                   saved=_describe(saved)),
+                _t("Stop using {active}, used since {since} (p6_use_database)", active=_describe(active),
+                   since=state["since"])]
         target, override = saved, None
     else:
         src, name, entry = _source_find(data, source, profile)
         why = _source_problem(src, name, entry, data)
         if why:
-            raise ValueError(why + " Nothing was switched.")
+            raise ValueError(_t("{why} Nothing was switched.", why=why))
         target = {"source": src, "profile": name}
         if (src, name) == (active["source"], active["profile"]):
             return {**state, "already_active": True,
-                    "note": f"{_describe(target)} is already the data source of this server process."}
+                    "note": _t("{target} is already the data source of this server process.",
+                               target=_describe(target))}
         tgt = _source_target(src, name, entry, data)
         where = tgt["copy"]["path"] if tgt["copy"] else tgt["points_to"]
-        plan = [f"Use {_describe(target)} for this server process only: {where}",
-                f"Writes: {_source_writes(src, data)}",
-                f"config.json and MCP for Primavera P6 Settings keep the saved choice ({_describe(saved)}); a restart "
-                "of the server, or p6_use_database(source=\"saved\"), returns to it"]
+        plan = [_t("Use {target} for this server process only: {where}", target=_describe(target), where=where),
+                _source_writes(src, data),
+                _t("config.json and MCP for Primavera P6 Settings keep the saved choice ({saved}); a restart of "
+                   "the server, or p6_use_database(source=\"saved\"), returns to it", saved=_describe(saved))]
         override = (None if (src, name) == (saved["source"], saved["profile"]) else
                     {"source": src, "profile": name, "since": datetime.now().isoformat(timespec="seconds"),
                      "selection": _config.source_selection(src, name)})
     gate = _plan_gate(plan, confirm)
     if gate:
-        return {"applied": False, "error": gate.replace("The database changed", "The settings changed")}
+        error = gate.replace("The database changed", "The settings changed")
+        return {"applied": False, "error": SETTINGS_CHANGED if error == SETTINGS_CHANGED else error}
     if not confirm:
         return {"dry_run": True, "would_do": plan, **state}
     previous = _state.OVERRIDE
@@ -756,8 +793,8 @@ def p6_use_database(source: Optional[SourceKind] = None, profile: Optional[str] 
     if not _state.DB_PATH and source != "saved":  # the source would leave this process without a database
         _state.OVERRIDE = previous
         _refresh()
-        raise ValueError(f"{_describe(target)} cannot be used now: {now.db_problem or _config.NO_DB_MESSAGE} "
-                         "Nothing was switched.")
+        raise ValueError(_t("{target} cannot be used now: {problem} Nothing was switched.",
+                            target=_describe(target), problem=now.db_problem or _config.NO_DB_MESSAGE))
     return {"applied": True, **_source_state(),
             "writes": (_write_refusal() or "allowed") if _state.DB_PATH else None,
             "notes": _source_notes()}
@@ -775,16 +812,16 @@ def p6_pmdb_refresh() -> dict:
     st = _state.SETTINGS
     p = _config.pmdb_profile(st.raw, st.pmdb) if st.pmdb else None
     if p is None:
-        raise ValueError("Not in P6 Professional SQL Server / Oracle mode: in MCP for Primavera P6 Settings (Database), "
-                         "choose 'P6 Professional on SQL Server or Oracle', add the database, test the connection, "
-                         "click Use this database, then Save.")
+        raise ValueError(_t("Not in P6 Professional SQL Server / Oracle mode: in MCP for Primavera P6 Settings "
+                            "(Database), choose 'P6 Professional on SQL Server or Oracle', add the database, test the "
+                            "connection, click Use this database, then Save."))
     try:
         pw = credentials.get(credentials.pmdb_key(p["name"]))
     except credentials.SecretStoreError as e:
         raise ValueError(str(e)) from None
     if not pw:
-        raise ValueError("No password is stored for this database login: enter it in MCP for Primavera P6 Settings "
-                         "(Database) and click Test connection.")
+        raise ValueError(_t("No password is stored for this database login: enter it in MCP for Primavera P6 Settings "
+                            "(Database) and click Test connection."))
     try:
         m = _pmdb.copy(p, pw)
     except _pmdb.CopyError as e:
@@ -796,4 +833,4 @@ def p6_pmdb_refresh() -> dict:
     return {"database": p["name"], "copied_at": m["copied_at"], "seconds": m["seconds"],
             "p6_version": m["p6_version"].get("version"), "projects": m["projects"], "baselines": m["baselines"],
             "eps": m["eps"], "rows": m["rows"], "warnings": m["warnings"],
-            "next": "Every tool now reads this copy. It is read only: make changes in P6, then refresh again."}
+            "next": _t("Every tool now reads this copy. It is read only: make changes in P6, then refresh again.")}

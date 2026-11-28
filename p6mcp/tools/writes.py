@@ -20,6 +20,7 @@ from p6mcp.core.writes import (
 )
 from p6mcp.registry import CodeEdits, WbsMoves  # activity code values and WBS moves
 from p6mcp.core.writes import _act_move, _code_set, _codes_next, _moves_next
+from p6mcp.messages import _join, _t
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
@@ -80,8 +81,9 @@ def p6_delete_relationships(project: ProjectId, ids: Optional[LinkIds] = None, p
     and p6_delete_relationship do. One edit log entry per link."""
     items = [{"task_pred_id": n} for n in _items_arg(ids or [])] + _items_arg(pairs or [])
     if len(items) > MAX_BATCH:
-        raise ValueError(f"At most {MAX_BATCH} items per call")
-    return _link_batch(project, items, "delete", confirm, _rel_delete, f"Delete {len(items)} relationship(s)")
+        raise ValueError(_t("At most {n} items per call", n=MAX_BATCH))
+    return _link_batch(project, items, "delete", confirm, _rel_delete,
+                       _t("Delete {n} relationship(s)", n=len(items)))
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
@@ -92,7 +94,7 @@ def p6_add_relationships(project: ProjectId, items: LinkNews, confirm: bool = Fa
     (task_pred_id from NEXTKEY, or the error); side_effects as in p6_delete_relationships (empty for
     additions). One edit log entry per link."""
     items = _items_arg(items)
-    return _link_batch(project, items, "add", confirm, _rel_add, f"Add {len(items)} relationship(s)")
+    return _link_batch(project, items, "add", confirm, _rel_add, _t("Add {n} relationship(s)", n=len(items)))
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
@@ -103,7 +105,8 @@ def p6_update_relationships(project: ProjectId, items: LinkEdits, confirm: bool 
     items: one report per item; side_effects as in p6_delete_relationships (empty: no link is
     removed). One edit log entry per link."""
     items = _items_arg(items)
-    return _link_batch(project, items, "update", confirm, _rel_update, f"Change {len(items)} relationship(s)")
+    return _link_batch(project, items, "update", confirm, _rel_update,
+                       _t("Change {n} relationship(s)", n=len(items)))
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
@@ -147,7 +150,7 @@ def p6_update_activity(
             return {"applied": False, "error": str(e)}
         plan = list(r["_lines"])
         if backup:
-            plan.append(f"Backup: {backup}")
+            plan.append(_t("Backup: {path}", path=backup))
         return _commit(con, plan, confirm, projects=r["projects"], log=r["log"])
 
 
@@ -164,8 +167,8 @@ def p6_update_activities(project: ProjectId, items: ActEdits, confirm: bool = Fa
         b = _batch(con, items, lambda i, it: _act_update(con, project, it))
         for rep, it in zip(b["items"], items, strict=False):
             rep["item"] = it
-        word = "activity" if len(items) == 1 else "activities"
-        return _batch_commit(con, b, confirm, f"Update {len(items)} {word}", backup)
+        head = _t("Update 1 activity") if len(items) == 1 else _t("Update {n} activities", n=len(items))
+        return _batch_commit(con, b, confirm, head, backup)
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
@@ -189,8 +192,9 @@ def p6_add_activities(project: ProjectId, items: NewActivities, confirm: bool = 
         b = _act_add_batch(con, project, items)
         for rep, it in zip(b["items"], items, strict=False):
             rep["item"] = it
-        word = "activity" if len(items) == 1 else "activities"
-        res = _batch_commit(con, b, confirm, f"Add {len(items)} {word} to {project}", backup, tail=[NEW_DATES_NOTE])
+        head = (_t("Add 1 activity to {project}", project=project) if len(items) == 1 else
+                _t("Add {n} activities to {project}", n=len(items), project=project))
+        res = _batch_commit(con, b, confirm, head, backup, tail=[NEW_DATES_NOTE])
         res.update(data_date=b["data_date"], dates_from=b["dates_from"], loops=b["loops"])
         return res
 
@@ -225,7 +229,7 @@ def p6_update_assignment(
         sums = _summaries_stale(con, [x["_sum"]])
         plan = [x["plan"], *_sum_plan(sums)]
         if backup:
-            plan.append(f"Backup: {backup}")
+            plan.append(_t("Backup: {path}", path=backup))
         res = _commit(con, plan, confirm, projects=x["projects"], log=x["log"])
         res["summaries_stale"] = sums
         return res
@@ -245,7 +249,7 @@ def p6_update_assignments(project: ProjectId, items: AsgEdits, confirm: bool = F
 
         def apply_one(i: int, it) -> dict:
             if not isinstance(it, Mapping):
-                raise ValueError("an item must be an object")
+                raise ValueError(_t("an item must be an object"))
             x = _asg_update(con, project, it)
             keys.append(x["_sum"])
             return x
@@ -254,7 +258,8 @@ def p6_update_assignments(project: ProjectId, items: AsgEdits, confirm: bool = F
         for rep, it in zip(b["items"], items, strict=False):
             rep["item"] = it
         sums = _summaries_stale(con, keys)
-        res = _batch_commit(con, b, confirm, f"Update units of {len(items)} assignment(s)", backup, tail=_sum_plan(sums))
+        res = _batch_commit(con, b, confirm, _t("Update units of {n} assignment(s)", n=len(items)), backup,
+                            tail=_sum_plan(sums))
         res["summaries_stale"] = sums
         return res
 
@@ -283,13 +288,14 @@ def p6_update_udfs(project: ProjectId, items: UdfEdits, confirm: bool = False) -
 
         def apply_one(i: int, it) -> dict:
             if not isinstance(it, Mapping):
-                raise ValueError("an item must be an object")
+                raise ValueError(_t("an item must be an object"))
             return _udf_set(con, project, it)
 
         b = _batch(con, items, apply_one)
         for rep, it in zip(b["items"], items, strict=False):
             rep["item"] = it
-        return _udf_next(_batch_commit(con, b, confirm, f"Set {len(items)} activity UDF value(s) in {project}", backup))
+        return _udf_next(_batch_commit(con, b, confirm, _t("Set {n} activity UDF value(s) in {project}",
+                                                           n=len(items), project=project), backup))
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
@@ -308,7 +314,8 @@ def p6_update_activity_codes(project: ProjectId, items: CodeEdits, confirm: bool
         b = _batch(con, items, lambda i, it: _code_set(con, project, it))
         for rep, it in zip(b["items"], items, strict=False):
             rep["item"] = it
-        res = _batch_commit(con, b, confirm, f"Set {len(items)} activity code value(s) in {project}", backup)
+        res = _batch_commit(con, b, confirm, _t("Set {n} activity code value(s) in {project}", n=len(items),
+                                                project=project), backup)
         return _codes_next(res)
 
 
@@ -338,8 +345,9 @@ def p6_move_activities(project: ProjectId, items: WbsMoves, confirm: bool = Fals
         for rep, it in zip(b["items"], items, strict=False):
             rep["item"] = it
         sums = _summaries_stale(con, [(p, None, None) for p in sorted(pids)])
-        word = "activity" if len(items) == 1 else "activities"
-        res = _batch_commit(con, b, confirm, f"Move {len(items)} {word} to another WBS in {project}", backup,
+        head = (_t("Move 1 activity to another WBS in {project}", project=project) if len(items) == 1 else
+                _t("Move {n} activities to another WBS in {project}", n=len(items), project=project))
+        res = _batch_commit(con, b, confirm, head, backup,
                             tail=_sum_plan(sums))
         res["summaries_stale"] = sums
         return _moves_next(res, bool(b["projects"]))
@@ -362,17 +370,18 @@ def p6_delete_activity(project: ProjectId, task_code: ActivityId, force: bool = 
         actual = {k: t[k] for k in ("act_start_date", "act_end_date") if t[k]}
     finally:
         con.close()
-    reasons = ([f"{task_code} has actual dates {actual}: progress would be lost. Pass force=True to delete it anyway."]
-               if actual and not force else [])
+    reasons = ([_t("{task_code} has actual dates {actual}: progress would be lost. Pass force=True to delete it "
+                   "anyway.", task_code=task_code, actual=actual)] if actual and not force else [])
     if reasons and confirm:
-        raise ValueError("Delete refused (nothing written). " + reasons[0])
+        raise ValueError(_t("Delete refused (nothing written). {reason}", reason=reasons[0]))
     with _write_session(confirm) as (con, backup):
         t = _task(con, project, task_code)
         actual = {k: t[k] for k in ("act_start_date", "act_end_date") if t[k]}  # again, under the write lock
         if actual and not force and not reasons:
-            reasons = [f"{task_code} has actual dates {actual}: progress would be lost. Pass force=True to delete it anyway."]
+            reasons = [_t("{task_code} has actual dates {actual}: progress would be lost. Pass force=True to delete "
+                          "it anyway.", task_code=task_code, actual=actual)]
             if confirm:
-                raise ValueError("Delete refused (nothing written). " + reasons[0])
+                raise ValueError(_t("Delete refused (nothing written). {reason}", reason=reasons[0]))
         tid, pid = t["task_id"], t["proj_id"]
         links = [_rel_row_fn(con, pid)(r) for r in con.execute(_rel_sql(con, "both"), {"tid": tid})]
         ends = con.execute("SELECT task_id, pred_task_id FROM TASKPRED WHERE (task_id = ? OR pred_task_id = ?)"
@@ -392,27 +401,32 @@ def p6_delete_activity(project: ProjectId, task_code: ActivityId, force: bool = 
                     if {"cost_name", "target_cost", "act_cost", "cost_item_id"} <= _cols(con, "PROJCOST") else [])
         warnings = []
         if _sched_options(con, pid)[0].get("key_activity_for_multiple_longest_paths") == str(tid):
-            warnings.append("It is the key activity of the project's schedule options (multiple float paths): "
-                            "pick another one in P6 or with p6_set_schedule_options.")
+            warnings.append(_t("It is the key activity of the project's schedule options (multiple float paths): pick "
+                               "another one in P6 or with p6_set_schedule_options."))
         snap = {k: t[k] for k in ACT_SNAPSHOT if k in _cols(con, "TASK")}
         counts, cleared, left = _act_delete_rows(con, [tid])
         if left:
-            raise RuntimeError(f"Rows still naming the activity after the delete: {left} (nothing written)")
+            raise RuntimeError(_t("Rows still naming the activity after the delete: {left} (nothing written)",
+                                  left=left))
         side = _side_effects(con, lost_pred, lost_succ, gone={tid})
         npred = sum(1 for x in links if x["direction"] == "predecessor")
-        plan = [f"Delete activity {task_code} '{t['task_name']}' ({TYPE_NAMES.get(t['task_type'], t['task_type'])}, "
-                f"{STATUS_NAMES.get(t['status_code'], t['status_code'])}) from {project}",
-                f"Relationships removed: {len(links)} ({npred} predecessors, {len(links) - npred} successors)",
-                "Rows deleted: " + ", ".join(f"{k} {n}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1]))]
+        plan = [_t("Delete activity {task_code} '{task_name}' ({type}, {status}) from {project}",
+                   task_code=task_code, task_name=t['task_name'], type=TYPE_NAMES.get(t['task_type'], t['task_type']),
+                   status=STATUS_NAMES.get(t['status_code'], t['status_code']), project=project),
+                _t("Relationships removed: {n} ({preds} predecessors, {succs} successors)",
+                   n=len(links), preds=npred, succs=len(links) - npred),
+                _t("Rows deleted: {rows}",
+                   rows=", ".join(f"{k} {n}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1])))]
         if cleared:
-            plan.append("Kept, activity cleared: " + ", ".join(f"{k} {n}" for k, n in cleared.items()))
+            plan.append(_t("Kept, activity cleared: {rows}", rows=", ".join(f"{k} {n}" for k, n in cleared.items())))
         if actual:
-            plan.append(f"Actual dates {actual} deleted with it (force=True)" if force else f"Note: actual dates {actual}")
+            plan.append(_t("Actual dates {actual} deleted with it (force=True)", actual=actual) if force
+                        else _t("Note: actual dates {actual}", actual=actual))
         if side["count"]:
-            plan.append(f"Left without predecessor: {len(side['no_predecessor'])}, without successor: "
-                        f"{len(side['no_successor'])} (side_effects)")
+            plan.append(_t("Left without predecessor: {no_pred}, without successor: {no_succ} (side_effects)",
+                           no_pred=len(side['no_predecessor']), no_succ=len(side['no_successor'])))
         if backup:
-            plan.append(f"Backup: {backup}")
+            plan.append(_t("Backup: {path}", path=backup))
         log = [{"operation": "delete_activity", "proj_id": pid, "table": "TASK",
                 "keys": {"task_id": tid, "task_code": task_code},
                 "before": {"task": snap, "rows": counts, "cleared": cleared,
@@ -426,9 +440,10 @@ def p6_delete_activity(project: ProjectId, task_code: ActivityId, force: bool = 
                    counts={k: {"deleted": n} for k, n in counts.items()}, cleared=cleared, side_effects=side,
                    warnings=warnings)
         if cut:
-            res["details_note"] = f"Only the first {ACT_LINKS_CAP} rows listed of: {', '.join(cut)} (counts has all)."
+            res["details_note"] = _t("Only the first {n} rows listed of: {tables} (counts has all).", n=ACT_LINKS_CAP,
+                                     tables=", ".join(cut))
         if not confirm:
             res.update(would_refuse=bool(reasons), refuse_reasons=reasons)
             if reasons:
-                res["next"] = "confirm=True would be refused: " + reasons[0]
+                res["next"] = _t("confirm=True would be refused: {reasons}", reasons=_join(" ", reasons))
         return res

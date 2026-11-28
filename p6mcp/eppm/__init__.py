@@ -9,6 +9,7 @@ import hashlib
 import json
 from datetime import datetime
 from typing import Any, Callable, Optional
+from p6mcp.messages import _t
 
 PROXY_KEYS = ("proxy", "proxy_url", "proxy_user")  # eppm/proxy.py
 CONNECTION_KEYS = ("base_url", "context", "database", "user", "auth", "ca_bundle", "sql") + PROXY_KEYS
@@ -58,14 +59,14 @@ def test_profile(profile: dict, password: Optional[str], sql_password: Optional[
     from p6mcp.eppm import rest, sql
     res: dict = {"ok": False, "digest": digest(profile), "tested_at": datetime.now().isoformat(timespec="seconds")}
     if not password:
-        res["rest"] = {"ok": False, "error": "No password: enter the P6 password of this server."}
+        res["rest"] = {"ok": False, "error": _t("No password: enter the P6 password of this server.")}
     else:
         res["rest"] = rest.test_connection(profile, password, rest_opener,
                                            lock_check(profile, sql_password or "", sql_module), proxy_password)
     res["ok"] = bool(res["rest"].get("ok"))
     if profile.get("sql"):
         if not sql_password:
-            res["sql"] = {"ok": False, "error": "No password for the SQL account."}
+            res["sql"] = {"ok": False, "error": _t("No password for the SQL account.")}
         else:
             res["sql"] = sql.test_connection(profile["sql"], sql_password, sql_module)
     else:

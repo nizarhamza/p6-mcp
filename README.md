@@ -655,6 +655,10 @@ Only if you allow it. Writes are off by default; when on, each one is previewed 
 with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and
 float are never written: P6 computes them when you press F9.
 
+**In which language do the tools answer?**
+English or French, following the Language setting of the Settings window (Windows language by default): errors,
+refusals, dry-run plans, notes and advice are translated; field names, codes and the confirmation text stay English.
+
 **Does my schedule leave my PC?**
 The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client;
 with a cloud model that means its provider. For confidential projects use a local model, for example in LM Studio.

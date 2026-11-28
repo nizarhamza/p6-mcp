@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from p6mcp.core.constants import HPD_SQL, LAG_RULES
 from p6mcp.core.db import _alive, _cols, _dict, _insert, _stamp_cols, _update
+from p6mcp.messages import _t
 
 
 def _blob_text(v) -> str:
@@ -69,7 +70,7 @@ def _p6_tree(text: str, strict: bool = False) -> dict:
         if pos != len(s):
             raise IndexError
     except (IndexError, ValueError):
-        raise ValueError(f"unreadable P6 data at char {pos}") from None
+        raise ValueError(_t("unreadable P6 data at char {pos}", pos=pos)) from None
     return root
 
 
@@ -102,7 +103,7 @@ def _props(con, pid: int, prop_name: str) -> Optional[dict]:
     try:
         return _p6_tree(_blob_text(r[0]))
     except ValueError as e:
-        return {"name": None, "attrs": {}, "kids": [], "error": f"PROJPROP {prop_name}: {e}"}
+        return {"name": None, "attrs": {}, "kids": [], "error": _t("PROJPROP {prop_name}: {error}", prop_name=prop_name, error=e)}
 
 
 # ----------------------------------------------------------------- schedule options and lag rule
@@ -112,9 +113,9 @@ def _sched_options(con, pid: int) -> tuple[dict[str, str], str]:
     priority list is flattened for display only."""
     tree = _props(con, pid, "scheduling")
     if tree is None:
-        return {}, "none stored for this project"
+        return {}, _t("none stored for this project")
     if tree.get("error"):
-        return {}, f"unreadable: {tree['error']}"
+        return {}, _t("unreadable: {error}", error=tree["error"])
     opts = {k.lower(): v for k, v in tree["attrs"].items()}
     lpl = _p6_find(tree, "LevelPriorityList")
     if lpl is not None:
@@ -127,10 +128,10 @@ def _lag_rule(con, pid: int) -> tuple[str, str]:
     opts, src = _sched_options(con, pid)
     v = opts.get("sched_calendar_on_relationship_lag")
     if v in LAG_RULES:
-        return v, "project schedule options (PROJPROP scheduling)"
+        return v, _t("project schedule options (PROJPROP scheduling)")
     if v is None:
-        return "rcal_Predecessor", f"P6 default ({src})"
-    return "rcal_Predecessor", f"P6 default (unrecognised value {v!r})"
+        return "rcal_Predecessor", _t("P6 default ({source})", source=src)
+    return "rcal_Predecessor", _t("P6 default (unrecognised value {value!r})", value=v)
 
 
 def _lag_info(con, pid: int) -> dict:
@@ -169,8 +170,8 @@ def _lag_hpd_sql(con, pid: int) -> tuple[str, str]:
 def _xer_project(x: dict, xer_project: Optional[str]) -> dict:
     projects = [p for p in x.get("PROJECT", []) if xer_project in (None, p["proj_short_name"])]
     if len(projects) != 1:
-        raise ValueError("Choose the project with xer_project=: "
-                         f"{[p['proj_short_name'] for p in x.get('PROJECT', [])]}")
+        raise ValueError(_t("Choose the project with xer_project=: {projects}",
+                               projects=[p["proj_short_name"] for p in x.get("PROJECT", [])]))
     return projects[0]
 
 
@@ -323,27 +324,28 @@ def _norm_opt(prop: str, key: str, v: Any, lenient: bool = False) -> tuple[str, 
     s = ("Y" if v else "N") if isinstance(v, bool) else "" if v is None else str(v).strip()
     if kind == "flag":
         if s.upper() not in ("Y", "N"):
-            raise ValueError(f"{key}: Y or N (or true/false), not {v!r}")
+            raise ValueError(_t("{key}: Y or N (or true/false), not {value!r}", key=key, value=v))
         return s.upper(), None
     if kind in ("int", "num", "float"):
         try:
             f = float(s)
         except ValueError:
-            raise ValueError(f"{key}: a number, not {v!r}") from None
+            raise ValueError(_t("{key}: a number, not {value!r}", key=key, value=v)) from None
         if not math.isfinite(f) or f < 0:
-            raise ValueError(f"{key}: a number 0 or more, not {v!r}")
+            raise ValueError(_t("{key}: a number 0 or more, not {value!r}", key=key, value=v))
         if kind == "int" and not f.is_integer():
-            raise ValueError(f"{key}: a whole number, not {v!r}")
+            raise ValueError(_t("{key}: a whole number, not {value!r}", key=key, value=v))
         return (repr(f) if kind == "float" or not f.is_integer() else str(int(f))), None
     if isinstance(kind, tuple):
         hit = next((k for k in kind if k.lower() == s.lower()), None)
         if hit:
             return hit, None
         if lenient and re.fullmatch(r"\w+", s):
-            return s, f"{key}: XER value {s!r} is not one this server knows ({', '.join(kind)}); written as is"
-        raise ValueError(f"{key}: one of {list(kind)}, not {v!r}")
+            return s, _t("{key}: XER value {value!r} is not one this server knows ({known}); written as is", key=key,
+                         value=s, known=", ".join(kind))
+        raise ValueError(_t("{key}: one of {allowed}, not {value!r}", key=key, allowed=list(kind), value=v))
     if re.search(r"[|()\r\n]", s):
-        raise ValueError(f"{key}: P6 option values cannot contain | ( ) or line breaks: {v!r}")
+        raise ValueError(_t("{key}: P6 option values cannot contain | ( ) or line breaks: {value!r}", key=key, value=v))
     return s, None
 
 
@@ -354,7 +356,7 @@ def _key_task(con, pid: int, code: Any) -> str:
         return "-99"
     tid = _task_id_by_code(con, pid, c)
     if tid is None:
-        raise ValueError(f"key activity: Activity ID {c!r} not found in the project")
+        raise ValueError(_t("key activity: Activity ID {code!r} not found in the project", code=c))
     return str(tid)
 
 
@@ -371,14 +373,15 @@ def _xer_sched_values(x: dict, xp: dict, key_map: Callable[[str], Optional[int]]
         if k == "levelprioritylist":
             lpl = _xer_lpl(v) if v else None
             if v and lpl is None:
-                warn.append(f"XER level priority list {v!r} not readable: the stored list is kept")
+                warn.append(_t("XER level priority list {value!r} not readable: the stored list is kept", value=v))
             continue
         if k == "key_activity_for_multiple_longest_paths":
             raw = "" if v is None else str(v).strip()
             tid = None if raw in ("", "-99") else key_map(raw)
             if raw not in ("", "-99") and tid is None:
-                warn.append(f"key_activity_for_multiple_longest_paths: XER task_id {raw} has no activity in the "
-                            "project (not in the XER, or no Activity ID match): -99 (none) written")
+                warn.append(_t("key_activity_for_multiple_longest_paths: XER task_id {task_id} has no activity in "
+                               "the project (not in the XER, or no Activity ID match): -99 (none) written",
+                               task_id=raw))
             vals[k] = "-99" if tid is None else str(tid)
             continue
         if v is None:
@@ -408,22 +411,23 @@ def _xer_sched_export(con, pid: int, tasks: set) -> tuple[Optional[list], list[s
     level priority list is written as P6 does, 'field,ASC_BY_FIELD/ORDER' plus a line break per entry."""
     tree = _props(con, pid, "scheduling")
     if tree is None:
-        return None, ["SCHEDOPTIONS not exported: the project has no schedule options stored (PROJPROP "
-                      "scheduling); P6 applies its defaults on import."]
+        return None, [_t("SCHEDOPTIONS not exported: the project has no schedule options stored (PROJPROP "
+                         "scheduling); P6 applies its defaults on import.")]
     if tree.get("error"):
-        return None, [f"SCHEDOPTIONS not exported: {tree['error']}"]
+        return None, [_t("SCHEDOPTIONS not exported: {error}", error=tree["error"])]
     opts = {k.lower(): v for k, v in tree["attrs"].items()}
     warn = []
     key = str(opts.get("key_activity_for_multiple_longest_paths") or "").strip()
     known = key.isdigit() and int(key) in tasks
     if key not in ("", "-99") and not known:
-        warn.append(f"SCHEDOPTIONS: key activity task_id {key} is not an activity of the project: written as none")
+        warn.append(_t("SCHEDOPTIONS: key activity task_id {task_id} is not an activity of the project: written as "
+                       "none", task_id=key))
     opts["key_activity_for_multiple_longest_paths"] = key if known else ""
     node = _p6_find(tree, "LevelPriorityList")
     opts["levelprioritylist"] = "".join(f"{f},ASC_BY_FIELD/{o}\n" for f, o in _lpl_of(node)) if node else None
     extra = sorted(set(opts) - {c.lower() for c in SCHED_XER_COLS})
     if extra:
-        warn.append(f"SCHEDOPTIONS: stored options with no XER column, not exported: {extra}")
+        warn.append(_t("SCHEDOPTIONS: stored options with no XER column, not exported: {options}", options=extra))
     opts["schedoptions_id"], opts["proj_id"] = 1, pid
     return [opts.get(c.lower()) for c in SCHED_XER_COLS], warn
 
@@ -443,8 +447,8 @@ def _set_props(con, pid: int, prop: str, values: Mapping[str, str], lpl: Optiona
         try:
             tree = _p6_tree(_blob_text(raw), strict=True)
         except ValueError as e:
-            raise ValueError(f"PROJPROP {prop} of this project is not readable ({e}): fix it in P6 "
-                             "(Schedule Options) before writing it here") from None
+            raise ValueError(_t("PROJPROP {prop} of this project is not readable ({error}): fix it in P6 (Schedule "
+                                "Options) before writing it here", prop=prop, error=e)) from None
     else:
         tree = {"num": "0", "name": "", "attrs": {k: d for k, (_, d) in spec.items()}, "kids": []}
         if prop == "scheduling":
@@ -500,9 +504,9 @@ def _project_row(con, project: str) -> dict:
     """Live PROJECT row of a project (not an EPS node), lowercase keys."""
     r = con.execute("SELECT * FROM PROJECT WHERE proj_short_name = ?" + _alive(con, "PROJECT"), (project,)).fetchone()
     if r is None:
-        raise ValueError(f"Project not found: {project}")
+        raise ValueError(_t("Project not found: {project}", project=project))
     if (_dict(r).get("project_flag") or "Y") != "Y":
-        raise ValueError(f"{project} is an EPS node, not a project")
+        raise ValueError(_t("{project} is an EPS node, not a project", project=project))
     return _dict(r)
 
 
@@ -532,7 +536,8 @@ def _sched_write(con, pid: int, xer: Optional[tuple], options: Mapping, key_acti
         if k == key:
             vals[k] = _key_task(con, pid, v)
         elif k not in SCHED_SPEC and k not in stored:
-            raise ValueError(f"Unknown schedule option {k!r}: {sorted(SCHED_SPEC)} (or levelprioritylist)")
+            raise ValueError(_t("Unknown schedule option {option!r}: {options} (or levelprioritylist)", option=k,
+                                options=sorted(SCHED_SPEC)))
         else:
             vals[k] = _norm_opt("scheduling", k, v)[0]
     if key_activity is not None:
@@ -550,5 +555,6 @@ def _lpl_arg(level_priority_list) -> Optional[list[tuple[str, str]]]:
     items = [level_priority_list] if isinstance(level_priority_list, str) else list(level_priority_list)
     lpl = _xer_lpl(";".join(str(i) for i in items), ":")
     if lpl is None:
-        raise ValueError(f"level_priority_list: entries 'field:ASC' or 'field:DESC', not {level_priority_list!r}")
+        raise ValueError(_t("level_priority_list: entries 'field:ASC' or 'field:DESC', not {level_priority_list!r}",
+                            level_priority_list=level_priority_list))
     return lpl

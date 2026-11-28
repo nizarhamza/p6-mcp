@@ -15,6 +15,7 @@ from p6mcp.core import state as _state
 from p6mcp.core.state import _log_cache
 from p6mcp.registry import _CALL, TOOL_HINTS
 from p6mcp.core.db import _alive, _cols
+from p6mcp.messages import _join, _t
 
 
 # ----------------------------------------------------------------- edit log (persistent)
@@ -121,15 +122,16 @@ def _schedule_state(con, pid: int, explain: bool = False) -> dict:
     row = con.execute(f"SELECT {sel} FROM PROJECT WHERE proj_id = ? AND COALESCE(project_flag, 'Y') = 'Y'"
                       + _alive(con, "PROJECT"), (pid,)).fetchone()
     if row is None:
-        raise ValueError(f"Project id not found: {pid}")
+        raise ValueError(_t("Project id not found: {pid}", pid=pid))
     e = _edit_state(pid, row["last_schedule_date"])
-    note = "Dates, float and paths come from the last F9 in P6."
+    parts = [_t("Dates, float and paths come from the last F9 in P6.")]
     if e:
-        note += " This server changed the schedule after that: open P6 and press F9 before trusting them."
+        parts.append(_t("This server changed the schedule after that: open P6 and press F9 before trusting them."))
     if not row["last_schedule_date"]:
-        note += (" last_schedule_date is empty (never scheduled in a P6 version that records it,"
-                 " or imported from an XER without it).")
-    note += " Edits are tracked in the edit log next to the database (p6_edit_log)."
+        parts.append(_t("last_schedule_date is empty (never scheduled in a P6 version that records it, or imported "
+                        "from an XER without it)."))
+    parts.append(_t("Edits are tracked in the edit log next to the database (p6_edit_log)."))
+    note = _join(" ", parts)
     out = {"data_date": row["last_recalc_date"], "last_schedule_date": row["last_schedule_date"],
            "stale": bool(e), "edited_since_last_schedule": e,
            "note": note if explain or e or not row["last_schedule_date"] else None}

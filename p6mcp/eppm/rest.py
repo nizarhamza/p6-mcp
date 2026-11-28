@@ -29,6 +29,7 @@ import urllib.request
 from typing import Any, Callable, Optional
 
 from p6mcp.eppm import proxy as _proxy
+from p6mcp.messages import _join, _t
 
 DEFAULT_CONTEXT = "p6ws"
 TOKEN_LIFETIME_S = 3600
@@ -45,10 +46,11 @@ def lock_finding(failed: Optional[int], user: str) -> str:
     if failed is None:
         return ""
     if failed >= LOCK_AFTER:
-        return (f" The SQL account confirms it: P6 counts {failed} failed sign-ins in a row for {user}, so the account "
-                "is locked.")
-    return (f" The SQL account shows {failed} failed sign-in(s) in a row for {user}, under P6's lockout limit "
-            f"({LOCK_AFTER} by default): the account is probably not locked, and the P6 server log may tell the cause.")
+        return _t(" The SQL account confirms it: P6 counts {failed} failed sign-ins in a row for {user}, so the "
+                  "account is locked.", failed=failed, user=user)
+    return _t(" The SQL account shows {failed} failed sign-in(s) in a row for {user}, under P6's lockout limit "
+              "({limit} by default): the account is probably not locked, and the P6 server log may tell the cause.",
+              failed=failed, user=user, limit=LOCK_AFTER)
 
 
 class EppmError(ValueError):
@@ -66,7 +68,7 @@ def _ssl_context(ca_bundle: Optional[str]) -> ssl.SSLContext:
     try:
         return ssl.create_default_context(cafile=ca_bundle or None)
     except (OSError, ssl.SSLError) as e:
-        raise EppmError(f"The certificate file cannot be read ({ca_bundle}): {e}") from e
+        raise EppmError(_t("The certificate file cannot be read ({file}): {error}", file=ca_bundle, error=e)) from e
 
 
 class Session:
@@ -82,9 +84,9 @@ class Session:
         proxy: the profile's proxy settings (proxy, proxy_url, proxy_user: eppm/proxy.py), proxy_password the
         proxy user's password. An opener given (tests) is used as it is."""
         if not (user or "").strip():
-            raise EppmError("No user name: enter the P6 user of this server.")
+            raise EppmError(_t("No user name: enter the P6 user of this server."))
         if not password:
-            raise EppmError("No password: enter the P6 password of this server.")
+            raise EppmError(_t("No password: enter the P6 password of this server."))
         root = base_url.rstrip("/") + "/" + (context or DEFAULT_CONTEXT).strip("/")
         self.rest, self.token_url = root + "/restapi", root + "/oauth/token"
         self.user, self.database, self.timeout = user, database or "", timeout_s
@@ -94,8 +96,8 @@ class Session:
         self.jar = http.cookiejar.CookieJar()
         self.proxy = _proxy.resolve(base_url, proxy)
         if self.proxy["mode"] == "custom" and not self.proxy["url"] and not self.proxy["bypassed"]:
-            raise EppmError("The proxy is set to 'This proxy' without an address: enter the proxy address "
-                            "(http://host:port) in the server settings, or choose another proxy setting.")
+            raise EppmError(_t("The proxy is set to 'This proxy' without an address: enter the proxy address "
+                               "(http://host:port) in the server settings, or choose another proxy setting."))
         self.opener = opener or urllib.request.build_opener(
             urllib.request.HTTPSHandler(context=_ssl_context(ca_bundle)), urllib.request.HTTPCookieProcessor(self.jar),
             _proxy.handler(self.proxy, proxy_password))
@@ -124,16 +126,17 @@ class Session:
         except urllib.error.HTTPError as e:
             status, raw = e.code, (e.read() or b"")
         except ssl.SSLError as e:
-            raise EppmError(f"Secure connection to the server failed ({e.reason or e}). If your company uses its "
-                            "own certificates, set the certificate file of this server.") from e
+            raise EppmError(_t("Secure connection to the server failed ({reason}). If your company uses its own "
+                               "certificates, set the certificate file of this server.", reason=e.reason or e)) from e
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             reason = self._clean(str(getattr(e, "reason", e)))
             if self.proxy.get("url"):
                 if "407" in reason:  # an https tunnel the proxy refused
                     raise EppmError(self._proxy_refused()) from e
-                raise EppmError(f"The server cannot be reached through the proxy {self.proxy['url']} "
-                                f"({self.proxy['source']}): {reason}. Check the proxy setting of this server.") from e
-            raise EppmError(f"The server cannot be reached: {reason}") from e
+                raise EppmError(_t("The server cannot be reached through the proxy {url} ({source}): {reason}. Check "
+                                   "the proxy setting of this server.",
+                                   url=self.proxy["url"], source=self.proxy["source"], reason=reason)) from e
+            raise EppmError(_t("The server cannot be reached: {reason}", reason=reason)) from e
         if status == 407:  # plain http through the proxy: the proxy itself answers
             raise EppmError(self._proxy_refused())
         self.calls.append({"name": name or method, "method": method, "status": status,
@@ -141,10 +144,13 @@ class Session:
         return status, raw
 
     def _proxy_refused(self) -> str:
-        return (f"The proxy {self.proxy.get('url')} refused the call (HTTP 407, proxy sign-in required)"
-                + (": check the proxy user and password of this server." if self.proxy.get("user") else
-                   ": enter the proxy user and password in the server settings.")
-                + " Only Basic proxy sign-in is supported (not NTLM or Kerberos).")
+        if self.proxy.get("user"):
+            return _t("The proxy {url} refused the call (HTTP 407, proxy sign-in required): check the proxy user and "
+                      "password of this server. Only Basic proxy sign-in is supported (not NTLM or Kerberos).",
+                      url=self.proxy.get("url"))
+        return _t("The proxy {url} refused the call (HTTP 407, proxy sign-in required): enter the proxy user and "
+                  "password in the server settings. Only Basic proxy sign-in is supported (not NTLM or Kerberos).",
+                  url=self.proxy.get("url"))
 
     def _clean(self, text: str) -> str:
         for s in (self._pw, self._b64, self._proxy_pw):
@@ -195,25 +201,28 @@ class Session:
 
     def _refused(self, status: int, raw: bytes) -> EppmError:
         if status in (401, 403):
-            return EppmError(f"Sign-in refused by the server (HTTP {status}): check the user name, the password"
-                             + ("" if self.mode == "oauth" else " and the database name") + ".")
+            if self.mode == "oauth":
+                return EppmError(_t("Sign-in refused by the server (HTTP {status}): check the user name, the "
+                                    "password.", status=status))
+            return EppmError(_t("Sign-in refused by the server (HTTP {status}): check the user name, the password and "
+                                "the database name.", status=status))
         if status == 404:
-            return EppmError("The server answered 404: check the server address and the context (usually p6ws), "
-                             "and that P6 EPPM Web Services is deployed.")
+            return EppmError(_t("The server answered 404: check the server address and the context (usually p6ws), "
+                                "and that P6 EPPM Web Services is deployed."))
         if self.mode == "oauth" and status >= 500:  # measured on an on-premises 25.12: IDCS not configured
-            return EppmError("OAuth sign-in is not set up on this server (it is for P6 EPPM on Oracle Cloud). For a "
-                             "server on premises, set Sign-in to Automatic or Session sign-in. The server said: "
-                             + self._detail(raw))
+            return EppmError(_t("OAuth sign-in is not set up on this server (it is for P6 EPPM on Oracle Cloud). For "
+                                "a server on premises, set Sign-in to Automatic or Session sign-in. The server said: "
+                                "{detail}", detail=self._detail(raw)))
         detail = self._detail(raw)
-        msg = f"Sign-in failed (HTTP {status}): {detail}"
+        parts = [_t("Sign-in failed (HTTP {status}): {detail}", status=status, detail=detail)]
         if self.mode == "login" and status == 500 and "request failed" in detail.lower():
-            msg += LOCKED_HINT.format(n=LOCK_AFTER)
+            parts.append(_t(LOCKED_HINT, n=LOCK_AFTER))
             if self.lock_check:
                 try:
-                    msg += self.lock_check() or ""
+                    parts.append(self.lock_check() or "")
                 except Exception:  # noqa: BLE001  (the check is a bonus: the sign-in error stays the message)
                     pass
-        return EppmError(msg)
+        return EppmError(_join("", parts))
 
     def close(self) -> None:
         if self.signed_in and self.mode == "login":
@@ -240,15 +249,17 @@ class Session:
         st, raw = self._send(method, self.rest + path, body=body, name=name)
         if not 200 <= st < 300:
             if st in (401, 403):
-                raise EppmError(f"The server refused the call (HTTP {st}): the session ended or this user lacks "
-                                "the rights for it.")
-            raise EppmError(f"The server answered HTTP {st} to {name or path.split('?')[0]}: {self._detail(raw)}")
+                raise EppmError(_t("The server refused the call (HTTP {status}): the session ended or this user lacks "
+                                   "the rights for it.", status=st))
+            raise EppmError(_t("The server answered HTTP {status} to {call}: {detail}",
+                               status=st, call=name or path.split("?")[0], detail=self._detail(raw)))
         if not raw.strip():
             return None
         try:
             return json.loads(raw.decode("utf-8"))
         except ValueError as e:
-            raise EppmError(f"The server sent an answer that is not JSON to {name or path.split('?')[0]}.") from e
+            raise EppmError(_t("The server sent an answer that is not JSON to {call}.",
+                               call=name or path.split("?")[0])) from e
 
     def read(self, entity: str, fields: list[str], filter: Optional[str] = None) -> list[dict]:
         """GET /<entity>?Fields=..&Filter=.. as a list of objects (no paging in the API)."""
@@ -303,6 +314,6 @@ def test_connection(profile: dict, password: str,
     except EppmError as e:
         res["error"] = str(e)
     except (KeyError, TypeError, ValueError) as e:
-        res["error"] = f"Incomplete server settings: {e}"
+        res["error"] = _t("Incomplete server settings: {error}", error=e)
     res["seconds"] = round(time.perf_counter() - t0, 2)
     return res

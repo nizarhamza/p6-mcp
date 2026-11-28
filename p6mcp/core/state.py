@@ -17,6 +17,7 @@ from p6mcp import config as _config
 from p6mcp import pmdb as _pmdb
 from p6mcp import xerstore as _xerstore
 from p6mcp.eppm import store as _eppm_store
+from p6mcp.messages import _t
 
 
 # Effective settings: refreshed by _refresh() at the start of every tool call (config.json may change
@@ -79,7 +80,8 @@ def _refresh() -> _config.Settings:
             path, XER_MANIFEST = _xerstore.ensure(st.xer_files)
             st = dataclasses.replace(st, db_path=path)
         except (_xerstore.XerStoreError, OSError, ValueError) as e:
-            st = dataclasses.replace(st, db_problem=f"XER-only mode: the XER files cannot be loaded: {e}")
+            st = dataclasses.replace(st, db_problem=_t("XER-only mode: the XER files cannot be loaded: {error}",
+                                                       error=str(e)))
     if os.path.normcase(st.db_path) != os.path.normcase(DB_PATH):
         _cols_cache.clear()
         _schema_cache.clear()

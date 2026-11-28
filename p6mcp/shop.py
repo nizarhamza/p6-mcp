@@ -26,6 +26,7 @@ import zipfile
 from typing import Optional
 
 from p6mcp import __version__, policy, skills
+from p6mcp.messages import _join, _t
 
 REPO = "nizarhamza/p6-mcp-shop"
 REPO_URL = f"https://github.com/{REPO}"
@@ -73,12 +74,13 @@ def check_shared(item) -> list[str]:
     """Errors of a shared skill (p6mcp.json of the catalog, an issue or a file): the strict rules of
     skills.check_skill, its kind and schema, and the app version it needs. The catalog's workflow calls it."""
     if not isinstance(item, dict):
-        return ["a skill must be a JSON object"]
+        return [_t("a skill must be a JSON object")]
     errs = []
     if item.get("kind", KIND) != KIND or item.get("schema", SCHEMA) != SCHEMA:
-        errs.append(f"not a MCP for Primavera P6 skill (kind {KIND!r}, schema {SCHEMA})")
+        errs.append(_t("not a MCP for Primavera P6 skill (kind {kind!r}, schema {schema})", kind=KIND, schema=SCHEMA))
     if needs_newer_app(item):
-        errs.append(f"this skill needs MCP for Primavera P6 {item['min_app_version']} or later (this is {__version__})")
+        errs.append(_t("this skill needs MCP for Primavera P6 {needed} or later (this is {version})",
+                       needed=item["min_app_version"], version=__version__))
     return errs + skills.check_skill(skills.shared_item(item), strict=True)
 
 
@@ -112,12 +114,13 @@ def share_url(item: dict) -> tuple[str, str]:
 def _get(path: str, opener) -> bytes:
     url = RAW_PREFIX + path
     if not url.startswith(RAW_PREFIX) or ".." in path or "\\" in path:
-        raise ValueError(f"refusing to read {path!r}: not a file of the catalog {REPO}")
+        raise ValueError(_t("refusing to read {path!r}: not a file of the catalog {repo}", path=path, repo=REPO))
     req = urllib.request.Request(url, headers={"User-Agent": f"p6mcp/{__version__}"})
     with opener(req, timeout=TIMEOUT) as resp:
         data = resp.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
-        raise ValueError(f"{path} of the catalog is larger than {MAX_BYTES // 1024} KB")
+        raise ValueError(_t("{path} of the catalog is larger than {kb} KB",
+                            path=path, kb=MAX_BYTES // 1024))
     return data
 
 
@@ -128,7 +131,7 @@ def fetch_index(opener=urllib.request.urlopen) -> dict:
         data = json.loads(_get(INDEX, opener).decode("utf-8"))
         rows = data.get("skills") if isinstance(data, dict) else None
         if not isinstance(rows, list):
-            raise ValueError("index.json has no skills list")
+            raise ValueError(_t("index.json has no skills list"))
         out["skills"] = sorted((e for e in rows if isinstance(e, dict) and isinstance(e.get("name"), str)
                                 and skills.NAME_RE.match(e["name"])), key=lambda e: e["name"])
     except Exception as e:  # offline, 404, malformed file...
@@ -141,26 +144,27 @@ def fetch_skill(entry: dict, opener=urllib.request.urlopen) -> dict:
     lag the index by a few minutes: one new read of the index on a mismatch) and check_shared."""
     name = entry["name"]
     if not skills.NAME_RE.match(name):
-        raise ValueError(f"bad skill name {name!r} in the catalog")
+        raise ValueError(_t("bad skill name {name!r} in the catalog", name=name))
     if entry.get("builtin"):
-        raise ValueError(f"{name} is a built-in skill of MCP for Primavera P6: it is never installed from the shop")
+        raise ValueError(_t("{name} is a built-in skill of MCP for Primavera P6: it is never installed from the shop",
+                            name=name))
     path = f"skills/{name}/{META}"
     data = _get(path, opener)
     if hashlib.sha256(data).hexdigest() != entry.get("sha256"):
         fresh = next((e for e in fetch_index(opener)["skills"] if e["name"] == name), None)
         if not fresh or hashlib.sha256(data).hexdigest() != fresh.get("sha256"):
-            raise ValueError(f"{path} does not match the catalog index (it may be updating: try again in a few "
-                             "minutes)")
+            raise ValueError(_t("{path} does not match the catalog index (it may be updating: try again in a few "
+                                "minutes)", path=path))
         entry = fresh
     try:
         item = json.loads(data.decode("utf-8"))
     except ValueError as e:
-        raise ValueError(f"{path} is not valid JSON: {e}") from e
+        raise ValueError(_t("{path} is not valid JSON: {error}", path=path, error=e)) from e
     errs = check_shared(item)
     if errs:
-        raise ValueError(f"{name} from the shop: " + "; ".join(errs))
+        raise ValueError(_t("{name} from the shop: {errors}", name=name, errors=_join("; ", errs)))
     if item.get("name") != name:
-        raise ValueError(f"{path} holds the skill {item.get('name')!r}")
+        raise ValueError(_t("{path} holds the skill {name!r}", path=path, name=item.get("name")))
     item["sha256"] = entry.get("sha256")
     return item
 
@@ -205,11 +209,12 @@ def install(data: dict, item: dict, as_name: Optional[str] = None) -> dict:
     content as stored) so an edit made here is seen (skills.edited)."""
     from p6mcp import settings_logic
     if item.get("builtin"):
-        raise ValueError(f"{item['name']} is a built-in skill of P6 MCP 1.8: it is not installed from the shop")
+        raise ValueError(_t("{name} is a built-in skill of P6 MCP 1.8: it is not installed from the shop",
+                            name=item["name"]))
     old = installed_as(data, item["name"]) if as_name is None else None
     name = as_name or (old["name"] if old else item["name"])
     if old is None and any(c.get("name") == name for c in data.get("custom_skills") or []):
-        raise ValueError(f"You already have a skill named {name!r}: install this one under another name")
+        raise ValueError(_t("You already have a skill named {name!r}: install this one under another name", name=name))
     stored = to_stored(dict(item, name=name))
     if old is not None:
         stored["enabled"] = bool(old.get("enabled", True))
@@ -283,7 +288,7 @@ def import_bytes(raw: bytes, file_name: str = "skill.zip") -> dict:
         try:
             item = json.loads(raw.decode("utf-8-sig"))
         except ValueError as e:
-            raise ValueError(f"{file_name} is not valid JSON: {e}") from e
+            raise ValueError(_t("{file_name} is not valid JSON: {error}", file_name=file_name, error=e)) from e
         errs = check_shared(item)
         if errs:
             raise ValueError("; ".join(errs))
@@ -291,14 +296,14 @@ def import_bytes(raw: bytes, file_name: str = "skill.zip") -> dict:
     try:
         z = zipfile.ZipFile(io.BytesIO(raw))
     except zipfile.BadZipFile as e:
-        raise ValueError(f"{file_name} is not a zip file") from e
+        raise ValueError(_t("{file_name} is not a zip file", file_name=file_name)) from e
     infos = [i for i in z.infolist() if not i.is_dir()]
     if len(infos) > MAX_ZIP_ENTRIES or sum(i.file_size for i in infos) > MAX_ZIP_BYTES:
-        raise ValueError(f"{file_name} holds too many or too large files for a skill")
+        raise ValueError(_t("{file_name} holds too many or too large files for a skill", file_name=file_name))
     names = [i.filename for i in infos]
     for n in names:
         if n.startswith(("/", "\\")) or "\\" in n or ":" in n or ".." in n.split("/"):
-            raise ValueError(f"{file_name}: unsafe path {n!r}")
+            raise ValueError(_t("{file_name}: unsafe path {path!r}", file_name=file_name, path=n))
     tops = {n.split("/")[0] for n in names if "/" in n}
     root = tops.pop() + "/" if len(tops) == 1 and all("/" in n for n in names) else ""
     rel = {n[len(root):]: n for n in names}
@@ -309,7 +314,8 @@ def import_bytes(raw: bytes, file_name: str = "skill.zip") -> dict:
         try:
             texts[r] = z.read(n).decode("utf-8-sig")
         except UnicodeDecodeError as e:
-            raise ValueError(f"{file_name}: {r} is not UTF-8 text (scripts and binary files are not imported)") from e
+            raise ValueError(_t("{file_name}: {file} is not UTF-8 text (scripts and binary files are not imported)",
+                                file_name=file_name, file=r)) from e
     if META in texts:
         item = json.loads(texts[META])
         errs = check_shared(item)
@@ -318,12 +324,12 @@ def import_bytes(raw: bytes, file_name: str = "skill.zip") -> dict:
         return to_stored(item)
     md = next((r for r in texts if r.lower() == "skill.md"), None)
     if md is None:
-        raise ValueError(f"{file_name} has no SKILL.md or {META}")
+        raise ValueError(_t("{file_name} has no SKILL.md or {meta}", file_name=file_name, meta=META))
     refs = {r: t for r, t in texts.items() if r != md}
     bad = [r for r in refs if skills.file_problem(r)]
     if bad:
-        raise ValueError(f"{file_name}: only text reference files (.md, .txt, .csv, .json) are imported, not "
-                         + ", ".join(bad))
+        raise ValueError(_t("{file_name}: only text reference files (.md, .txt, .csv, .json) are imported, not {bad}",
+                            file_name=file_name, bad=", ".join(bad)))
     item = _from_plain(texts[md], refs)
     errs = skills.check_skill(item, strict=True)
     if errs:
@@ -334,6 +340,6 @@ def import_bytes(raw: bytes, file_name: str = "skill.zip") -> dict:
 def import_file(path: str) -> dict:
     import os
     if os.path.getsize(path) > MAX_ZIP_BYTES:
-        raise ValueError(f"{os.path.basename(path)} is too large for a skill file")
+        raise ValueError(_t("{path} is too large for a skill file", path=os.path.basename(path)))
     with open(path, "rb") as fh:
         return import_bytes(fh.read(), os.path.basename(path))

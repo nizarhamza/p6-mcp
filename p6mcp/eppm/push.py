@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from p6mcp.eppm import mapping
+from p6mcp.messages import _join, _t
 
 ORDER = (("TASKPRED", "delete"), ("TASK", "update"), ("TASKPRED", "create"), ("TASKPRED", "update"),
          ("TASKRSRC", "update"))
@@ -87,10 +88,13 @@ def same(table: str, col: str, a: Any, b: Any) -> bool:
 def _label(c: dict) -> str:
     lb = c.get("labels") or {}
     if c["table"] == "TASK":
-        return f"activity {lb.get('task_code', c['keys'])}"
+        return _t("activity {code}", code=lb.get("task_code", c["keys"]))
     if c["table"] == "TASKPRED":
-        return f"relationship {lb.get('predecessor', '?')} -> {lb.get('successor', '?')}"
-    return f"assignment {lb.get('task_code', '')} {lb.get('resource') or lb.get('role') or ''}".strip()
+        return _t("relationship {pred} -> {succ}", pred=lb.get("predecessor", "?"), succ=lb.get("successor", "?"))
+    code, who = str(lb.get("task_code", "")).strip(), str(lb.get("resource") or lb.get("role") or "").strip()
+    if code and who:
+        return _t("assignment {code} {who}", code=code, who=who)
+    return _t("assignment {code}", code=code or who) if code or who else _t("assignment")
 
 
 def plan(sess, changes: list[dict], local_base: int) -> dict:
@@ -122,7 +126,7 @@ def plan(sess, changes: list[dict], local_base: int) -> dict:
             if action == "create":
                 refs = c.get("refs") or {}
                 if not refs.get("task_id") or not refs.get("pred_task_id"):
-                    conflicts.append(dict(item, reason="the activities of the new relationship are unknown"))
+                    conflicts.append(dict(item, reason=_t("the activities of the new relationship are unknown")))
                     continue
                 body = {"PredecessorActivityObjectId": int(refs["pred_task_id"]),
                         "SuccessorActivityObjectId": int(refs["task_id"])}
@@ -135,19 +139,19 @@ def plan(sess, changes: list[dict], local_base: int) -> dict:
                     if same(table, "lag_hr_cnt", mapping.value(hit.get("Lag"), "num"),
                             c["fields"].get("lag_hr_cnt", {}).get("local", 0.0)):
                         done.append(dict(item, server_id=int(hit["ObjectId"]),
-                                         reason="the same relationship exists on the server"))
+                                         reason=_t("the same relationship exists on the server")))
                     else:
-                        conflicts.append(dict(item, reason="a relationship of this type already links these "
-                                                           "activities on the server, with another lag"))
+                        conflicts.append(dict(item, reason=_t("a relationship of this type already links these "
+                                                              "activities on the server, with another lag")))
                     continue
                 calls.append(dict(item, method="POST", path=f"/{ENTITY[table]}", body=[body]))
                 continue
             row = live.get((table, oid))
             if row is None:
                 if action == "delete":
-                    done.append(dict(item, reason="already gone from the server"))
+                    done.append(dict(item, reason=_t("already gone from the server")))
                 else:
-                    conflicts.append(dict(item, reason="no longer on the server (or not readable by this user)"))
+                    conflicts.append(dict(item, reason=_t("no longer on the server (or not readable by this user)")))
                 continue
             diffs, already = [], True
             for col, f in (fields.items() if action != "delete" else PUSHED[table].items()):
@@ -159,25 +163,27 @@ def plan(sess, changes: list[dict], local_base: int) -> dict:
                 if not same(table, col, cur, fc["pulled"]):
                     if action != "delete" and same(table, col, cur, fc["local"]):
                         continue  # this field already holds the local value
-                    diffs.append(f"{f}: pulled {fc['pulled']!r}, now {cur!r} on the server")
+                    diffs.append(_t("{field}: pulled {pulled!r}, now {now!r} on the server", field=f,
+                                    pulled=fc["pulled"], now=cur))
                 if action != "delete" and not same(table, col, cur, fc["local"]):
                     already = False
             if diffs:
-                conflicts.append(dict(item, reason="changed on the server since the pull: " + "; ".join(diffs)))
+                conflicts.append(dict(item, reason=_t("changed on the server since the pull: {diffs}",
+                                                      diffs=_join("; ", diffs))))
             elif action == "delete":
                 calls.append(dict(item, method="DELETE", path=f"/{ENTITY[table]}?ObjectId={oid}", body=None))
             elif already:
-                done.append(dict(item, reason="the server already holds the local values"))
+                done.append(dict(item, reason=_t("the server already holds the local values")))
             else:
                 body = {ID_FIELD[table]: oid}
                 body.update({f: to_rest(table, col, c["fields"][col]["local"]) for col, f in fields.items()})
                 calls.append(dict(item, method="PUT", path=f"/{ENTITY[table]}", body=[body]))
-    lines = [f"{i + 1}. {x['method']} {x['label']}"
-             + (f" ({x['project']})" if x.get("project") else "")
-             + (": " + ", ".join(f"{k} = {v!r}" for k, v in x["body"][0].items() if not k.endswith("ObjectId"))
-                if x["body"] else "") for i, x in enumerate(calls)]
+    lines = [_t("{n}. {method} {label}{rest}", n=i + 1, method=x["method"], label=x["label"],
+                rest=(f" ({x['project']})" if x.get("project") else "")
+                + (": " + ", ".join(f"{k} = {v!r}" for k, v in x["body"][0].items() if not k.endswith("ObjectId"))
+                   if x["body"] else "")) for i, x in enumerate(calls)]
     return {"calls": calls, "already_done": done, "conflicts": conflicts, "unsupported": unsupported,
-            "plan": lines or ["Nothing to send."]}
+            "plan": lines or [_t("Nothing to send.")]}
 
 
 def apply(sess, calls: list[dict], journal: str) -> dict:
@@ -199,7 +205,7 @@ def apply(sess, calls: list[dict], journal: str) -> dict:
             if x["action"] == "create":
                 ids = [int(v) for v in (res or []) if str(v).strip().lstrip("-").isdigit()]
                 if not ids:
-                    rec.update(ok=False, error=f"the server did not return the new ObjectId: {res!r}")
+                    rec.update(ok=False, error=_t("the server did not return the new ObjectId: {answer!r}", answer=res))
                     fh.write(json.dumps(rec, default=str) + "\n")
                     return {"sent": sent, "failed": rec, "created": created}
                 created[x["object_id"]] = ids[0]

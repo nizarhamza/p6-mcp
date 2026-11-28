@@ -11,6 +11,8 @@ import importlib
 import time
 from typing import Any, Callable, Optional
 
+from p6mcp.messages import _t
+
 DRIVERS = {"mssql": "pymssql", "oracle": "oracledb"}
 CORE_TABLES = ("PROJECT", "PROJWBS", "TASK", "TASKPRED", "CALENDAR")
 
@@ -23,7 +25,8 @@ def driver_module(driver: str) -> Optional[Any]:
     """The imported driver module, or None when it is not installed."""
     name = DRIVERS.get(driver)
     if not name:
-        raise SqlError(f"Unknown SQL driver {driver!r}: use one of {sorted(DRIVERS)}.")
+        raise SqlError(_t("Unknown SQL driver {driver!r}: use one of {drivers}.", driver=driver,
+                          drivers=sorted(DRIVERS)))
     from p6mcp.eppm import drivers
     drivers.activate()  # drivers installed on demand live outside the product's own folder
     try:
@@ -56,10 +59,10 @@ def connect(sql: dict, password: str, module: Any = None):
     """A DB-API connection. tls (P6 Professional databases, p6mcp.pmdb): SQL Server encryption required, Oracle over
     TCPS; without it, each driver's default."""
     if not (sql.get("user") or "").strip():
-        raise SqlError("No SQL user name: enter the read-only SQL account.")
+        raise SqlError(_t("No SQL user name: enter the read-only SQL account."))
     mod = module or driver_module(sql["driver"])
     if mod is None:
-        raise SqlError(f"The {DRIVERS[sql['driver']]} driver is not installed.")
+        raise SqlError(_t("The {driver} driver is not installed.", driver=DRIVERS[sql["driver"]]))
     try:
         if sql["driver"] == "mssql":
             extra = {"encryption": "require"} if sql.get("tls") else {}
@@ -72,7 +75,7 @@ def connect(sql: dict, password: str, module: Any = None):
         return mod.connect(user=sql["user"], password=password, dsn=dsn)
     except Exception as e:  # noqa: BLE001  (every driver raises its own classes)
         text = str(e).replace(password, "***") if password else str(e)
-        raise SqlError(f"SQL connection failed: {' '.join(text.split())[:300]}") from e
+        raise SqlError(_t("SQL connection failed: {error}", error=" ".join(text.split())[:300])) from e
 
 
 def failed_sign_ins(sql: dict, password: str, user: str, module: Any = None) -> Optional[int]:
@@ -106,7 +109,7 @@ def test_connection(sql: dict, password: str, module_factory: Optional[Callable[
         mod = module_factory(sql["driver"]) if module_factory else driver_module(sql["driver"])
         if mod is None:
             res.update(driver_missing=DRIVERS[sql["driver"]],
-                       error=f"The {DRIVERS[sql['driver']]} driver is not installed.")
+                       error=_t("The {driver} driver is not installed.", driver=DRIVERS[sql["driver"]]))
             return res
         con = connect(sql, password, mod)
         try:
@@ -119,8 +122,8 @@ def test_connection(sql: dict, password: str, module_factory: Optional[Callable[
                 except Exception:  # noqa: BLE001
                     missing.append(t)
             if missing:
-                raise SqlError("These P6 tables cannot be read with this account: " + ", ".join(missing)
-                               + ". Check the schema, the table prefix and the account's rights.")
+                raise SqlError(_t("These P6 tables cannot be read with this account: {tables}. Check the schema, the "
+                                  "table prefix and the account's rights.", tables=", ".join(missing)))
             cur.execute(f"SELECT COUNT(*) FROM {table(sql, 'PROJECT')}")
             res["project_rows"] = int(cur.fetchall()[0][0])
             cur.execute(first_row(sql, f"* FROM {table(sql, 'TASK')}"))
@@ -132,6 +135,6 @@ def test_connection(sql: dict, password: str, module_factory: Optional[Callable[
     except SqlError as e:
         res["error"] = str(e)
     except (KeyError, TypeError, ValueError) as e:
-        res["error"] = f"Incomplete SQL settings: {e}"
+        res["error"] = _t("Incomplete SQL settings: {error}", error=e)
     res["seconds"] = round(time.perf_counter() - t0, 2)
     return res

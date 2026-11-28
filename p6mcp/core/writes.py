@@ -31,6 +31,7 @@ from p6mcp.core.calendar import _calendars, _resolve_dt
 from p6mcp.core.editlog import _caller_tool, _log_ts, _log_write
 from p6mcp.core.wbs_codes import _code_tree, _code_type, _eps_nodes, _guid, _name_sep, _wbs_tree
 from p6mcp.core.read import _lag_arg, _rel_code, _udf_out, _udf_type
+from p6mcp.messages import _join, _t
 
 
 # ----------------------------------------------------------------- write tools
@@ -46,8 +47,8 @@ def _commit(con: sqlite3.Connection, plan: list[str], confirm: bool, projects: I
         con.rollback()
         con.close()
         return {"dry_run": True, "would_do": plan,
-                "next": "Call again with confirm=True to apply"
-                        + (" (the local working copy only)." if _state.SETTINGS.eppm else " (P6 must be closed).")}
+                "next": _t("Call again with confirm=True to apply (the local working copy only).")
+                if _state.SETTINGS.eppm else _t("Call again with confirm=True to apply (P6 must be closed).")}
     if mismatch:
         con.rollback()
         con.close()
@@ -85,13 +86,13 @@ def _commit(con: sqlite3.Connection, plan: list[str], confirm: bool, projects: I
                 "change": plan[0][:160], "backup": _state._last_backup, "stale": stale,
                 "stale_projects": [v[0] for v in snap.values()]} for it in items]
     res = {"applied": True, "done": plan,
-           "next": EPPM_NEXT if _state.SETTINGS.eppm else "Open P6 and press F9 to reschedule."}
+           "next": EPPM_NEXT if _state.SETTINGS.eppm else _t("Open P6 and press F9 to reschedule.")}
     if snap:
         res["stale_projects"] = [v[0] for v in snap.values()]
     try:
         res["edit_log"] = {"file": _log_write(entries), "entries": len(entries)}
     except OSError as e:  # committed already: say so rather than fail
-        res["edit_log"] = {"error": f"edit log not written: {e}"}
+        res["edit_log"] = {"error": _t("edit log not written: {e}", e=e)}
     return res
 
 
@@ -156,13 +157,13 @@ def _find_rel(con, succ, pred, current_type: Optional[str]):
                        + _alive(con, "TASKPRED", "r"), (succ["task_id"], pred["task_id"])).fetchall()
     if current_type:
         if current_type.upper() not in REL_TYPES:
-            raise ValueError("current_type must be FS, SS, FF or SF")
+            raise ValueError(_t("current_type must be FS, SS, FF or SF"))
         rows = [r for r in rows if r["pred_type"] == REL_TYPES[current_type.upper()]]
     if not rows:
-        return None, "Relationship not found."
+        return None, _t("Relationship not found.")
     if len(rows) > 1:
-        return None, ("Several relationships link these activities "
-                      f"({[REL_TYPES_REV.get(r['pred_type']) for r in rows]}): pass current_type.")
+        return None, _t("Several relationships link these activities ({types}): pass current_type.",
+                        types=[REL_TYPES_REV.get(r['pred_type']) for r in rows])
     return rows[0], None
 
 
@@ -178,7 +179,7 @@ def _task_by_id(con, task_id: int) -> sqlite3.Row:
                     "LEFT JOIN CALENDAR c ON c.clndr_id = t.clndr_id JOIN PROJECT p ON p.proj_id = t.proj_id "
                     "WHERE t.task_id = ?" + _alive(con, "TASK", "t"), (task_id,)).fetchone()
     if r is None:
-        raise ValueError(f"Activity id {task_id} not found")
+        raise ValueError(_t("Activity id {task_id} not found", task_id=task_id))
     return r
 
 
@@ -186,7 +187,7 @@ def _rel_ends(con, project: str, it: Mapping) -> tuple[sqlite3.Row, sqlite3.Row]
     """(pred, succ) of a link item: successor in project, predecessor in predecessor_project or project."""
     for k in ("predecessor_code", "successor_code"):
         if not isinstance(it.get(k), str) or not it[k]:
-            raise ValueError(f"{k} is required")
+            raise ValueError(_t("{k} is required", k=k))
     succ = _task(con, project, it["successor_code"])
     pred = _task(con, it.get("predecessor_project") or project, it["predecessor_code"])
     return pred, succ
@@ -198,10 +199,10 @@ def _rel_add(con, project: str, it: Mapping) -> dict:
     lag_days = _lag_arg(it.get("lag_days") or 0)
     pred, succ = _rel_ends(con, project, it)
     if pred["task_id"] == succ["task_id"]:
-        raise ValueError("An activity cannot be linked to itself.")
+        raise ValueError(_t("An activity cannot be linked to itself."))
     if con.execute("SELECT 1 FROM TASKPRED r WHERE r.task_id=? AND r.pred_task_id=? AND r.pred_type=?"
                    + _alive(con, "TASKPRED", "r"), (succ["task_id"], pred["task_id"], code)).fetchone():
-        raise _Refused("This relationship already exists, use p6_update_relationship.")
+        raise _Refused(_t("This relationship already exists, use p6_update_relationship."))
     hpd, basis = _lag_hpd(con, pred, succ)
     new_id = _next_key(con, "TASKPRED", "task_pred_id")
     row = {"task_pred_id": new_id, "task_id": succ["task_id"], "pred_task_id": pred["task_id"],
@@ -209,8 +210,9 @@ def _rel_add(con, project: str, it: Mapping) -> dict:
     row.update(_stamp_cols(con, "TASKPRED", _now_str(con), create=True))
     row = {k: v for k, v in row.items() if k in _cols(con, "TASKPRED")}
     con.execute(f"INSERT INTO TASKPRED ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
-    plan = (f"Add {REL_TYPES_REV[code]} {pred['task_code']} -> {succ['task_code']}, "
-            f"lag {lag_days:g} d = {lag_days * hpd:g} h ({basis}) (task_pred_id {new_id})")
+    plan = _t("Add {type} {pred} -> {succ}, lag {lag:g} d = {hours:g} h ({basis}) (task_pred_id {id})",
+              type=REL_TYPES_REV[code], pred=pred['task_code'], succ=succ['task_code'], lag=lag_days,
+              hours=lag_days * hpd, basis=basis, id=new_id)
     return {"plan": plan, "projects": [succ["proj_id"], pred["proj_id"]], "task_pred_id": new_id,
             "log": [_rel_log("add_relationship", pred, succ, new_id, None, row, plan)]}
 
@@ -229,19 +231,20 @@ def _rel_update(con, project: str, it: Mapping) -> dict:
     if code and code != r["pred_type"]:
         if con.execute("SELECT 1 FROM TASKPRED r WHERE r.task_id=? AND r.pred_task_id=? AND r.pred_type=?"
                        + _alive(con, "TASKPRED", "r"), (succ["task_id"], pred["task_id"], code)).fetchone():
-            raise _Refused(f"A {REL_TYPES_REV[code]} relationship already links these activities: change or "
-                           "delete that one instead.")
+            raise _Refused(_t("A {type} relationship already links these activities: change or delete that one "
+                              "instead.", type=REL_TYPES_REV[code]))
         sets["pred_type"] = code
-        plan.append(f"type {REL_TYPES_REV.get(r['pred_type'])} -> {REL_TYPES_REV[code]}")
+        plan.append(_t("type {old} -> {new}", old=REL_TYPES_REV.get(r['pred_type']), new=REL_TYPES_REV[code]))
     if lag_days is not None:
         hpd, basis = _lag_hpd(con, pred, succ)
         sets["lag_hr_cnt"] = lag_days * hpd
-        plan.append(f"lag {_days(r['lag_hr_cnt'], hpd)} d -> {lag_days:g} d = {lag_days * hpd:g} h ({basis})")
+        plan.append(_t("lag {old} d -> {lag:g} d = {hours:g} h ({basis})",
+                       old=_days(r['lag_hr_cnt'], hpd), lag=lag_days, hours=lag_days * hpd, basis=basis))
     if not plan:
-        raise _Refused("Nothing to change.")
+        raise _Refused(_t("Nothing to change."))
     con.execute(f"UPDATE TASKPRED SET {', '.join(k + '=?' for k in sets)} WHERE task_pred_id=?",
                 [*sets.values(), r["task_pred_id"]])
-    plan = f"{pred['task_code']} -> {succ['task_code']}: " + ", ".join(plan)
+    plan = _t("{pred} -> {succ}: {changes}", pred=pred['task_code'], succ=succ['task_code'], changes=_join(", ", plan))
     return {"plan": plan, "projects": [succ["proj_id"], pred["proj_id"]], "task_pred_id": r["task_pred_id"],
             "log": [_rel_log("update_relationship", pred, succ, r["task_pred_id"], r, {**_dict(r), **sets}, plan)]}
 
@@ -251,7 +254,8 @@ def _rel_delete_row(con, r: sqlite3.Row, pred: sqlite3.Row, succ: sqlite3.Row) -
     _pred / _succ: task_ids for side effects (not reported)."""
     con.execute("DELETE FROM TASKPRED WHERE task_pred_id=?", (r["task_pred_id"],))
     hpd = _lag_hpd(con, pred, succ)[0]
-    plan = f"Delete {REL_TYPES_REV.get(r['pred_type'])} {pred['task_code']} -> {succ['task_code']}"
+    plan = _t("Delete {type} {pred} -> {succ}",
+              type=REL_TYPES_REV.get(r['pred_type']), pred=pred['task_code'], succ=succ['task_code'])
     return {"plan": plan, "projects": [succ["proj_id"], pred["proj_id"]], "task_pred_id": r["task_pred_id"],
             "predecessor": pred["task_code"], "successor": succ["task_code"],
             "type": REL_TYPES_REV.get(r["pred_type"], r["pred_type"]), "lag_d": _days(r["lag_hr_cnt"] or 0, hpd),
@@ -277,7 +281,7 @@ def _single_link(fn: Callable, project: str, it: Mapping, confirm: bool) -> dict
             return {"applied": False, "error": str(e)}
         plan = [x["plan"]]
         if backup:
-            plan.append(f"Backup: {backup}")
+            plan.append(_t("Backup: {path}", path=backup))
         return _commit(con, plan, confirm, projects=x["projects"], log=x["log"])
 
 
@@ -288,18 +292,18 @@ LINK_KEYS = {"delete": set(LinkRef.__annotations__) | _ENDS | {"current_type"},
 
 def _items_arg(items: Any) -> list:
     if not isinstance(items, (list, tuple)):
-        raise ValueError("items: a list of objects")
+        raise ValueError(_t("items: a list of objects"))
     if len(items) > MAX_BATCH:
-        raise ValueError(f"At most {MAX_BATCH} items per call")
+        raise ValueError(_t("At most {n} items per call", n=MAX_BATCH))
     return list(items)
 
 
 def _item_keys(it: Any, kind: str) -> Mapping:
     if not isinstance(it, Mapping):
-        raise ValueError("an item must be an object with predecessor_code and successor_code")
+        raise ValueError(_t("an item must be an object with predecessor_code and successor_code"))
     bad = sorted(set(it) - LINK_KEYS[kind])
     if bad:
-        raise ValueError(f"unknown key(s) {bad}; allowed: {sorted(LINK_KEYS[kind])}")
+        raise ValueError(_t("unknown key(s) {bad}; allowed: {allowed}", bad=bad, allowed=sorted(LINK_KEYS[kind])))
     return it
 
 
@@ -325,8 +329,8 @@ def _side_effects(con, lost_pred: Iterable[int], lost_succ: Iterable[int], gone:
         out[key] = [{"project": r[0], "task_code": r[1], "task_name": r[2], "task_type": r[3]}
                     for r in sorted(rows, key=lambda r: (r[0], r[1]))]
     out["count"] = len(out["no_predecessor"]) + len(out["no_successor"])
-    out["note"] = ("open activities left without any predecessor or successor by this change (LOE and WBS "
-                   "summary links do not count)")
+    out["note"] = _t("open activities left without any predecessor or successor by this change (LOE and WBS "
+                     "summary links do not count)")
     return out
 
 
@@ -341,17 +345,20 @@ def _link_batch(project: str, items: list, kind: str, confirm: bool, fn: Callabl
             if kind == "delete" and isinstance(it, Mapping) and set(it) == {"task_pred_id"}:
                 tpid = it["task_pred_id"]
                 if isinstance(tpid, bool) or not isinstance(tpid, int):
-                    raise ValueError(f"task_pred_id must be an integer, not {tpid!r}")
+                    raise ValueError(_t("task_pred_id must be an integer, not {tpid!r}", tpid=tpid))
                 if tpid in done:
-                    return {"plan": f"task_pred_id {tpid}: already removed by item {done[tpid]}", "projects": []}
+                    return {"plan": _t("task_pred_id {tpid}: already removed by item {item}", tpid=tpid,
+                                       item=done[tpid]), "projects": []}
                 r = con.execute("SELECT * FROM TASKPRED WHERE task_pred_id = ?" + _alive(con, "TASKPRED"),
                                 (tpid,)).fetchone()
                 if r is None:
-                    raise ValueError(f"task_pred_id {tpid} not found")
+                    raise ValueError(_t("task_pred_id {tpid} not found", tpid=tpid))
                 pred, succ = _task_by_id(con, r["pred_task_id"]), _task_by_id(con, r["task_id"])
                 if pid not in (pred["proj_id"], succ["proj_id"]):
-                    raise ValueError(f"task_pred_id {tpid} links {pred['proj_short_name']} {pred['task_code']} -> "
-                                     f"{succ['proj_short_name']} {succ['task_code']}: not a link of {project}")
+                    raise ValueError(_t("task_pred_id {tpid} links {pred_project} {pred} -> {succ_project} {succ}: "
+                                        "not a link of {project}", tpid=tpid, pred_project=pred['proj_short_name'],
+                                        pred=pred['task_code'], succ_project=succ['proj_short_name'],
+                                        succ=succ['task_code'], project=project))
                 x = _rel_delete_row(con, r, pred, succ)
             elif kind == "delete":
                 keys = _item_keys(it, kind)
@@ -364,7 +371,8 @@ def _link_batch(project: str, items: list, kind: str, confirm: bool, fn: Callabl
                              and (ty is None or t == str(ty).upper())]
                     if not prior:
                         raise
-                    return {"plan": f"{pred['task_code']} -> {succ['task_code']}: already removed by item {prior[0]}",
+                    return {"plan": _t("{pred} -> {succ}: already removed by item {item}",
+                                       pred=pred['task_code'], succ=succ['task_code'], item=prior[0]),
                             "projects": []}
             else:
                 x = fn(con, project, _item_keys(it, kind))
@@ -392,28 +400,28 @@ def _act_check(it: Mapping) -> dict:
     """Checks of one activity edit that need no database (keys, durations, %, constraint, date formats).
     Returns {code: constraint code or None, dates: {field: (value, edge)}}; ValueError otherwise."""
     if not isinstance(it, Mapping):
-        raise ValueError("an item must be an object with task_code")
+        raise ValueError(_t("an item must be an object with task_code"))
     bad = sorted(set(it) - ACT_KEYS)
     if bad:
-        raise ValueError(f"unknown key(s) {bad}; allowed: {sorted(ACT_KEYS)}")
+        raise ValueError(_t("unknown key(s) {bad}; allowed: {allowed}", bad=bad, allowed=sorted(ACT_KEYS)))
     if not isinstance(it.get("task_code"), str) or not it["task_code"]:
-        raise ValueError("task_code is required")
+        raise ValueError(_t("task_code is required"))
     for name in ("original_duration_days", "remaining_duration_days"):
         v = it.get(name)
         if v is not None:
             f = _num(v)
             if f is None or not (math.isfinite(f) and f >= 0):
-                raise ValueError(f"{name}: a duration must be 0 or more")
+                raise ValueError(_t("{name}: a duration must be 0 or more", name=name))
     if it.get("physical_pct") is not None:
         f = _num(it["physical_pct"])
         if f is None or not 0 <= f <= 100:
-            raise ValueError("physical_pct must be between 0 and 100")
+            raise ValueError(_t("physical_pct must be between 0 and 100"))
     constraint = it.get("constraint")
     if constraint is not None and constraint not in CSTR_TYPES:
-        raise ValueError(f"constraint must be one of {list(CSTR_TYPES)}")
+        raise ValueError(_t("constraint must be one of {allowed}", allowed=list(CSTR_TYPES)))
     code = CSTR_TYPES.get(constraint) if constraint is not None else None
     if code and code != "CS_ALAP" and not it.get("constraint_date"):
-        raise ValueError("constraint_date is required for this constraint")
+        raise ValueError(_t("constraint_date is required for this constraint"))
     dates = {"actual_start": (it.get("actual_start"), "start"), "actual_finish": (it.get("actual_finish"), "finish"),
              "constraint_date": (it.get("constraint_date") if code and code != "CS_ALAP" else None,
                                  "finish" if code in CSTR_FINISH else "start")}
@@ -454,75 +462,85 @@ def _act_update(con, project: str, it: Mapping) -> dict:
 
     if task_name:
         sets["task_name"] = task_name
-        plan.append(f"name -> {task_name}")
+        plan.append(_t("name -> {task_name}", task_name=task_name))
     if original_duration_days is not None:
         sets["target_drtn_hr_cnt"] = original_duration_days * hpd
-        plan.append(f"orig dur {_days(t['target_drtn_hr_cnt'], hpd)} -> {original_duration_days} d")
+        plan.append(_t("orig dur {old} -> {new} d",
+                       old=_days(t['target_drtn_hr_cnt'], hpd), new=original_duration_days))
         if t["status_code"] == "TK_NotStart" and remaining_duration_days is None:
             sets["remain_drtn_hr_cnt"] = original_duration_days * hpd
-            plan.append(f"rem dur -> {original_duration_days} d (not started: follows the original)")
+            plan.append(_t("rem dur -> {new} d (not started: follows the original)", new=original_duration_days))
     if remaining_duration_days is not None:
         sets["remain_drtn_hr_cnt"] = remaining_duration_days * hpd
-        plan.append(f"rem dur {_days(t['remain_drtn_hr_cnt'], hpd)} -> {remaining_duration_days} d")
+        plan.append(_t("rem dur {old} -> {new} d",
+                       old=_days(t['remain_drtn_hr_cnt'], hpd), new=remaining_duration_days))
     if constraint is not None:
         sets["cstr_type"] = code
         sets["cstr_date"] = norm("constraint_date")
-        plan.append(f"constraint {t['cstr_type']} -> {code} {sets['cstr_date'] or ''}".strip())
+        plan.append(_t("constraint {old} -> {new} {date}", old=t['cstr_type'], new=code, date=sets['cstr_date'])
+                    if sets['cstr_date'] else _t("constraint {old} -> {new}", old=t['cstr_type'], new=code))
     mile = {"TT_Mile": "start", "TT_FinMile": "finish"}.get(t["task_type"])
     if mile and (actual_start or actual_finish):  # one date: P6 stores actual start = actual finish
         got = [_resolve_dt(cal, dates[f][0], f, mile) for f in ("actual_start", "actual_finish") if dates[f][0]]
         if len({v for v, _ in got}) > 1:
-            raise ValueError(f"{task_code} is a {mile} milestone: its actual start and finish are one date, "
-                             f"not {' and '.join(v for v, _ in got)}")
+            raise ValueError(_t("{task_code} is a {mile} milestone: its actual start and finish are one date, not "
+                                "{first} and {second}", task_code=task_code, mile=mile, first=got[0][0],
+                                second=got[1][0]))
         v = got[0][0]
         notes.extend(got[0][1])
         sets.update(act_start_date=v, act_end_date=v, status_code="TK_Complete", remain_drtn_hr_cnt=0)
-        plan.append(f"actual start and finish -> {v} ({mile} milestone, Completed)")
+        plan.append(_t("actual start and finish -> {date} ({mile} milestone, Completed)", date=v, mile=mile))
     if actual_start and not mile:
         sets["act_start_date"] = norm("actual_start")
         started = t["status_code"] == "TK_NotStart" and not actual_finish
         if t["status_code"] == "TK_NotStart":
             sets["status_code"] = "TK_Active"
-        plan.append(f"actual start -> {sets['act_start_date']}" + (" (In Progress)" if started else ""))
+        plan.append(_t("actual start -> {date} (In Progress)", date=sets['act_start_date']) if started
+                    else _t("actual start -> {date}", date=sets['act_start_date']))
     if actual_finish and not mile:
         if not (actual_start or t["act_start_date"]):
-            raise ValueError("Set actual_start before (or together with) actual_finish.")
+            raise ValueError(_t("Set actual_start before (or together with) actual_finish."))
         sets["act_end_date"] = norm("actual_finish")
         sets["status_code"] = "TK_Complete"
         sets["remain_drtn_hr_cnt"] = 0
-        plan.append(f"actual finish -> {sets['act_end_date']} (Completed)")
+        plan.append(_t("actual finish -> {date} (Completed)", date=sets['act_end_date']))
     if physical_pct is not None:
         sets["phys_complete_pct"] = it["physical_pct"]
-        plan.append(f"physical % -> {it['physical_pct']}")
+        plan.append(_t("physical % -> {pct}", pct=it['physical_pct']))
     if not sets:
-        raise _Refused("Nothing to change.")
+        raise _Refused(_t("Nothing to change."))
     start = _db_dt(sets.get("act_start_date") or t["act_start_date"])
     finish = _db_dt(sets.get("act_end_date") or t["act_end_date"])
     if start and finish and finish < start:
-        raise ValueError(f"actual finish {_fmt_dt(finish)} is before actual start {_fmt_dt(start)}")
+        raise ValueError(_t("actual finish {finish} is before actual start {start}",
+                            finish=_fmt_dt(finish), start=_fmt_dt(start)))
     dd = None
     if "last_recalc_date" in _cols(con, "PROJECT"):
         dd = _db_dt(con.execute("SELECT last_recalc_date FROM PROJECT WHERE proj_id = ?", (t["proj_id"],)).fetchone()[0])
     late = [f"{k} {sets[c]}" for k, c in (("actual_start", "act_start_date"), ("actual_finish", "act_end_date"))
             if c in sets and dd and _db_dt(sets[c]) > dd]
     if late and not it.get("allow_after_data_date"):
-        raise ValueError(f"{' and '.join(late)} after the data date {_fmt_dt(dd)}: actuals belong before it. "
-                         "Pass allow_after_data_date=True if this is intended.")
-    notes += [f"{x} is after the data date {_fmt_dt(dd)} (allowed)" for x in late]
+        raise ValueError(_t("{late} after the data date {dd}: actuals belong before it. Pass "
+                            "allow_after_data_date=True if this is intended.",
+                            late=late[0] if len(late) == 1 else _t("{first} and {second}", first=late[0],
+                                                                   second=late[1]), dd=_fmt_dt(dd)))
+    notes += [_t("{value} is after the data date {dd} (allowed)", value=x, dd=_fmt_dt(dd)) for x in late]
     if physical_pct is not None and float(physical_pct) == 100 and not finish:
-        notes.append("physical % 100 but no actual finish: the activity is not Completed until actual_finish is set")
+        notes.append(_t("physical % 100 but no actual finish: the activity is not Completed until actual_finish is set",
+                        ))
     sets.update(_stamp_cols(con, "TASK", _now_str(con), create=False))
     sets = {k: v for k, v in sets.items() if k in _cols(con, "TASK")}
     con.execute(f"UPDATE TASK SET {', '.join(k + '=?' for k in sets)} WHERE task_id=?",
                 [*sets.values(), t["task_id"]])
-    head = f"{task_code}: " + "; ".join(plan)
+    head = _t("{code}: {changes}", code=task_code, changes=_join("; ", plan))
     sched = set(sets) & {"target_drtn_hr_cnt", "remain_drtn_hr_cnt", "cstr_type", "cstr_date",
                          "act_start_date", "act_end_date", "status_code"}  # name and physical % do not move dates
     changed = [k for k in sets if k not in ("update_date", "update_user")]
     log = [{"operation": "update_activity", "proj_id": t["proj_id"], "table": "TASK",
             "keys": {"task_id": t["task_id"], "task_code": task_code},
             "before": {k: t[k] for k in changed}, "after": {k: sets[k] for k in changed}, "summary": head}]
-    return {"plan": head + "".join(f"; Note: {n}" for n in notes), "_lines": [head] + [f"Note: {n}" for n in notes],
+    lines = [head] + [_t("Note: {note}", note=n) for n in notes]
+    return {"plan": _join("; ", lines), "_lines": lines,
             "log": log, "projects": [t["proj_id"]] if sched else [], "task_code": task_code}
 
 
@@ -546,15 +564,16 @@ NEW_TASK_FIXED = {"phys_complete_pct": 0, "rev_fdbk_flag": "N", "est_wt": 1, "lo
                   "control_updates_flag": "N"}
 NEW_TASK_DEFAULTS = {"complete_pct_type": ("def_complete_pct_type", "CP_Drtn"),
                      "duration_type": ("def_duration_type", "DT_FixedDUR2")}  # PROJECT column, else this
-NEW_DATES_NOTE = ("New activities are placed at the data date (planned, early and remaining dates = data date + "
-                  "duration on their calendar; late dates and float empty) until P6 schedules them: press F9.")
+NEW_DATES_NOTE = _t("New activities are placed at the data date (planned, early and remaining dates = data date + "
+                    "duration on their calendar; late dates and float empty) until P6 schedules them: press F9.")
 
 
 def _code_ok(code: Any, field: str) -> str:
     if not isinstance(code, str) or not code.strip():
-        raise ValueError(f"{field} is required")
+        raise ValueError(_t("{field} is required", field=field))
     if code != code.strip() or any(ord(ch) < 32 for ch in code):
-        raise ValueError(f"{field} {code!r}: no leading or trailing spaces, tabs or line breaks")
+        raise ValueError(_t("{field} {code!r}: no leading or trailing spaces, tabs or line breaks",
+                            field=field, code=code))
     return code
 
 
@@ -562,21 +581,22 @@ def _new_link_check(v: Any, field: str) -> list[dict]:
     if v is None:
         return []
     if not isinstance(v, (list, tuple)):
-        raise ValueError(f"{field}: a list of {{task_code, type, lag_days, project}}")
+        raise ValueError(_t("{field}: a list of {{task_code, type, lag_days, project}}", field=field))
     if len(v) > NEW_LINKS_CAP:
-        raise ValueError(f"{field}: at most {NEW_LINKS_CAP} per activity")
+        raise ValueError(_t("{field}: at most {n} per activity", field=field, n=NEW_LINKS_CAP))
     out = []
     for k, x in enumerate(v):
         if not isinstance(x, Mapping):
-            raise ValueError(f"{field}[{k}]: an object with task_code")
+            raise ValueError(_t("{field}[{k}]: an object with task_code", field=field, k=k))
         bad = sorted(set(x) - NEW_LINK_KEYS)
         if bad:
-            raise ValueError(f"{field}[{k}]: unknown key(s) {bad}; allowed: {sorted(NEW_LINK_KEYS)}")
+            raise ValueError(_t("{field}[{k}]: unknown key(s) {bad}; allowed: {allowed}",
+                                field=field, k=k, bad=bad, allowed=sorted(NEW_LINK_KEYS)))
         _code_ok(x.get("task_code"), f"{field}[{k}].task_code")
         code = _rel_code(x.get("type") or "FS", f"{field}[{k}].type")
         lag = _lag_arg(x.get("lag_days") or 0)
         if x.get("project") is not None and (not isinstance(x["project"], str) or not x["project"]):
-            raise ValueError(f"{field}[{k}].project: a Project ID")
+            raise ValueError(_t("{field}[{k}].project: a Project ID", field=field, k=k))
         out.append({"task_code": x["task_code"], "type": REL_TYPES_REV[code], "lag_days": lag,
                     "project": x.get("project") or None})
     return out
@@ -586,48 +606,49 @@ def _new_act_check(it: Any) -> dict:
     """Checks of one new activity that need no database. Returns the item normalised: task_code, task_name, type
     (TT_ code), duration (days or None), cstr (code or None), cstr_date, wbs, calendar, predecessors, successors."""
     if not isinstance(it, Mapping):
-        raise ValueError("an item must be an object with task_code and task_name")
+        raise ValueError(_t("an item must be an object with task_code and task_name"))
     bad = sorted(set(it) - NEW_ACT_KEYS)
     if bad:
-        raise ValueError(f"unknown key(s) {bad}; allowed: {sorted(NEW_ACT_KEYS)}")
+        raise ValueError(_t("unknown key(s) {bad}; allowed: {allowed}", bad=bad, allowed=sorted(NEW_ACT_KEYS)))
     code = _code_ok(it.get("task_code"), "task_code")
     name = it.get("task_name")
     if not isinstance(name, str) or not name.strip():
-        raise ValueError(f"{code}: task_name is required")
+        raise ValueError(_t("{code}: task_name is required", code=code))
     if len(name) > TASK_NAME_MAX:
-        raise ValueError(f"{code}: task_name has {len(name)} characters, P6 takes at most {TASK_NAME_MAX}")
+        raise ValueError(_t("{code}: task_name has {n} characters, P6 takes at most {max}",
+                            code=code, n=len(name), max=TASK_NAME_MAX))
     raw = it.get("type") or "task"
     ttype = ACT_TYPES.get(raw) or (raw if raw in TYPE_NAMES else None)
     if ttype is None:
-        raise ValueError(f"{code}: type must be one of {list(ACT_TYPES)}")
+        raise ValueError(_t("{code}: type must be one of {allowed}", code=code, allowed=list(ACT_TYPES)))
     dur = it.get("original_duration_days")
     if dur is not None:
         f = _num(dur)
         if isinstance(dur, bool) or f is None or f < 0:
-            raise ValueError(f"{code}: original_duration_days must be 0 or more")
+            raise ValueError(_t("{code}: original_duration_days must be 0 or more", code=code))
         dur = f
     if ttype in NO_DURATION_TYPES and dur:
-        raise ValueError(f"{code}: a {TYPE_NAMES[ttype].lower()} has no duration (leave original_duration_days "
-                         "out or 0)")
+        raise ValueError(_t("{code}: a {type} has no duration (leave original_duration_days out or 0)",
+                            code=code, type=TYPE_NAMES[ttype].lower()))
     if ttype in COMPUTED_DURATION_TYPES and dur:
-        raise ValueError(f"{code}: P6 computes the duration of a {TYPE_NAMES[ttype]} activity from its "
-                         "relationships when it schedules (F9): leave original_duration_days out")
+        raise ValueError(_t("{code}: P6 computes the duration of a {type} activity from its relationships when it "
+                            "schedules (F9): leave original_duration_days out", code=code, type=TYPE_NAMES[ttype]))
     cname = it.get("constraint")
     if cname is not None and cname not in CSTR_TYPES:
-        raise ValueError(f"{code}: constraint must be one of {list(CSTR_TYPES)}")
+        raise ValueError(_t("{code}: constraint must be one of {allowed}", code=code, allowed=list(CSTR_TYPES)))
     cstr = CSTR_TYPES.get(cname) if cname is not None else None
     if cstr and ttype in COMPUTED_DURATION_TYPES:
-        raise ValueError(f"{code}: P6 takes no constraint on a {TYPE_NAMES[ttype]} activity")
+        raise ValueError(_t("{code}: P6 takes no constraint on a {type} activity", code=code, type=TYPE_NAMES[ttype]))
     cdate = it.get("constraint_date")
     if cstr and cstr != "CS_ALAP":
         if not cdate:
-            raise ValueError(f"{code}: constraint_date is required for this constraint")
+            raise ValueError(_t("{code}: constraint_date is required for this constraint", code=code))
         _parse_dt(cdate, "constraint_date")
     elif cdate:
-        raise ValueError(f"{code}: constraint_date needs a constraint that takes a date")
+        raise ValueError(_t("{code}: constraint_date needs a constraint that takes a date", code=code))
     for k in ("wbs", "calendar"):
         if it.get(k) is not None and (not isinstance(it[k], str) or not it[k].strip()):
-            raise ValueError(f"{code}: {k} must be a non-empty text")
+            raise ValueError(_t("{code}: {k} must be a non-empty text", code=code, k=k))
     return {"task_code": code, "task_name": name, "type": ttype, "duration": dur, "cstr": cstr,
             "cstr_date": cdate if cstr and cstr != "CS_ALAP" else None, "wbs": it.get("wbs"),
             "calendar": it.get("calendar"), "predecessors": _new_link_check(it.get("predecessors"), "predecessors"),
@@ -645,11 +666,11 @@ class _NewActCtx:
             "project_flag"))
         self.prj = con.execute(f"SELECT {sel} FROM PROJECT WHERE proj_id = ?", (self.pid,)).fetchone()
         if (self.prj["project_flag"] or "Y") != "Y":
-            raise ValueError(f"{project} is an EPS node, not a project")
+            raise ValueError(_t("{project} is an EPS node, not a project", project=project))
         self.sep = _name_sep(con, self.pid)
         self.nodes = _wbs_tree(con, self.pid, self.sep)
         if not self.nodes:
-            raise ValueError(f"{project} has no project WBS node: P6 cannot hold activities there")
+            raise ValueError(_t("{project} has no project WBS node: P6 cannot hold activities there", project=project))
         self.code_max = _prefer(con, "task_code_len") or TASK_CODE_MAX
         self.dd = _db_dt(self.prj["last_recalc_date"]) or _db_dt(self.prj["plan_start_date"])
         self.dd_src = "data date" if _db_dt(self.prj["last_recalc_date"]) else "project planned start"
@@ -674,12 +695,13 @@ class _NewActCtx:
             if len(hits) == 1:
                 return hits[0]
             if hits:
-                raise ValueError(f"WBS name {value!r} is used by {len(hits)} nodes: give its code, one of "
-                                 f"{[n['wbs_code'] for n in hits][:10]}")
+                raise ValueError(_t("WBS name {value!r} is used by {n} nodes: give its code, one of {codes}",
+                                    value=value, n=len(hits), codes=[n['wbs_code'] for n in hits][:10]))
         rel = [n["wbs_code"][len(top) + len(self.sep):] for n in self.nodes[1:]]
         near = difflib.get_close_matches(p, rel, n=10) or [r for r, n in zip(rel, self.nodes[1:], strict=False)
                                                             if n["depth"] == 1][:10]
-        raise ValueError(f"WBS {value!r} not found in {self.project} (code or name). Close codes: {near}")
+        raise ValueError(_t("WBS {value!r} not found in {project} (code or name). Close codes: {near}",
+                            value=value, project=self.project, near=near))
 
     def calendar(self, value: Optional[str]) -> sqlite3.Row:
         """Activity calendar by name: a global calendar or one of this project's (not a resource calendar);
@@ -688,23 +710,25 @@ class _NewActCtx:
             cid = self.prj["clndr_id"]
             hit = [r for r in self.cal_rows if r["clndr_id"] == cid]
             if not hit:
-                raise ValueError(f"{self.project} has no default calendar: give calendar (p6_list_calendars)")
+                raise ValueError(_t("{project} has no default calendar: give calendar (p6_list_calendars)",
+                                    project=self.project))
             return hit[0]
         name = value.strip()
         for same in (lambda r: r["clndr_name"] == name, lambda r: (r["clndr_name"] or "").casefold() == name.casefold()):
             hits = [r for r in self.cal_rows if same(r)]
             usable = [r for r in hits if r["clndr_type"] != "CA_Rsrc"]
             if len(usable) > 1:
-                raise ValueError(f"calendar {value!r} names {len(usable)} calendars (ids "
-                                 f"{[r['clndr_id'] for r in usable]}): rename one in P6")
+                raise ValueError(_t("calendar {value!r} names {n} calendars (ids {ids}): rename one in P6",
+                                    value=value, n=len(usable), ids=[r['clndr_id'] for r in usable]))
             if usable:
                 return usable[0]
             if hits:
-                raise ValueError(f"calendar {value!r} is a resource calendar: activities take a global or project "
-                                 "calendar")
+                raise ValueError(_t("calendar {value!r} is a resource calendar: activities take a global or project "
+                                    "calendar", value=value))
         names = [r["clndr_name"] for r in self.cal_rows if r["clndr_type"] != "CA_Rsrc"]
-        raise ValueError(f"calendar {value!r} not found among the global calendars and those of {self.project}. "
-                         f"Close names: {difflib.get_close_matches(name, names, n=10) or names[:10]}")
+        raise ValueError(_t("calendar {value!r} not found among the global calendars and those of {project}. Close "
+                            "names: {near}", value=value, project=self.project,
+                            near=difflib.get_close_matches(name, names, n=10) or names[:10]))
 
 
 def _act_add(con, ctx: _NewActCtx, i: int, chk: dict) -> dict:
@@ -712,12 +736,13 @@ def _act_add(con, ctx: _NewActCtx, i: int, chk: dict) -> dict:
     projects, task_code, task_id, wbs_code, calendar, start, finish}; ValueError when P6 would refuse it."""
     code, ttype = chk["task_code"], chk["type"]
     if len(code) > ctx.code_max:
-        raise ValueError(f"{code}: an Activity ID has at most {ctx.code_max} characters in this database")
+        raise ValueError(_t("{code}: an Activity ID has at most {max} characters in this database", code=code,
+                            max=ctx.code_max))
     if code in ctx.batch:
-        raise ValueError(f"{code}: Activity ID already given by item {ctx.batch[code]}")
+        raise ValueError(_t("{code}: Activity ID already given by item {item}", code=code, item=ctx.batch[code]))
     if con.execute("SELECT 1 FROM TASK WHERE proj_id = ? AND task_code = ?" + _alive(con, "TASK"),
                    (ctx.pid, code)).fetchone():
-        raise ValueError(f"{code}: Activity ID already used in {ctx.project}")
+        raise ValueError(_t("{code}: Activity ID already used in {project}", code=code, project=ctx.project))
     node, cal_row = ctx.wbs(chk["wbs"]), ctx.calendar(chk["calendar"])
     cal = ctx.cals.get(cal_row["clndr_id"])
     hpd = cal.hpd if cal is not None else 8.0
@@ -727,10 +752,11 @@ def _act_add(con, ctx: _NewActCtx, i: int, chk: dict) -> dict:
         dflt = con.execute("SELECT def_target_drtn_hr_cnt FROM PREFER").fetchone() \
             if "def_target_drtn_hr_cnt" in _cols(con, "PREFER") else None
         if not dflt or dflt[0] is None:
-            raise ValueError(f"{code}: original_duration_days is required (no default duration in the admin "
-                             "preferences)")
+            raise ValueError(_t("{code}: original_duration_days is required (no default duration in the admin "
+                                "preferences)", code=code))
         days = float(dflt[0]) / hpd
-        notes.append(f"duration {days:g} d: default of the admin preferences ({float(dflt[0]):g} h)")
+        notes.append(_t("duration {days:g} d: default of the admin preferences ({hours:g} h)", days=days,
+                        hours=float(dflt[0])))
     hours = (days or 0) * hpd
     usable = cal is not None and not cal.error
     start = finish = None
@@ -741,8 +767,8 @@ def _act_add(con, ctx: _NewActCtx, i: int, chk: dict) -> dict:
         except ValueError:  # a calendar without working time
             usable, start, finish = False, ctx.dd, ctx.dd + timedelta(hours=hours)
         if not usable:
-            notes.append(f"calendar {cal_row['clndr_name']!r} is unreadable or has no working time: dates placed in "
-                         "elapsed time")
+            notes.append(_t("calendar {name!r} is unreadable or has no working time: dates placed in elapsed time",
+                            name=cal_row['clndr_name']))
     cstr_date = None
     if chk["cstr_date"]:
         edge = "finish" if chk["cstr"] in CSTR_FINISH else "start"
@@ -760,10 +786,17 @@ def _act_add(con, ctx: _NewActCtx, i: int, chk: dict) -> dict:
     _insert(con, "TASK", row)
     ctx.batch[code] = i
     wbs_code = node["wbs_code"]
-    head = (f"Add {code} '{chk['task_name']}' ({TYPE_NAMES[ttype]}, {days or 0:g} d, WBS {wbs_code}, calendar "
-            f"{cal_row['clndr_name']}" + (f", {CSTR_LABELS[chk['cstr']]} {cstr_date or ''}".rstrip() if chk["cstr"] else "")
-            + f") task_id {tid}")
-    plan = head + "".join(f"; Note: {n}" for n in notes)
+    what = dict(code=code, name=chk['task_name'], type=TYPE_NAMES[ttype], days=days or 0, wbs=wbs_code,
+                calendar=cal_row['clndr_name'], id=tid)
+    if not chk["cstr"]:
+        head = _t("Add {code} '{name}' ({type}, {days:g} d, WBS {wbs}, calendar {calendar}) task_id {id}", **what)
+    elif cstr_date:
+        head = _t("Add {code} '{name}' ({type}, {days:g} d, WBS {wbs}, calendar {calendar}, {constraint} {date}) "
+                  "task_id {id}", constraint=CSTR_LABELS[chk['cstr']], date=cstr_date, **what)
+    else:
+        head = _t("Add {code} '{name}' ({type}, {days:g} d, WBS {wbs}, calendar {calendar}, {constraint}) task_id {id}",
+                  constraint=CSTR_LABELS[chk['cstr']], **what)
+    plan = _join("; ", [head] + [_t("Note: {note}", note=n) for n in notes])
     log = [{"operation": "add_activity", "proj_id": ctx.pid, "table": "TASK", "keys": {"task_id": tid, "task_code": code},
             "before": None, "after": {k: row[k] for k in ACT_SNAPSHOT if k in row}, "summary": head}]
     return {"plan": plan, "log": log, "projects": [ctx.pid], "task_code": code, "task_id": tid, "wbs_code": wbs_code,
@@ -790,10 +823,12 @@ def _act_add_links(con, project: str, made: Mapping[int, dict]) -> tuple[dict[in
                 if key in seen:
                     j, lag = seen[key]
                     if lag == s["lag_days"]:
-                        rep.update(ok=True, plan=f"{pred[1]} -> {succ[1]} {s['type']}: given twice, added once (item {j})")
+                        rep.update(ok=True, plan=_t("{pred} -> {succ} {type}: given twice, added once (item {item})",
+                                                    pred=pred[1], succ=succ[1], type=s['type'], item=j))
                     else:
-                        rep.update(ok=False, error=f"{pred[1]} -> {succ[1]} {s['type']} is given twice with lags "
-                                                   f"{lag:g} and {s['lag_days']:g} d")
+                        rep.update(ok=False, error=_t("{pred} -> {succ} {type} is given twice with lags {lag:g} and "
+                                                      "{lag2:g} d", pred=pred[1], succ=succ[1], type=s['type'], lag=lag,
+                                                      lag2=s['lag_days']))
                         failed += 1
                     reps.setdefault(i, []).append(rep)
                     continue
@@ -908,7 +943,8 @@ def _act_add_batch(con, project: str, items: Sequence) -> dict:
             rep["links"] = links
             bad = [x for x in links if not x["ok"]]
             if bad:
-                rep.update(ok=False, error=f"{len(bad)} of {len(links)} relationship(s) refused (see links)")
+                rep.update(ok=False, error=_t("{bad} of {n} relationship(s) refused (see links)", bad=len(bad),
+                                              n=len(links)))
                 b["failed"] += 1
     by_id = {m["task_id"]: i for i, m in made.items()}
     loops = _new_loops(con, by_id)
@@ -922,14 +958,14 @@ def _act_add_batch(con, project: str, items: Sequence) -> dict:
             c, p = name.get(t, (str(t), None))
             return c if p == project else f"{p} {c}"
         for c in loops:
-            txt = "logic loop: " + " -> ".join(label(t) for t in c)
+            txt = _t("logic loop: {path}", path=" -> ".join(label(t) for t in c))
             for t in set(c) & set(by_id):
                 rep = b["items"][by_id[t]]
                 if rep["ok"]:
                     rep.update(ok=False, error=txt)
                     b["failed"] += 1
                 else:
-                    rep["error"] += f"; {txt}"
+                    rep["error"] = _join("; ", [rep["error"], txt])
     b["plan"] += lplan
     b["log"] += llog
     b["projects"] |= lprojects
@@ -963,24 +999,28 @@ def _asg_find(con, project: str, it: Mapping) -> tuple[sqlite3.Row, sqlite3.Row,
     tid = it.get("taskrsrc_id")
     if tid is not None:
         if isinstance(tid, bool) or not isinstance(tid, int):
-            raise ValueError(f"taskrsrc_id must be an integer, not {tid!r}")
+            raise ValueError(_t("taskrsrc_id must be an integer, not {tid!r}", tid=tid))
         a = con.execute(sql + " WHERE a.taskrsrc_id = ?" + al("TASKRSRC", "a"), (tid,)).fetchone()
         if a is None:
-            raise ValueError(f"Assignment taskrsrc_id {tid} not found")
+            raise ValueError(_t("Assignment taskrsrc_id {tid} not found", tid=tid))
         t = _task_by_id(con, a["task_id"])
         if t["proj_id"] != _project_id(con, project) or it.get("task_code") not in (None, t["task_code"]):
-            raise ValueError(f"taskrsrc_id {tid} is an assignment of {t['proj_short_name']} {t['task_code']}, "
-                             f"not of {project} {it.get('task_code') or ''}".rstrip())
+            raise ValueError(_t("taskrsrc_id {tid} is an assignment of {owner} {owner_code}, not of {project} {code}",
+                                tid=tid, owner=t['proj_short_name'], owner_code=t['task_code'], project=project,
+                                code=it['task_code']) if it.get('task_code') else
+                             _t("taskrsrc_id {tid} is an assignment of {owner} {owner_code}, not of {project}",
+                                tid=tid, owner=t['proj_short_name'], owner_code=t['task_code'], project=project))
         return a, t, label(a)
     if not isinstance(it.get("task_code"), str) or not it["task_code"]:
-        raise ValueError("task_code (with resource or role) or taskrsrc_id is required")
+        raise ValueError(_t("task_code (with resource or role) or taskrsrc_id is required"))
     t = _task(con, project, it["task_code"])
     rows = con.execute(sql + " WHERE a.task_id = ?" + al("TASKRSRC", "a") + " ORDER BY a.taskrsrc_id",
                        (t["task_id"],)).fetchall()
     if not rows:
-        raise ValueError(f"{t['task_code']} has no resource assignment")
+        raise ValueError(_t("{task_code} has no resource assignment", task_code=t['task_code']))
     if not it.get("resource") and not it.get("role"):
-        raise ValueError(f"resource or role is required; assignments of {t['task_code']}: {[label(a) for a in rows]}")
+        raise ValueError(_t("resource or role is required; assignments of {task_code}: {labels}",
+                            task_code=t['task_code'], labels=[label(a) for a in rows]))
     hits = rows
     for key, col in (("resource", "rsrc_short_name"), ("role", "role_short_name")):
         if it.get(key):
@@ -988,15 +1028,18 @@ def _asg_find(con, project: str, it: Mapping) -> tuple[sqlite3.Row, sqlite3.Row,
             exact = [a for a in hits if a[col] == want]
             hits = exact or [a for a in hits if (a[col] or "").casefold() == want.casefold()]
     if len(hits) != 1:
-        raise ValueError(f"{'No' if not hits else 'Several'} assignment(s) of {t['task_code']} match "
-                         f"{ {k: it[k] for k in ('resource', 'role') if it.get(k)} }: "
-                         f"{[label(a) for a in (hits or rows)]}" + (" (pass taskrsrc_id)" if hits else ""))
+        given = {k: it[k] for k in ('resource', 'role') if it.get(k)}
+        if hits:
+            raise ValueError(_t("Several assignment(s) of {task_code} match {given}: {labels} (pass taskrsrc_id)",
+                                task_code=t['task_code'], given=given, labels=[label(a) for a in hits]))
+        raise ValueError(_t("No assignment(s) of {task_code} match {given}: {labels}",
+                            task_code=t['task_code'], given=given, labels=[label(a) for a in rows]))
     return hits[0], t, label(hits[0])
 
 
 SUM_TABLES = ("SUMTASK", "SUMTASKSPREAD", "SUMTRSRC")  # P6 summary tables (Tools > Summarize)
-SUMMARIZE_ADVICE = ("In P6 choose Tools > Summarize > Open Projects (or All Projects: only that one refreshes "
-                    "the global resource summaries) to refresh them.")
+SUMMARIZE_ADVICE = _t("In P6 choose Tools > Summarize > Open Projects (or All Projects: only that one refreshes the "
+                      "global resource summaries) to refresh them.")
 
 
 def _summaries_stale(con, keys: Iterable[tuple]) -> dict:
@@ -1026,8 +1069,8 @@ def _sum_plan(s: dict) -> list[str]:
     """Plan line of _summaries_stale (none when no summary row is affected)."""
     if not s["stale"]:
         return []
-    rows = ", ".join(f"{t} {n} row(s)" for t, n in s["tables"].items())
-    return [f"Summaries not refreshed ({rows}): {s['advice']}"]
+    rows = _join(", ", [_t("{table} {n} row(s)", table=t, n=n) for t, n in s["tables"].items()])
+    return [_t("Summaries not refreshed ({rows}): {advice}", rows=rows, advice=s['advice'])]
 
 
 def _asg_update(con, project: str, it: Mapping) -> dict:
@@ -1036,24 +1079,26 @@ def _asg_update(con, project: str, it: Mapping) -> dict:
     activity when the project links them, the activity's labor / nonlabor totals."""
     bad = sorted(set(it) - ASG_KEYS)
     if bad:
-        raise ValueError(f"unknown key(s) {bad}; allowed: {sorted(ASG_KEYS)}")
+        raise ValueError(_t("unknown key(s) {bad}; allowed: {allowed}", bad=bad, allowed=sorted(ASG_KEYS)))
     vals: dict[str, float] = {}
     for k in ("budgeted_units", "actual_units", "remaining_units", "at_completion_units"):
         if it.get(k) is not None:
             f = None if isinstance(it[k], bool) else _num(it[k])
             if f is None or f < 0:
-                raise ValueError(f"{k} must be a number, 0 or more (not {it[k]!r})")
+                raise ValueError(_t("{k} must be a number, 0 or more (not {value!r})", k=k, value=it[k]))
             vals[k] = f
     if "remaining_units" in vals and "at_completion_units" in vals:
-        raise ValueError("Give remaining_units or at_completion_units (= actual + remaining), not both.")
+        raise ValueError(_t("Give remaining_units or at_completion_units (= actual + remaining), not both."))
     if not vals:
-        raise _Refused("Nothing to change: give budgeted_units, actual_units, remaining_units or at_completion_units.")
+        raise _Refused(_t("Nothing to change: give budgeted_units, actual_units, remaining_units or "
+                          "at_completion_units."))
     a, t, label = _asg_find(con, project, it)
     code, st = t["task_code"], t["status_code"]
     dt = t["duration_type"] if "duration_type" in _cols(con, "TASK") else None
     if dt is not None and dt not in FIXED_DRTN_TYPES:
-        raise ValueError(f"{code} has duration type {dt}: P6 would recompute its duration from the units, and this "
-                         "tool never changes durations. Only Fixed Duration types are handled; edit it in P6.")
+        raise ValueError(_t("{code} has duration type {dt}: P6 would recompute its duration from the units, and this "
+                            "tool never changes durations. Only Fixed Duration types are handled; edit it in P6.",
+                            code=code, dt=dt))
     acols = _cols(con, "TASKRSRC")
     old = {c: float(a[c] or 0) for _, c in ASG_QTY}
     ot = float(a["act_ot_qty"] or 0) if "act_ot_qty" in acols else 0.0
@@ -1061,19 +1106,23 @@ def _asg_update(con, project: str, it: Mapping) -> dict:
     notes: list[str] = []
     if "actual_units" in vals:
         if st == "TK_NotStart" and vals["actual_units"] > 0:
-            raise ValueError(f"{code} is not started: set its actual start first (p6_update_activity), then actual units.")
+            raise ValueError(_t("{code} is not started: set its actual start first (p6_update_activity), then actual "
+                                "units.", code=code))
         if vals["actual_units"] < ot:
-            raise ValueError(f"actual_units {vals['actual_units']:g} is less than the overtime actual {ot:g}")
+            raise ValueError(_t("actual_units {actual:g} is less than the overtime actual {ot:g}",
+                                actual=vals['actual_units'], ot=ot))
         new["act_reg_qty"] = vals["actual_units"] - ot
     actual = new["act_reg_qty"] + ot
     if "at_completion_units" in vals:
         if vals["at_completion_units"] < actual:
-            raise ValueError(f"at_completion_units {vals['at_completion_units']:g} is less than the actual units {actual:g}")
+            raise ValueError(_t("at_completion_units {at_completion:g} is less than the actual units {actual:g}",
+                                at_completion=vals['at_completion_units'], actual=actual))
         new["remain_qty"] = vals["at_completion_units"] - actual
     if "remaining_units" in vals:
         new["remain_qty"] = vals["remaining_units"]
     if st == "TK_Complete" and new["remain_qty"] > 0:
-        raise ValueError(f"{code} is completed: its remaining units stay 0 (at completion = actual {actual:g}).")
+        raise ValueError(_t("{code} is completed: its remaining units stay 0 (at completion = actual {actual:g}).",
+                            code=code, actual=actual))
     if "budgeted_units" in vals:
         new["target_qty"] = vals["budgeted_units"]
     link = None
@@ -1082,24 +1131,25 @@ def _asg_update(con, project: str, it: Mapping) -> dict:
     if link == "Y":  # P6 option "Link Budget and At Completion for not started activities"
         given_rem = "remaining_units" in vals or "at_completion_units" in vals
         if "budgeted_units" in vals and given_rem and abs(new["remain_qty"] - new["target_qty"]) > 1e-9:
-            raise ValueError(f"{code} is not started and its project links budget and at completion units: give one "
-                             f"value (budget {new['target_qty']:g} and at completion {new['remain_qty']:g} differ).")
+            raise ValueError(_t("{code} is not started and its project links budget and at completion units: give one "
+                                "value (budget {budget:g} and at completion {at_completion:g} differ).",
+                                code=code, budget=new['target_qty'], at_completion=new['remain_qty']))
         if "budgeted_units" in vals and not given_rem:
             new["remain_qty"] = new["target_qty"]
-            notes.append("remaining follows the budget (not started, budget and at completion linked)")
+            notes.append(_t("remaining follows the budget (not started, budget and at completion linked)"))
         elif given_rem and "budgeted_units" not in vals:
             new["target_qty"] = new["remain_qty"]
-            notes.append("budget follows at completion (not started, budget and at completion linked)")
+            notes.append(_t("budget follows at completion (not started, budget and at completion linked)"))
     changed = [c for _, c in ASG_QTY if abs(new[c] - old[c]) > 1e-9]
     if not changed:
-        raise _Refused(f"Nothing to change: {code} {label} already has these units.")
+        raise _Refused(_t("Nothing to change: {code} {label} already has these units.", code=code, label=label))
     sets: dict[str, Any] = {c: new[c] for c in changed}
     price = a["cost_per_qty"] if "cost_per_qty" in acols else None
     linked = "cost_qty_link_flag" in acols and a["cost_qty_link_flag"] == "Y" and price is not None
     if linked:
         sets.update({ASG_COST[c]: new[c] * float(price) for c in changed if ASG_COST[c] in acols})
     elif any(ASG_COST[c] in acols for c in changed):
-        notes.append("costs unchanged (cost not linked to units on this assignment)")
+        notes.append(_t("costs unchanged (cost not linked to units on this assignment)"))
     for c in changed:
         rate, drtn = ASG_RATE.get(c, (None, None))
         if rate in acols:  # fixed duration: the units/time absorb the change (resource calendar hours kept)
@@ -1113,7 +1163,8 @@ def _asg_update(con, project: str, it: Mapping) -> dict:
         if kind and col in _cols(con, "TASK"):
             tsets[col] = float(t[col] or 0) + new[c] - old[c]
     if not kind:
-        notes.append(f"resource type {a['rsrc_type']}: not rolled up to the activity's labor or nonlabor units")
+        notes.append(_t("resource type {type}: not rolled up to the activity's labor or nonlabor units",
+                        type=a['rsrc_type']))
     now = _now_str(con)
     full = {**sets, **_stamp_cols(con, "TASKRSRC", now, create=False)}
     con.execute(f"UPDATE TASKRSRC SET {', '.join(k + '=?' for k in full)} WHERE taskrsrc_id=?",
@@ -1121,16 +1172,23 @@ def _asg_update(con, project: str, it: Mapping) -> dict:
     if tsets:
         full = {**tsets, **_stamp_cols(con, "TASK", now, create=False)}
         con.execute(f"UPDATE TASK SET {', '.join(k + '=?' for k in full)} WHERE task_id=?", [*full.values(), t["task_id"]])
-    names = {"target_qty": "budget", "act_reg_qty": "actual", "remain_qty": "remaining"}
     fmt = lambda v: f"{v:.6g}"  # noqa: E731
-    parts = [f"{names[c]} {fmt(old[c] + (ot if c == 'act_reg_qty' else 0))} -> {fmt(new[c] + (ot if c == 'act_reg_qty' else 0))}"
-             for c in changed]
-    parts.append(f"at completion {fmt(old['act_reg_qty'] + ot + old['remain_qty'])} -> {fmt(actual + new['remain_qty'])}")
+
+    def qty(c: str) -> str:
+        o, n = fmt(old[c] + (ot if c == 'act_reg_qty' else 0)), fmt(new[c] + (ot if c == 'act_reg_qty' else 0))
+        if c == "target_qty":
+            return _t("budget {old} -> {new}", old=o, new=n)
+        if c == "act_reg_qty":
+            return _t("actual {old} -> {new}", old=o, new=n)
+        return _t("remaining {old} -> {new}", old=o, new=n)
+    parts = [qty(c) for c in changed]
+    parts.append(_t("at completion {old} -> {new}", old=fmt(old['act_reg_qty'] + ot + old['remain_qty']),
+                    new=fmt(actual + new['remain_qty'])))
     costs = [f"{ASG_COST[c].replace('_', ' ')} {fmt(float(a[ASG_COST[c]] or 0))} -> {fmt(sets[ASG_COST[c]])}"
              for c in changed if ASG_COST[c] in sets]
     if costs:
-        parts.append(f"{', '.join(costs)} ({fmt(float(price))}/unit)")
-    plan = f"{code} {label}: " + ", ".join(parts) + "".join(f"; {n}" for n in notes)
+        parts.append(_t("{costs} ({price}/unit)", costs=", ".join(costs), price=fmt(float(price))))
+    plan = _join("; ", [_t("{code} {label}: {changes}", code=code, label=label, changes=_join(", ", parts))] + notes)
     view = lambda q: {"budgeted_units": q["target_qty"], "actual_units": q["act_reg_qty"] + ot,  # noqa: E731
                       "remaining_units": q["remain_qty"], "at_completion_units": q["act_reg_qty"] + ot + q["remain_qty"]}
     log = [{"operation": "update_assignment", "proj_id": t["proj_id"], "table": "TASKRSRC",
@@ -1152,44 +1210,54 @@ def _udf_store(con, y: sqlite3.Row, value: Any) -> tuple[str, Any, Any, list[str
     lt, label = y["logical_data_type"], y["udf_type_label"]
     kind = UDF_KINDS.get(lt)
     if kind is None:
-        raise ValueError(f"{label!r}: UDF data type {lt} is not supported")
+        raise ValueError(_t("{label!r}: UDF data type {lt} is not supported", label=label, lt=lt))
     if kind == "text":
         if not isinstance(value, str):
-            raise ValueError(f"{label!r} is a text UDF: give a string, not {value!r}")
+            raise ValueError(_t("{label!r} is a text UDF: give a string, not {value!r}", label=label, value=value))
         if len(value) > UDF_TEXT_MAX:
-            raise ValueError(f"{label!r}: text longer than {UDF_TEXT_MAX} characters ({len(value)})")
+            raise ValueError(_t("{label!r}: text longer than {max} characters ({n})",
+                                label=label, max=UDF_TEXT_MAX, n=len(value)))
         return "udf_text", value, value, []
     if kind == "indicator":
         v = value.strip().upper() if isinstance(value, str) else None
         if not v or not UDF_INDICATOR.fullmatch(v):
-            raise ValueError(f"{label!r} is an indicator UDF: give UDF_G0 to UDF_G4 as P6 stores the icons, not {value!r}")
+            raise ValueError(_t("{label!r} is an indicator UDF: give UDF_G0 to UDF_G4 as P6 stores the icons, not "
+                                "{value!r}", label=label, value=value))
         return "udf_text", v, v, []
     if kind in ("start_date", "finish_date"):
         if not isinstance(value, str):
-            raise ValueError(f"{label!r} is a date UDF: give 'YYYY-MM-DD[ HH:MM]', not {value!r}")
+            raise ValueError(_t("{label!r} is a date UDF: give 'YYYY-MM-DD[ HH:MM]', not {value!r}", label=label,
+                                value=value))
         s = _fmt_dt(_parse_dt(value, label)[0])
         return "udf_date", s, s, []
     if kind == "code":
         if "udf_code_id" not in _cols(con, "UDFVALUE") or "udf_type_id" not in _cols(con, "UDFCODE"):
-            raise ValueError(f"{label!r} is a code UDF and this database has no UDFCODE table")
+            raise ValueError(_t("{label!r} is a code UDF and this database has no UDFCODE table", label=label))
         rows = con.execute("SELECT udf_code_id, short_name, udf_code_name FROM UDFCODE WHERE udf_type_id = ?"
                            + _alive(con, "UDFCODE") + " ORDER BY udf_code_id", (y["udf_type_id"],)).fetchall()
         v = str(value).strip()
         hit = ([r for r in rows if r["short_name"] == v] or [r for r in rows if (r["short_name"] or "").casefold() == v.casefold()]
                or [r for r in rows if (r["udf_code_name"] or "").casefold() == v.casefold()])
         if len(hit) != 1:
-            raise ValueError(f"{label!r}: {'several codes match' if hit else 'no code'} {value!r}; codes: "
-                             f"{[r['short_name'] for r in (hit or rows)][:30]}")
+            codes = [r['short_name'] for r in (hit or rows)][:30]
+            raise ValueError(_t("{label!r}: several codes match {value!r}; codes: {codes}", label=label, value=value,
+                                codes=codes) if hit else
+                             _t("{label!r}: no code {value!r}; codes: {codes}", label=label, value=value, codes=codes))
         return "udf_code_id", hit[0]["udf_code_id"], hit[0]["short_name"], []
     f = None if isinstance(value, bool) else _num(value)
     if f is None:
-        raise ValueError(f"{label!r} is a{'n' if kind == 'integer' else ''} {kind} UDF: give a number, not {value!r}")
+        raise ValueError(_t("{label!r} is an integer UDF: give a number, not {value!r}", label=label, value=value)
+                         if kind == "integer" else
+                         _t("{label!r} is a {kind} UDF: give a number, not {value!r}", label=label, kind=kind,
+                            value=value))
     if kind == "integer":
         if not f.is_integer():
-            raise ValueError(f"{label!r} is an integer UDF: {value!r} is not a whole number")
+            raise ValueError(_t("{label!r} is an integer UDF: {value!r} is not a whole number", label=label,
+                                value=value))
         return "udf_number", f, int(f), []
     if kind == "number" and round(f, 2) != f:
-        return "udf_number", round(f, 2), round(f, 2), [f"rounded to 2 decimals as P6 stores it ({f!r})"]
+        return "udf_number", round(f, 2), round(f, 2), [_t("rounded to 2 decimals as P6 stores it ({value!r})",
+                                                            value=f)]
     return "udf_number", f, f, []
 
 
@@ -1211,22 +1279,23 @@ def _udf_set(con, project: str, it: Mapping) -> dict:
     soft-deleted row is revived) or delete (hard, as P6; its trigger logs REFRDEL)."""
     bad = sorted(set(it) - UDF_KEYS)
     if bad:
-        raise ValueError(f"unknown key(s) {bad}; allowed: {sorted(UDF_KEYS)}")
+        raise ValueError(_t("unknown key(s) {bad}; allowed: {allowed}", bad=bad, allowed=sorted(UDF_KEYS)))
     if not isinstance(it.get("task_code"), str) or not it["task_code"]:
-        raise ValueError("task_code is required")
+        raise ValueError(_t("task_code is required"))
     clear = it.get("clear", False)
     if not isinstance(clear, bool):
-        raise ValueError("clear must be true or false")
+        raise ValueError(_t("clear must be true or false"))
     value = it.get("value")
     if clear and value is not None:
-        raise ValueError("Give value or clear=True, not both.")
+        raise ValueError(_t("Give value or clear=True, not both."))
     if not clear and (value is None or value == ""):
-        raise ValueError("value is required (clear=True removes the value)")
+        raise ValueError(_t("value is required (clear=True removes the value)"))
     t = _task(con, project, it["task_code"])
     y = _udf_type(con, "TASK", it.get("udf"))
     label, code, tid, uid = y["udf_type_label"], t["task_code"], t["task_id"], y["udf_type_id"]
     if "formula" in _cols(con, "UDFTYPE") and y["formula"]:
-        raise ValueError(f"{label!r} is a formula UDF ({y['formula']}): P6 computes its value")
+        raise ValueError(_t("{label!r} is a formula UDF ({formula}): P6 computes its value", label=label,
+                            formula=y['formula']))
     vcols = _cols(con, "UDFVALUE")
     old = con.execute("SELECT * FROM UDFVALUE WHERE udf_type_id = ? AND fk_id = ?", (uid, tid)).fetchone()
     dead = old is not None and "delete_session_id" in vcols and old["delete_session_id"] is not None
@@ -1236,10 +1305,10 @@ def _udf_set(con, project: str, it: Mapping) -> dict:
     now = _now_str(con)
     if clear:
         if live is None:
-            raise _Refused(f"Nothing to clear: {code} has no {label!r} value.")
+            raise _Refused(_t("Nothing to clear: {code} has no {label!r} value.", code=code, label=label))
         col = "udf_code_id" if y["logical_data_type"] == "FT_CODE" else UDF_VALUE.get(y["logical_data_type"], "udf_text")
         con.execute("DELETE FROM UDFVALUE WHERE udf_type_id = ? AND fk_id = ?", (uid, tid))
-        plan = f"{code} {label!r}: {before!r} -> cleared"
+        plan = _t("{code} {label!r}: {before!r} -> cleared", code=code, label=label, before=before)
         log = [{"operation": "clear_udf", "proj_id": t["proj_id"], "table": "UDFVALUE", "keys": keys,
                 "before": {col: live[col]}, "after": None, "summary": plan}]
         after = None
@@ -1250,7 +1319,8 @@ def _udf_set(con, project: str, it: Mapping) -> dict:
             same = (cur is not None and abs(float(cur) - float(stored)) <= 1e-9 if col == "udf_number"
                     else _db_dt(cur) == _db_dt(stored) if col == "udf_date" else cur == stored)
             if same:
-                raise _Refused(f"Nothing to change: {code} {label!r} is already {after!r}.")
+                raise _Refused(_t("Nothing to change: {code} {label!r} is already {after!r}.", code=code, label=label,
+                                  after=after))
         if old is not None:
             sets = {col: stored, "proj_id": t["proj_id"], **_stamp_cols(con, "UDFVALUE", now, create=False)}
             if dead:
@@ -1261,7 +1331,8 @@ def _udf_set(con, project: str, it: Mapping) -> dict:
             row = {"udf_type_id": uid, "fk_id": tid, "proj_id": t["proj_id"], col: stored,
                    **_stamp_cols(con, "UDFVALUE", now, create=True)}
             con.execute(f"INSERT INTO UDFVALUE ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
-        plan = f"{code} {label!r}: {before!r} -> {after!r}" + "".join(f"; {n}" for n in notes)
+        plan = _join("; ", [_t("{code} {label!r}: {before!r} -> {after!r}", code=code, label=label, before=before,
+                               after=after)] + notes)
         log = [{"operation": "update_udf", "proj_id": t["proj_id"], "table": "UDFVALUE", "keys": keys,
                 "before": None if live is None else {col: live[col]}, "after": {col: stored}, "summary": plan}]
     return {"plan": plan, "projects": [], "log": log,
@@ -1271,7 +1342,7 @@ def _udf_set(con, project: str, it: Mapping) -> dict:
 
 def _udf_next(res: dict) -> dict:
     if res.get("applied"):
-        res["next"] = "Open P6 to see the values (UDFs do not move dates: no F9 needed)."
+        res["next"] = _t("Open P6 to see the values (UDFs do not move dates: no F9 needed).")
     return res
 
 
@@ -1279,7 +1350,7 @@ def _udf_next(res: dict) -> dict:
 
 CODE_KEYS = set(CodeEdit.__required_keys__) | set(CodeEdit.__optional_keys__)
 MOVE_KEYS = set(WbsMove.__required_keys__)
-CODES_NOTE = "Activity codes do not move dates: no project is marked stale and no F9 is needed."
+CODES_NOTE = _t("Activity codes do not move dates: no project is marked stale and no F9 is needed.")
 
 
 def _code_value(tree: Mapping[int, dict], type_name: str, value: str) -> dict:
@@ -1291,11 +1362,12 @@ def _code_value(tree: Mapping[int, dict], type_name: str, value: str) -> dict:
         for same in (lambda x: x == v, lambda x: x.casefold() == v.casefold()):
             hit = [c for c in order if same(c[key] or "")]
             if len(hit) > 1:
-                raise ValueError(f"Several {type_name} codes match {value!r}: {[c['path'] for c in hit][:30]}; "
-                                 "give the code path.")
+                raise ValueError(_t("Several {type_name} codes match {value!r}: {codes}; give the code path.",
+                                    type_name=type_name, value=value, codes=[c['path'] for c in hit][:30]))
             if hit:
                 return hit[0]
-    raise ValueError(f"No {type_name} code {value!r}; codes: {[c['path'] for c in order][:30]}")
+    raise ValueError(_t("No {type_name} code {value!r}; codes: {codes}",
+                        type_name=type_name, value=value, codes=[c['path'] for c in order][:30]))
 
 
 def _code_set(con, project: str, it: Mapping) -> dict:
@@ -1304,21 +1376,21 @@ def _code_set(con, project: str, it: Mapping) -> dict:
     sees (_code_type: project, EPS, global); a soft-deleted row is revived; clear is a hard delete, as P6
     (its trigger logs REFRDEL). Codes move no date: projects stays empty."""
     if not isinstance(it, Mapping):
-        raise ValueError("an item must be an object with task_code and code_type")
+        raise ValueError(_t("an item must be an object with task_code and code_type"))
     bad = sorted(set(it) - CODE_KEYS)
     if bad:
-        raise ValueError(f"unknown key(s) {bad}; allowed: {sorted(CODE_KEYS)}")
+        raise ValueError(_t("unknown key(s) {bad}; allowed: {allowed}", bad=bad, allowed=sorted(CODE_KEYS)))
     for k in ("task_code", "code_type"):
         if not isinstance(it.get(k), str) or not it[k].strip():
-            raise ValueError(f"{k} is required")
+            raise ValueError(_t("{k} is required", k=k))
     clear = it.get("clear", False)
     if not isinstance(clear, bool):
-        raise ValueError("clear must be true or false")
+        raise ValueError(_t("clear must be true or false"))
     value = it.get("code_value")
     if clear and value is not None:
-        raise ValueError("Give code_value or clear=True, not both.")
+        raise ValueError(_t("Give code_value or clear=True, not both."))
     if not clear and (not isinstance(value, str) or not value.strip()):
-        raise ValueError("code_value is required (clear=True removes the value)")
+        raise ValueError(_t("code_value is required (clear=True removes the value)"))
     t = _task(con, project, it["task_code"])
     info = _code_type(con, t["proj_id"], it["code_type"])
     type_id, tname = info["type_id"], info["type"]
@@ -1334,9 +1406,9 @@ def _code_set(con, project: str, it: Mapping) -> dict:
     keys = {"task_id": t["task_id"], "actv_code_type_id": type_id, "task_code": code, "code_type": tname}
     if clear:
         if not live:
-            raise _Refused(f"Nothing to clear: {code} has no {tname!r} code.")
+            raise _Refused(_t("Nothing to clear: {code} has no {code_type!r} code.", code=code, code_type=tname))
         con.execute("DELETE FROM TASKACTV WHERE task_id = ? AND actv_code_type_id = ?", (t["task_id"], type_id))
-        plan = f"{code} {tname!r}: {before!r} -> cleared"
+        plan = _t("{code} {code_type!r}: {before!r} -> cleared", code=code, code_type=tname, before=before)
         log = [{"operation": "clear_activity_code", "proj_id": t["proj_id"], "table": "TASKACTV", "keys": keys,
                 "before": {"actv_code_id": old_id}, "after": None, "summary": plan}]
         after = None
@@ -1344,7 +1416,8 @@ def _code_set(con, project: str, it: Mapping) -> dict:
         c = _code_value(tree, tname, value)
         after = c["path"]
         if old_id == c["id"] and len(rows) == 1:
-            raise _Refused(f"Nothing to change: {code} {tname!r} is already {after!r}.")
+            raise _Refused(_t("Nothing to change: {code} {code_type!r} is already {after!r}.", code=code,
+                              code_type=tname, after=after))
         now = _now_str(con)
         if rows:  # replace the value (one row per type and activity), reviving a soft-deleted row
             sets = {"actv_code_id": c["id"], "proj_id": t["proj_id"], **_stamp_cols(con, "TASKACTV", now, create=False),
@@ -1357,7 +1430,8 @@ def _code_set(con, project: str, it: Mapping) -> dict:
                    "proj_id": t["proj_id"], **_stamp_cols(con, "TASKACTV", now, create=True)}
             row = {k: v for k, v in row.items() if k in cols}
             con.execute(f"INSERT INTO TASKACTV ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
-        plan = f"{code} {tname!r}: {before!r} -> {after!r}"
+        plan = _t("{code} {code_type!r}: {before!r} -> {after!r}", code=code, code_type=tname, before=before,
+                  after=after)
         log = [{"operation": "update_activity_code", "proj_id": t["proj_id"], "table": "TASKACTV", "keys": keys,
                 "before": None if old_id is None else {"actv_code_id": old_id}, "after": {"actv_code_id": c["id"]},
                 "summary": plan}]
@@ -1369,7 +1443,7 @@ def _codes_next(res: dict) -> dict:
     """Result note of p6_update_activity_codes: codes move no date."""
     res["schedule_effect"] = CODES_NOTE
     if res.get("applied"):
-        res["next"] = "Open P6 to see the codes. " + CODES_NOTE
+        res["next"] = _t("Open P6 to see the codes. {note}", note=CODES_NOTE)
     return res
 
 
@@ -1379,7 +1453,7 @@ def _wbs_find(con, tree: list[dict], pid: int, project: str, wbs: Any) -> dict:
     exact text first, then case ignored. The project node itself is a valid target (P6 keeps activities there).
     A WBS code that starts with another project's ID raises with that project."""
     if not isinstance(wbs, str) or not wbs.strip():
-        raise ValueError("wbs is required (a WBS code as p6_list_wbs shows it, or a WBS name)")
+        raise ValueError(_t("wbs is required (a WBS code as p6_list_wbs shows it, or a WBS name)"))
     v = wbs.strip()
     sep = _name_sep(con, pid)
     head = tree[0]["wbs_code"] + sep if tree else None
@@ -1388,17 +1462,18 @@ def _wbs_find(con, tree: list[dict], pid: int, project: str, wbs: Any) -> dict:
         for same in (lambda x: x == v, lambda x: x.casefold() == v.casefold()):
             hit = [n for n in tree if get(n) is not None and same(get(n))]
             if len(hit) > 1:
-                raise ValueError(f"Several WBS nodes of {project} match {wbs!r}: {[n['wbs_code'] for n in hit][:30]}; "
-                                 "give the WBS code.")
+                raise ValueError(_t("Several WBS nodes of {project} match {wbs!r}: {codes}; give the WBS code.",
+                                    project=project, wbs=wbs, codes=[n['wbs_code'] for n in hit][:30]))
             if hit:
                 return hit[0]
     other = con.execute("SELECT proj_short_name FROM PROJECT WHERE proj_short_name = ? AND proj_id <> ? "
                         "AND project_flag = 'Y'" + _alive(con, "PROJECT"), (v.split(sep, 1)[0], pid)).fetchone()
     if other:
-        raise ValueError(f"WBS {wbs!r} belongs to project {other[0]}: activities move only within their project here "
-                         "(in P6, with both projects open, giving an activity a WBS of the other project moves it there "
-                         "with its links, assignments and codes).")
-    raise ValueError(f"WBS {wbs!r} not found in {project}; WBS codes: {[n['wbs_code'] for n in tree][:30]}")
+        raise ValueError(_t("WBS {wbs!r} belongs to project {other}: activities move only within their project here "
+                            "(in P6, with both projects open, giving an activity a WBS of the other project moves it "
+                            "there with its links, assignments and codes).", wbs=wbs, other=other[0]))
+    raise ValueError(_t("WBS {wbs!r} not found in {project}; WBS codes: {codes}",
+                        wbs=wbs, project=project, codes=[n['wbs_code'] for n in tree][:30]))
 
 
 def _wbs_summaries(con, pid: int, tree: list[dict], nodes: Iterable[int]) -> list[str]:
@@ -1422,12 +1497,12 @@ def _act_move(con, project: str, it: Mapping, trees: dict) -> dict:
     WBS summary activities: the project is stale when one spans the old or the new node (or the activity is one),
     else there is nothing to reschedule. trees: per-call cache of _wbs_tree by proj_id."""
     if not isinstance(it, Mapping):
-        raise ValueError("an item must be an object with task_code and wbs")
+        raise ValueError(_t("an item must be an object with task_code and wbs"))
     bad = sorted(set(it) - MOVE_KEYS)
     if bad:
-        raise ValueError(f"unknown key(s) {bad}; allowed: {sorted(MOVE_KEYS)}")
+        raise ValueError(_t("unknown key(s) {bad}; allowed: {allowed}", bad=bad, allowed=sorted(MOVE_KEYS)))
     if not isinstance(it.get("task_code"), str) or not it["task_code"]:
-        raise ValueError("task_code is required")
+        raise ValueError(_t("task_code is required"))
     t = _task(con, project, it["task_code"])
     pid, code = t["proj_id"], t["task_code"]
     if pid not in trees:
@@ -1437,15 +1512,21 @@ def _act_move(con, project: str, it: Mapping, trees: dict) -> dict:
     old = next((n for n in tree if n["wbs_id"] == t["wbs_id"]), None)
     old_code = old["wbs_code"] if old else f"wbs_id {t['wbs_id']}"
     if node["wbs_id"] == t["wbs_id"]:
-        raise _Refused(f"Nothing to change: {code} is already in {node['wbs_code']}.")
+        raise _Refused(_t("Nothing to change: {code} is already in {wbs}.", code=code, wbs=node['wbs_code']))
     sets = {"wbs_id": node["wbs_id"], **_stamp_cols(con, "TASK", _now_str(con), create=False)}
     con.execute(f"UPDATE TASK SET {', '.join(k + ' = ?' for k in sets)} WHERE task_id = ?", [*sets.values(), t["task_id"]])
     spans = _wbs_summaries(con, pid, tree, [w for w in (t["wbs_id"], node["wbs_id"]) if w is not None])
     if t["task_type"] == "TT_WBS" and code not in spans:
         spans.append(code)
-    plan = f"{code} '{t['task_name']}': WBS {old_code} -> {node['wbs_code']}"
-    if spans:
-        plan += f" (WBS summary activities to reschedule: {', '.join(spans[:10])}{' ...' if len(spans) > 10 else ''})"
+    what = dict(code=code, name=t['task_name'], old=old_code, new=node['wbs_code'])
+    if not spans:
+        plan = _t("{code} '{name}': WBS {old} -> {new}", **what)
+    elif len(spans) > 10:
+        plan = _t("{code} '{name}': WBS {old} -> {new} (WBS summary activities to reschedule: {summaries} ...)",
+                  summaries=", ".join(spans[:10]), **what)
+    else:
+        plan = _t("{code} '{name}': WBS {old} -> {new} (WBS summary activities to reschedule: {summaries})",
+                  summaries=", ".join(spans), **what)
     log = [{"operation": "move_activity", "proj_id": pid, "table": "TASK",
             "keys": {"task_id": t["task_id"], "task_code": code},
             "before": {"wbs_id": t["wbs_id"]}, "after": {"wbs_id": node["wbs_id"]}, "summary": plan}]
@@ -1457,12 +1538,13 @@ def _act_move(con, project: str, it: Mapping, trees: dict) -> dict:
 def _moves_next(res: dict, stale: bool) -> dict:
     """Result note of p6_move_activities: what the user must do in P6."""
     res["schedule_effect"] = (
-        "A WBS summary activity spans the old or the new WBS: press F9 in P6 to reschedule it." if stale else
-        "Dates do not depend on the WBS here (no WBS summary activity spans the old or the new WBS): no F9 needed.")
+        _t("A WBS summary activity spans the old or the new WBS: press F9 in P6 to reschedule it.") if stale else
+        _t("Dates do not depend on the WBS here (no WBS summary activity spans the old or the new WBS): no F9 "
+           "needed."))
     if res.get("applied"):
-        res["next"] = ("Open P6 to see the activities under their new WBS. " + res["schedule_effect"]
-                       + " WBS rollups (p6_list_wbs, P6's WBS bands) follow at once; P6's summary tables only after "
-                       "Tools > Summarize.")
+        res["next"] = _t("Open P6 to see the activities under their new WBS. {effect} WBS rollups (p6_list_wbs, P6's "
+                         "WBS bands) follow at once; P6's summary tables only after Tools > Summarize.",
+                         effect=res["schedule_effect"])
     return res
 
 
@@ -1558,20 +1640,22 @@ def _batch_commit(con, b: dict, confirm: bool, head: str, backup: Optional[str],
     item failed, nothing (a dry run reports would_refuse; confirm returns applied False). The report
     per item is under items."""
     n, bad = len(b["items"]), b["failed"]
-    plan = [head] + [f"  {p}" for p in b["plan"]] + list(tail)
-    reasons = [f"{bad} of {n} item(s) cannot be applied (see items): nothing is written"] if bad else []
+    plan = [head] + [_join("", ["  ", p]) for p in b["plan"]] + list(tail)
+    reasons = [_t("{bad} of {n} item(s) cannot be applied (see items): nothing is written",
+                  bad=bad, n=n)] if bad else []
     if not n:
-        reasons = ["no items"]
+        reasons = [_t("no items")]
     if reasons and confirm:
-        return {"applied": False, "error": " ".join(reasons) + " (all or nothing).", "items": b["items"]}
+        return {"applied": False, "error": _t("{reasons} (all or nothing).", reasons=_join(" ", reasons)),
+                "items": b["items"]}
     if backup:
-        plan.append(f"Backup: {backup}")
+        plan.append(_t("Backup: {path}", path=backup))
     res = _commit(con, plan, confirm, projects=b["projects"], log=b["log"])
     res["items"] = b["items"]
     if not confirm:
         res.update(would_refuse=bool(reasons), refuse_reasons=reasons)
         if reasons:
-            res["next"] = "confirm=True would be refused: " + " ".join(reasons)
+            res["next"] = _t("confirm=True would be refused: {reasons}", reasons=_join(" ", reasons))
     return res
 
 
@@ -1579,7 +1663,8 @@ def _create_eps(con, eps_id: str, eps_name: str, parent_wbs: Optional[int], now:
     """Insert an EPS node (PROJECT row with project_flag N plus its PROJWBS node); returns the node wbs_id.
     Refuses a name already used by a project, baseline or EPS node (tools look PROJECT up by name)."""
     if con.execute("SELECT 1 FROM PROJECT WHERE proj_short_name = ?" + _alive(con, "PROJECT"), (eps_id,)).fetchone():
-        raise ValueError(f"{eps_id!r} is already used by a project or EPS node: choose another EPS ID.")
+        raise ValueError(_t("{eps_id!r} is already used by a project or EPS node: choose another EPS ID.",
+                            eps_id=eps_id))
     root_obs = con.execute("SELECT obs_id FROM OBS WHERE parent_obs_id IS NULL"
                            + _alive(con, "OBS") + " ORDER BY seq_num, obs_id").fetchone()
     pid = _next_key(con, "PROJECT", "proj_id")
@@ -1739,7 +1824,7 @@ def _cross_links(con) -> dict:
     return {"count": n, "sample": [f"{r['pp']} {r['pc']} -> {r['sp']} {r['sc']} {REL_TYPES_REV.get(r['ty'], r['ty'])}"
                                    for r in rows],
             "other_proj_ids": kept,
-            "note": "deleted with the project (P6 does the same); the other project needs F9"}
+            "note": _t("deleted with the project (P6 does the same); the other project needs F9")}
 
 
 def _eps_ancestors(con, pids: Iterable[int]) -> list[dict]:
@@ -1780,16 +1865,17 @@ def _delete_targets(con, names: list[str], include_baselines: bool, allow_templa
         if r is None:
             missing.append(name)
         elif (r["project_flag"] or "Y") != "Y":
-            errs.append(f"{name} is an EPS node (delete_empty_eps removes EPS nodes left empty)")
+            errs.append(_t("{name} is an EPS node (delete_empty_eps removes EPS nodes left empty)", name=name))
         elif r["status_code"] == "WS_Template" and not allow_templates:
-            errs.append(f"{name} is a template (status WS_Template): pass allow_templates=True to delete it")
+            errs.append(_t("{name} is a template (status WS_Template): pass allow_templates=True to delete it",
+                           name=name))
         else:
             found.append({"proj_id": r["proj_id"], "project": name,
                           "kind": "baseline" if r["orig_proj_id"] else "project", "status": r["status_code"]})
     if missing:
-        errs.insert(0, f"Project not found: {missing}")
+        errs.insert(0, _t("Project not found: {missing}", missing=missing))
     if errs:
-        raise ValueError("; ".join(errs))
+        raise ValueError(_join("; ", errs))
     ids = {p["proj_id"] for p in found}
     bls = [{"proj_id": r[0], "project": r[1], "kind": "baseline", "of": r[2], "status": None} for r in con.execute(
         "SELECT b.proj_id, b.proj_short_name, o.proj_short_name FROM PROJECT b JOIN PROJECT o ON o.proj_id = "

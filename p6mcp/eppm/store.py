@@ -27,6 +27,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from p6mcp import config
 from p6mcp.eppm import sql as _sql
+from p6mcp.messages import _t
 
 MANIFEST_FILE = "pull.json"
 STORE_VERSION = 2  # 2: the file is named after the profile (the edit log keys its entries by file name)
@@ -124,7 +125,7 @@ def update_manifest(profile_name: str, pushed_entries: Iterable[str] = (), push:
     p6_eppm_status does not report the user's own push as a change made by someone else on the server."""
     m = read_manifest(profile_name)
     if m is None:
-        raise PullError("No working copy to update.")
+        raise PullError(_t("No working copy to update."))
     m["pushed_entries"] = list(dict.fromkeys(list(m.get("pushed_entries", [])) + list(pushed_entries)))
     if pushed_activities:
         m["pushed_activities"] = {**m.get("pushed_activities", {}), **pushed_activities}
@@ -225,7 +226,8 @@ def sched_values(row: dict, task_ids: Callable[[str], Optional[int]]) -> tuple[d
             if row.get(k) not in (None, ""):
                 vals[key] = str(float(row[k]))
         except ValueError:
-            warn.append(f"schedule option {k}={row[k]!r} is not a number: the default is kept")
+            warn.append(_t("schedule option {option}={value!r} is not a number: the default is kept", option=k,
+                           value=row[k]))
     ign = flag(row.get("IgnoreOtherProjectRelationships", ""))
     if ign is not None:
         vals["sched_outer_depend_type"] = "SD_None" if ign == "Y" else "SD_Both"
@@ -233,7 +235,8 @@ def sched_values(row: dict, task_ids: Callable[[str], Optional[int]]) -> tuple[d
     if text in OOS:
         vals["sched_retained_logic"], vals["sched_progress_override"] = OOS[text]
     elif text:
-        warn.append(f"out of sequence option {row['OutOfSequenceScheduleType']!r} not known: the default is kept")
+        warn.append(_t("out of sequence option {value!r} not known: the default is kept",
+                       value=row["OutOfSequenceScheduleType"]))
     for field, table, key in (("ComputeTotalFloatType", FLOAT_TYPE, "sched_float_type"),
                               ("RelationshipLagCalendar", LAG_CAL, "sched_calendar_on_relationship_lag")):
         text = str(row.get(field) or "").strip().lower()
@@ -241,13 +244,15 @@ def sched_values(row: dict, task_ids: Callable[[str], Optional[int]]) -> tuple[d
         if hit:
             vals[key] = hit
         elif text:
-            warn.append(f"schedule option {field}={row[field]!r} not known: the default is kept")
+            warn.append(_t("schedule option {option}={value!r} not known: the default is kept", option=field,
+                           value=row[field]))
     end = str(row.get("MultipleFloatPathsEndingActivityShortName") or "").strip()
     if end:
         tid = task_ids(end)
         vals["key_activity_for_multiple_longest_paths"] = str(tid) if tid else "-99"
         if not tid:
-            warn.append(f"multiple float paths ending activity {end!r} not found in the project: none kept")
+            warn.append(_t("multiple float paths ending activity {code!r} not found in the project: none kept",
+                           code=end))
     lpl = [(f, o) for f, o in re.findall(r"\(0\|\|(\w+)\(sort_type\|(ASC|DESC)", str(row.get("PriorityList") or ""))]
     return vals, (lpl or None), warn
 
@@ -272,7 +277,7 @@ def _wanted(profile: dict, project_ids: Iterable[str]) -> set[str]:
     wanted = {str(p).strip() for p in project_ids if str(p).strip()}
     wanted |= {p["project_id"] for p in old.get("projects", [])}
     if not wanted:
-        raise PullError("Name at least one project (its Project ID).")
+        raise PullError(_t("Name at least one project (its Project ID)."))
     return wanted
 
 
@@ -283,7 +288,8 @@ def _server_info(sess, wanted: set[str], include_baseline: bool) -> tuple[list, 
     by_id = {str(p.get("Id", "")).lower(): p for p in listed}
     missing = sorted(w for w in wanted if w.lower() not in by_id)
     if missing:
-        raise PullError(f"Not found among the projects this P6 user can read: {', '.join(missing)}")
+        raise PullError(_t("Not found among the projects this P6 user can read: {missing}",
+                           missing=", ".join(missing)))
     projects = []
     for w in sorted(wanted, key=str.lower):
         p = by_id[w.lower()]
@@ -337,7 +343,7 @@ def pull(profile: dict, project_ids: Iterable[str], password: str, sql_password:
          include_baseline: bool = True, route: str = "auto", **kw) -> dict:
     """Pull by SQL when the profile has a SQL account with a password and its driver (route auto), else by REST."""
     if route not in ROUTES:
-        raise PullError(f"route must be one of {list(ROUTES)}")
+        raise PullError(_t("route must be one of {routes}", routes=list(ROUTES)))
     if route == "auto":
         sqlcfg = profile.get("sql")
         usable = bool(sqlcfg and sql_password and (kw.get("sql_module") or _sql.driver_module(sqlcfg["driver"])))
@@ -354,8 +360,8 @@ def pull_sql(profile: dict, project_ids: Iterable[str], password: str, sql_passw
     """Pull the given projects (Project IDs, plus the ones already pulled) by SQL, with REST for the project list
     (the user's rights) and the schedule options. Returns the manifest written to pull.json."""
     if not profile.get("sql"):
-        raise PullError("This server has no SQL account: pull by REST (route 'rest'), or add the read-only SQL "
-                        "account in MCP for Primavera P6 Settings (Database).")
+        raise PullError(_t("This server has no SQL account: pull by REST (route 'rest'), or add the read-only SQL "
+                           "account in MCP for Primavera P6 Settings (Database)."))
     sqlcfg = profile["sql"]
     wanted = _wanted(profile, project_ids)
     started = datetime.now()
@@ -383,16 +389,19 @@ def pull_sql(profile: dict, project_ids: Iterable[str], password: str, sql_passw
                         except Exception:  # noqa: BLE001
                             pass
                     if optional:
-                        warnings.append(f"{table} not copied: {' '.join(str(e).split())[:160]}")
+                        warnings.append(_t("{table} not copied: {error}",
+                                           table=table, error=" ".join(str(e).split())[:160]))
                         continue
-                    raise PullError(f"{table} cannot be read by SQL: {' '.join(str(e).split())[:200]}") from e
+                    raise PullError(_t("{table} cannot be read by SQL: {error}", table=table,
+                                       error=" ".join(str(e).split())[:200])) from e
                 if n is not None:
                     counts[table] = n
             cur.execute(f"SELECT COUNT(*) FROM {_sql.table(sqlcfg, 'TASKPRED')} WHERE (proj_id IN ({ids}) AND "
                         f"pred_proj_id NOT IN ({ids})) OR (pred_proj_id IN ({ids}) AND proj_id NOT IN ({ids}))")
             cross = int(cur.fetchall()[0][0])
             if cross:
-                warnings.append(f"{cross} relationship(s) to or from projects that were not pulled are left out")
+                warnings.append(_t("{n} relationship(s) to or from projects that were not pulled are left out",
+                                   n=cross))
         finally:
             con.close()
         _finish(out, profile, projects, sched_rows, warnings, server_module)
@@ -415,8 +424,8 @@ def _export(sess, oids: list[int], folder: str, name: str) -> str:
     st, raw = sess._send("POST", sess.rest + "/export/exportXERProject",
                          body={"FileType": "XER", "ProjectObjectId": oids}, name="export xer")
     if st != 200 or not raw.lstrip().startswith(b"ERMHDR"):
-        detail = sess._detail(raw) if raw[:2] != b"PK" else "a zip file (not handled yet)"
-        raise rest.EppmError(f"XER export refused (HTTP {st}): {detail}")
+        detail = sess._detail(raw) if raw[:2] != b"PK" else _t("a zip file (not handled yet)")
+        raise rest.EppmError(_t("XER export refused (HTTP {status}): {detail}", status=st, detail=detail))
     path = os.path.join(folder, name)
     with open(path, "wb") as fh:
         fh.write(raw)
@@ -459,7 +468,7 @@ def pull_rest(profile: dict, project_ids: Iterable[str], password: str, include_
                         done.add(bl)
                     out.execute("UPDATE PROJECT SET sum_base_proj_id = ? WHERE proj_id = ?", (bl, p["object_id"]))
                 except (rest.EppmError, ValueError, sqlite3.Error) as e:
-                    warnings.append(f"{p['project_id']}: baseline not pulled: {e}")
+                    warnings.append(_t("{project}: baseline not pulled: {error}", project=p["project_id"], error=e))
                     p["baseline_object_id"] = None
         _finish(out, profile, projects, sched_rows, warnings, server_module)
         out.commit()
@@ -502,14 +511,15 @@ def _finish(out: sqlite3.Connection, profile: dict, projects: list[dict], sched_
         for p in projects:
             row = sched_rows.get(p["object_id"])
             if not row:
-                warnings.append(f"{p['project_id']}: no schedule options from the server, P6 defaults assumed")
+                warnings.append(_t("{project}: no schedule options from the server, P6 defaults assumed",
+                                   project=p["project_id"]))
                 continue
 
             def task_ids(code: str, pid=p["object_id"]) -> Optional[int]:
                 r = out.execute("SELECT task_id FROM TASK WHERE proj_id = ? AND task_code = ?", (pid, code)).fetchone()
                 return int(r[0]) if r else None
             vals, lpl, warn = sched_values(row, task_ids)
-            warnings += [f"{p['project_id']}: {w}" for w in warn]
+            warnings += [_t("{project}: {warning}", project=p["project_id"], warning=w) for w in warn]
             try:
                 vals = {k: (v if k == "key_activity_for_multiple_longest_paths"
                             else props._norm_opt("scheduling", k, v, lenient=True)[0]) for k, v in vals.items()}
@@ -524,6 +534,7 @@ def _finish(out: sqlite3.Connection, profile: dict, projects: list[dict], sched_
                         out.execute(f"UPDATE PROJPROP SET {c} = ? WHERE proj_id = ? AND prop_name = 'scheduling'",
                                     (lsd[0] if lsd else None, p["object_id"]))
             except (ValueError, sqlite3.Error) as e:
-                warnings.append(f"{p['project_id']}: schedule options not stored: {e}")
+                warnings.append(_t("{project}: schedule options not stored: {error}", project=p["project_id"],
+                                   error=e))
     finally:
         state._cols_cache.clear()  # the cache describes the active database, not this copy

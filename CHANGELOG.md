@@ -7,6 +7,15 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ### Added
 
+- Tool messages in French: errors and refusals (policy, writes off, EPPM, XER-only, SQL Server / Oracle, remote),
+  dry-run plan lines and `next`, notes, caveats, warnings, definitions and explanations, and p6_diagnose advice
+  follow the Language setting of the Settings window (`language`; `auto` = the Windows display language), read on
+  every call, so a change applies without a restart. English stays the reference: field names, keys, codes and
+  statuses, P6 names, units, tool names, descriptions and schemas, the server instructions, the confirmation_text
+  to type, the edit log, audit logs and the Excel workbooks are unchanged. Messages are built with
+  `p6mcp.messages._t` (an English str that keeps its template), rendered at the edge of each call from
+  `p6mcp/locales/tools/fr.json` (about 1,260 templates); `tools/tool_messages.py --check` and
+  `tests/test_tool_messages.py` keep the catalog complete and refuse a new raw English message.
 - Five more MCP clients registered by the installer and the Settings Clients page (register, repair, remove, the
   p6mcp entry only, a backup of the file first, a file that cannot be read is refused and left untouched):
   - **Devin** (Windsurf became Devin Desktop in June 2026): `%APPDATA%\devin\mcp_config.json`, read by Devin

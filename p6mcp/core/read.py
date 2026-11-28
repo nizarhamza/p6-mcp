@@ -15,6 +15,7 @@ from p6mcp.registry import CpMode, UdfOp
 from p6mcp.core.db import _alive, _cols, _days, _fmt_dt, _ids_sql, _num, _page, _parse_dt
 from p6mcp.core.props import _blob_text, _lag_hpd, _lag_rule
 from p6mcp.core.wbs_codes import _name_sep
+from p6mcp.messages import _t
 
 
 def _rel_sql(con, direction: str) -> str:
@@ -97,7 +98,7 @@ def _udf_type(con, table: str, udf: Any) -> sqlite3.Row:
     """UDFTYPE row of a subject table (TASK, PROJECT...) by label, the column title in P6: exact, else
     case and outer spaces ignored. Several matches or none raise (close labels listed)."""
     if not isinstance(udf, str) or not udf.strip():
-        raise ValueError("udf: the UDF label (its column title in P6) is required")
+        raise ValueError(_t("udf: the UDF label (its column title in P6) is required"))
     rows = con.execute("SELECT * FROM UDFTYPE WHERE table_name = ?" + _alive(con, "UDFTYPE")
                        + " ORDER BY udf_type_id", (table,)).fetchall()
     hit = [r for r in rows if r["udf_type_label"] == udf] or [
@@ -105,10 +106,12 @@ def _udf_type(con, table: str, udf: Any) -> sqlite3.Row:
     if len(hit) == 1:
         return hit[0]
     if hit:
-        raise ValueError(f"Several {table} UDFs are labelled {udf!r} (udf_type_id {[r['udf_type_id'] for r in hit]})")
+        raise ValueError(_t("Several {table} UDFs are labelled {udf!r} (udf_type_id {ids})",
+                            table=table, udf=udf, ids=[r['udf_type_id'] for r in hit]))
     labels = [r["udf_type_label"] or "" for r in rows]
     near = difflib.get_close_matches(udf.strip(), labels, n=8, cutoff=0.4) or labels[:20]
-    raise ValueError(f"No {table} UDF labelled {udf!r}. Close labels: {near} (p6_list_udfs lists them)")
+    raise ValueError(_t("No {table} UDF labelled {udf!r}. Close labels: {near} (p6_list_udfs lists them)",
+                        table=table, udf=udf, near=near))
 
 
 def _udf_col(con, ltype: str) -> str:
@@ -148,17 +151,17 @@ def _udf_filter(con, filters: Any) -> tuple[str, list, list[dict]]:
     if isinstance(filters, Mapping):
         filters = [filters]
     if not isinstance(filters, (list, tuple)):
-        raise ValueError("udf_filter: a list of {udf, op, value}")
+        raise ValueError(_t("udf_filter: a list of {{udf, op, value}}"))
     sql, args, info = "", [], []
     for f in filters:
         if not isinstance(f, Mapping):
-            raise ValueError("udf_filter: a list of {udf, op, value}")
+            raise ValueError(_t("udf_filter: a list of {{udf, op, value}}"))
         bad = sorted(set(f) - {"udf", "op", "value"})
         if bad:
-            raise ValueError(f"udf_filter: unknown key(s) {bad}; allowed: ['op', 'udf', 'value']")
+            raise ValueError(_t("udf_filter: unknown key(s) {bad}; allowed: ['op', 'udf', 'value']", bad=bad))
         op = f.get("op") or "eq"
         if op not in get_args(UdfOp):
-            raise ValueError(f"udf_filter op must be one of {list(get_args(UdfOp))}")
+            raise ValueError(_t("udf_filter op must be one of {ops}", ops=list(get_args(UdfOp))))
         y = _udf_type(con, "TASK", f.get("udf"))
         lt, label = y["logical_data_type"], y["udf_type_label"]
         kind, col, v = UDF_KINDS.get(lt, "text"), _udf_col(con, lt), f.get("value")
@@ -167,20 +170,23 @@ def _udf_filter(con, filters: Any) -> tuple[str, list, list[dict]]:
         a: list[Any] = [y["udf_type_id"]]
         if op in ("empty", "not_empty"):
             if v is not None:
-                raise ValueError(f"udf_filter {label!r} {op} takes no value")
+                raise ValueError(_t("udf_filter {label!r} {op} takes no value", label=label, op=op))
             sql += f" AND {'NOT ' if op == 'empty' else ''}EXISTS ({sub} AND NULLIF({col}, '') IS NOT NULL)"
         else:
             if v is None or v == "":
-                raise ValueError(f"udf_filter {label!r} {op}: value is required (op 'empty' finds no value)")
+                raise ValueError(_t("udf_filter {label!r} {op}: value is required (op 'empty' finds no value)",
+                                    label=label, op=op))
             if op == "contains":
                 if kind not in ("text", "indicator", "code"):
-                    raise ValueError(f"udf_filter {label!r}: contains is for text, indicator and code UDFs ({kind})")
+                    raise ValueError(_t("udf_filter {label!r}: contains is for text, indicator and code UDFs ({kind})",
+                                        label=label, kind=kind))
                 cond = f"{col} LIKE ?"
                 a.append(f"%{v}%")
             elif kind in ("number", "integer", "cost"):
                 x = None if isinstance(v, bool) else _num(v)
                 if x is None:
-                    raise ValueError(f"udf_filter {label!r} is a {kind} UDF: value must be a number, not {v!r}")
+                    raise ValueError(_t("udf_filter {label!r} is a {kind} UDF: value must be a number, not {value!r}",
+                                        label=label, kind=kind, value=v))
                 cond = {"eq": f"ABS({col} - ?) <= 1e-9", "ne": f"ABS({col} - ?) > 1e-9"}.get(op, f"{col} {UDF_CMP[op]} ?")
                 a.append(x)
             elif kind in ("start_date", "finish_date"):
@@ -280,39 +286,51 @@ def _critical_clause(con, pid: int, mode: str, threshold_days: Optional[float]
     hours, CT_DrivPath = longest path, anything else total float (said in the definition).
     threshold_days forces total float <= that many days of each activity's calendar."""
     if mode not in get_args(CpMode):
-        raise ValueError(f"mode must be one of {list(get_args(CpMode))}")
+        raise ValueError(_t("mode must be one of {modes}", modes=list(get_args(CpMode))))
     if threshold_days is not None:
         if mode == "longest_path":
-            raise ValueError("float_threshold_days applies to total float, not to mode='longest_path'")
+            raise ValueError(_t("float_threshold_days applies to total float, not to mode='longest_path'"))
         return (f"t.total_float_hr_cnt <= ? * {HPD_SQL}", [float(threshold_days)],
-                f"total float <= {float(threshold_days):g} d (days of each activity's calendar)", None, "total_float")
+                _t("total float <= {days:g} d (days of each activity's calendar)", days=float(threshold_days)), None,
+                "total_float")
     cols = _cols(con, "PROJECT")
     p = con.execute("SELECT " + ", ".join(c if c in cols else f"NULL AS {c}" for c in
                                           ("critical_path_type", "critical_drtn_hr_cnt"))
                     + " FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()
-    hours, src = float(p["critical_drtn_hr_cnt"] or 0), ""
+    hours, ctype, source = float(p["critical_drtn_hr_cnt"] or 0), None, None  # source: from the project setting
     if mode == "project":
         ctype = p["critical_path_type"]
         mode = "longest_path" if ctype == "CT_DrivPath" else "total_float"
-        src = (f"project setting {ctype}: " if ctype in ("CT_DrivPath", "CT_TotFloat")
-               else f"project setting {ctype!r} unknown, total float used: ")
+        source = "set" if ctype in ("CT_DrivPath", "CT_TotFloat") else "unknown"
     if mode == "longest_path":
         if "driving_path_flag" in _cols(con, "TASK"):
-            return "t.driving_path_flag = 'Y'", [], src + "longest path (driving_path_flag)", None, "longest_path"
-        src += "no driving_path_flag column, total float used: "
+            definition = (_t("project setting {ctype}: longest path (driving_path_flag)", ctype=ctype) if source
+                          else _t("longest path (driving_path_flag)"))
+            return "t.driving_path_flag = 'Y'", [], definition, None, "longest_path"
         hours = 0.0  # the hours threshold belongs to the total float definition: 0 h, P6's default
-    return ("t.total_float_hr_cnt <= ?", [hours], src + f"total float <= {hours:g} h (critical_drtn_hr_cnt)",
-            hours, "total_float")
+        definition = (_t("project setting {ctype}: no driving_path_flag column, total float used: total float <= "
+                         "{hours:g} h (critical_drtn_hr_cnt)", ctype=ctype, hours=hours) if source else
+                      _t("no driving_path_flag column, total float used: total float <= {hours:g} h "
+                         "(critical_drtn_hr_cnt)", hours=hours))
+    elif source == "set":
+        definition = _t("project setting {ctype}: total float <= {hours:g} h (critical_drtn_hr_cnt)", ctype=ctype,
+                        hours=hours)
+    elif source == "unknown":
+        definition = _t("project setting {ctype!r} unknown, total float used: total float <= {hours:g} h "
+                        "(critical_drtn_hr_cnt)", ctype=ctype, hours=hours)
+    else:
+        definition = _t("total float <= {hours:g} h (critical_drtn_hr_cnt)", hours=hours)
+    return "t.total_float_hr_cnt <= ?", [hours], definition, hours, "total_float"
 
 
 def _rel_code(v: Any, name: str) -> str:
     if not isinstance(v, str) or v.upper() not in REL_TYPES:
-        raise ValueError(f"{name} must be FS, SS, FF or SF")
+        raise ValueError(_t("{name} must be FS, SS, FF or SF", name=name))
     return REL_TYPES[v.upper()]
 
 
 def _lag_arg(v: Any) -> float:
     f = _num(v)
     if f is None:
-        raise ValueError("lag_days must be a number")
+        raise ValueError(_t("lag_days must be a number"))
     return f

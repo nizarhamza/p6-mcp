@@ -8,6 +8,7 @@ from typing import Mapping, Optional
 
 from p6mcp.core.constants import ACT_LINKS_CAP, HPD_SQL, MAT_SQL, SUMMARY_TYPES
 from p6mcp.core.db import _alive, _cols, _dict, _ids_sql
+from p6mcp.messages import _t
 
 
 # ----------------------------------------------------------------- WBS tree and activity aggregates
@@ -123,12 +124,12 @@ def _code_type(con, pid: int, name: str) -> dict:
     hits = sorted((r for r in seen if (r["actv_code_type"] or "").lower() == str(name).strip().lower()),
                   key=lambda r: (rank(r["proj_id"]), r["actv_code_type_id"]))
     if not hits:
-        raise ValueError(f"Activity code type {name!r} not found for this project; types: "
-                         f"{sorted({r['actv_code_type'] for r in seen})}")
+        raise ValueError(_t("Activity code type {name!r} not found for this project; types: {types}",
+                            name=name, types=sorted({r['actv_code_type'] for r in seen})))
     best = [r for r in hits if rank(r["proj_id"]) == rank(hits[0]["proj_id"])]
     if len(best) > 1:
-        raise ValueError(f"Several activity code types called {name!r} at the same level: ids "
-                         f"{[r['actv_code_type_id'] for r in best]}")
+        raise ValueError(_t("Several activity code types called {name!r} at the same level: ids {ids}",
+                            name=name, ids=[r['actv_code_type_id'] for r in best]))
     r = hits[0]
     return {"type": r["actv_code_type"], "type_id": r["actv_code_type_id"], "scope": r["actv_code_type_scope"],
             "shadowed": [h["actv_code_type_scope"] for h in hits[1:]]}
@@ -165,7 +166,7 @@ def _code_filter(con, pid: int, code_type: Optional[str], code_value: Optional[s
     their descendants. ('', [], None) without code_type."""
     if not code_type:
         if code_value is not None:
-            raise ValueError("code_value needs code_type (the activity code type, e.g. 'Discipline')")
+            raise ValueError(_t("code_value needs code_type (the activity code type, e.g. 'Discipline')"))
         return "", [], None
     info = _code_type(con, pid, code_type)
     tree = _code_tree(con, info["type_id"])
@@ -178,7 +179,9 @@ def _code_filter(con, pid: int, code_type: Optional[str], code_value: Optional[s
             if hit:
                 break
         if not hit:
-            raise ValueError(f"No {info['type']} code {code_value!r}; codes: {[tree[i]['path'] for i in order(tree)][:20]}")
+            raise ValueError(_t("No {type} code {code_value!r}; codes: {codes}",
+                                type=info['type'], code_value=code_value,
+                                codes=[tree[i]['path'] for i in order(tree)][:20]))
         ids = set(hit)
         kids = {c["id"] for c in tree.values() if ids & set(c["chain"][:-1])} if include_children else set()
         info.update(value=code_value, include_child_codes=bool(include_children), matched=[tree[i]["path"] for i in hit],
@@ -230,16 +233,17 @@ def _eps_tree(con) -> list[dict]:
 def _eps_wbs_id(con, eps: Optional[str]) -> int:
     nodes = _eps_nodes(con)
     if not nodes:
-        raise ValueError("No EPS node in this database. Create one in P6 or with p6_create_eps "
-                         "(p6_import_xer: create_eps=).")
+        raise ValueError(_t("No EPS node in this database. Create one in P6 or with p6_create_eps (p6_import_xer: "
+                            "create_eps=)."))
     if eps is None:
         if len(nodes) == 1:
             return nodes[0]["wbs_id"]
-        raise ValueError(f"Several EPS nodes exist, choose one with eps=: {[n['eps_id'] for n in nodes]}")
+        raise ValueError(_t("Several EPS nodes exist, choose one with eps=: {known}",
+                            known=[n['eps_id'] for n in nodes]))
     for n in nodes:
         if n["eps_id"] == eps:
             return n["wbs_id"]
-    raise ValueError(f"EPS {eps!r} not found: {[n['eps_id'] for n in nodes]}")
+    raise ValueError(_t("EPS {eps!r} not found: {known}", eps=eps, known=[n['eps_id'] for n in nodes]))
 
 
 def _guid() -> str:
