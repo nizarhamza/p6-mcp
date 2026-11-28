@@ -8,10 +8,13 @@ from collections import Counter
 from datetime import datetime, timedelta
 from typing import Callable, Mapping, Optional, get_args
 
-from p6mcp.core.constants import ACT_LINKS_CAP, CSTR_FINISH, _cstr_label, CSTR_TYPES, HARD_CSTR_SET, REL_TYPES_REV
-from p6mcp.registry import WhatIfOp
+from p6mcp.core.constants import (
+    ACT_LINKS_CAP, CSTR_FINISH, _cstr_label, CSTR_TYPES, HARD_CSTR_SET, HPD_SQL, REL_TYPES_REV,
+)
+from p6mcp.registry import FragnetType, WhatIfOp
 from p6mcp.core.db import _alive, _baseline_pid, _cols, _connect, _days, _db_dt, _fmt_dt, _num
 from p6mcp.core.calendar import _resolve_dt, _week_text
+from p6mcp.core.wbs_codes import _name_sep, _wbs_tree
 from p6mcp.core.editlog import _edit_state, _log_entries, _undone_fn
 from p6mcp.core.read import _lag_arg, _rel_code
 from p6mcp.core.engine import _Cpm, CPM_TF_TOL_H, CPM_TOL, CPM_TRUST, _ELAPSED, GAP_TOL_H, LINK_FROM, LINK_TO, _mx, _Net
@@ -556,7 +559,11 @@ def _whatif_apply(cpm: _Cpm, e: Mapping, trace: Optional[list] = None) -> str:
     if op not in get_args(WhatIfOp):
         raise ValueError(f"op must be one of {list(get_args(WhatIfOp))}")
     act = lambda code: cpm.t[cpm.code[code]] if code in cpm.code else (_ for _ in ()).throw(  # noqa: E731
-        ValueError(f"Activity {code} not found in project {cpm.prj['proj_short_name']} (what-if edits stay inside it)"))
+        ValueError(f"Activity {code} not found in project {cpm.prj['proj_short_name']} (what-if edits stay inside it"
+                   + ("; a fragnet activity is added by an add_activity edit before its links)"
+                      if getattr(cpm, "frag_ctx", None) else ")")))
+    if op == "add_activity":
+        return _fragnet_add(cpm, e, rec)
     if op in ("add_link", "delete_link", "update_link"):
         if op != "add_link" and e.get("task_pred_id") is not None:
             hits = [lk for lk in cpm.links if lk["id"] == e["task_pred_id"]]
@@ -573,6 +580,10 @@ def _whatif_apply(cpm: _Cpm, e: Mapping, trace: Optional[list] = None) -> str:
                     raise ValueError("An activity cannot be linked to itself.")
                 if hits:
                     raise ValueError(f"{p['task_code']} -> {s['task_code']} {ty} already exists")
+                cyc = _link_cycle(cpm, p["task_id"], s["task_id"])
+                if cyc:
+                    raise ValueError(f"{p['task_code']} -> {s['task_code']} would close a loop (P6 refuses to schedule "
+                                     f"it): {' -> '.join(cpm.t[n]['task_code'] for n in cyc)}")
                 lag = _lag_arg(e.get("lag_days") or 0) * cpm.lag_hpd(p, s)
                 cpm.links.append({"id": None, "succ": s["task_id"], "pred": p["task_id"], "type": code, "lag": lag})
                 rec(op="add_link", link=cpm.links[-1], before=None)
@@ -638,6 +649,14 @@ def _whatif_apply(cpm: _Cpm, e: Mapping, trace: Optional[list] = None) -> str:
             original=e.get("original_days") is not None and "remaining_days" not in given
             and "add_remaining_days" not in given)
         return f"{d['task_code']}: " + ", ".join(ch)
+    code, dt = _cstr_arg(d["cal"], e)
+    rec(op="constraint", task_id=d["task_id"], before=(d["cstr_type"], d["cstr_date"]), after=(code, dt))
+    d["cstr_type"], d["cstr_date"] = code, dt
+    return f"{d['task_code']}: constraint {_cstr_label(code) or 'none'} {_fmt_dt(dt) if dt else ''}".strip()
+
+
+def _cstr_arg(cal, e: Mapping) -> tuple[Optional[str], Optional[datetime]]:
+    """(constraint code, date) of an edit's constraint and constraint_date, the date resolved on cal."""
     name = e.get("constraint")
     if name not in CSTR_TYPES:
         raise ValueError(f"constraint must be one of {list(CSTR_TYPES)}")
@@ -646,12 +665,129 @@ def _whatif_apply(cpm: _Cpm, e: Mapping, trace: Optional[list] = None) -> str:
     if code and code != "CS_ALAP":
         if not e.get("constraint_date"):
             raise ValueError("constraint_date is required for this constraint")
-        dt = _db_dt(_resolve_dt(d["cal"] if d["cal"] and not d["cal"].error else None, e["constraint_date"], "constraint_date",
+        dt = _db_dt(_resolve_dt(cal if cal and not cal.error else None, e["constraint_date"], "constraint_date",
                                 "finish" if code in CSTR_FINISH else "start")[0])
-    rec(op="constraint", task_id=d["task_id"], before=(d["cstr_type"], d["cstr_date"]), after=(code, dt))
-    d["cstr_type"], d["cstr_date"] = code, dt
-    return f"{d['task_code']}: constraint {_cstr_label(code) or 'none'} {_fmt_dt(dt) if dt else ''}".strip()
+    return code, dt
 
+
+def _link_cycle(cpm: _Cpm, pred: int, succ: int) -> list[int]:
+    """The loop a new link pred -> succ would close: [pred, succ, ..., pred] (task_ids, the shortest path back
+    from succ to pred along the links), else []."""
+    by_p: dict = {}
+    for lk in cpm.links:
+        by_p.setdefault(lk["pred"], []).append(lk["succ"])
+    back, todo, k = {succ: None}, [succ], 0
+    while k < len(todo):
+        n = todo[k]
+        k += 1
+        if n == pred:
+            path = []
+            while n is not None:
+                path.append(n)
+                n = back[n]
+            return [pred] + path[::-1]
+        for m in sorted(by_p.get(n, ())):
+            if m not in back:
+                back[m] = n
+                todo.append(m)
+    return []
+
+
+FRAGNET_TYPES = get_args(FragnetType)
+FRAGNET_PATH_CAP = 100  # rows of the fragnet's driving path into the project finish
+_FRAG_NONE = ("early_start_date", "early_end_date", "late_start_date", "late_end_date", "act_start_date",
+              "act_end_date", "total_float_hr_cnt", "cstr_type2", "cstr_date2", "expect_end_date", "suspend_date",
+              "resume_date", "free_float_hr_cnt", "driving_path_flag", "float_path", "float_path_order", "update_date")
+
+
+def _fragnet_ctx(con, pid: int) -> dict:
+    """What add_activity edits read from the database (the what-if's snapshot): the first task_id above every
+    TASK row (soft-deleted ones included: the temp tables of the DCMA block hold fragnet rows beside the real
+    ones), the project's WBS nodes (wbs_code, project node first), the calendars a project activity may use
+    (global and this project's, resource calendars left out) with their hours per day, the project calendar."""
+    top = con.execute("SELECT MAX(task_id) FROM TASK").fetchone()[0]
+    ccols = _cols(con, "CALENDAR")
+    typ = "c.clndr_type" if "clndr_type" in ccols else "NULL"
+    own = "c.proj_id" if "proj_id" in ccols else "NULL"
+    cals = [{"clndr_id": r[0], "name": r[1], "type": r[2], "proj_id": r[3], "hpd": float(r[4])} for r in con.execute(
+        f"SELECT c.clndr_id, c.clndr_name, {typ}, {own}, {HPD_SQL} FROM CALENDAR c WHERE 1 = 1"
+        + _alive(con, "CALENDAR", "c") + " ORDER BY c.clndr_id")]
+    cals = [c for c in cals if c["type"] != "CA_Rsrc" and (c["type"] != "CA_Project" or c["proj_id"] in (None, pid))]
+    pcal = con.execute("SELECT clndr_id FROM PROJECT WHERE proj_id = ?", (pid,)).fetchone()[0]
+    hpd = next((c["hpd"] for c in cals if c["clndr_id"] == pcal), 8.0)
+    return {"next_id": int(top or 0) + 1, "wbs": _wbs_tree(con, pid), "sep": _name_sep(con, pid), "cals": cals,
+            "pcal": pcal, "pcal_hpd": hpd, "added": []}
+
+
+def _fragnet_add(cpm: _Cpm, e: Mapping, rec: Callable) -> str:
+    """add_activity: a fragnet activity in cpm (never written): not started, its original and remaining duration in
+    days of its calendar, under the project node or the WBS given."""
+    ctx = getattr(cpm, "frag_ctx", None)
+    if ctx is None:
+        raise ValueError("add_activity needs the what-if context (p6_schedule_whatif)")
+    code = e.get("task_code")
+    if not isinstance(code, str) or not code.strip() or code != code.strip():
+        raise ValueError("task_code: a new Activity ID (text, no leading or trailing spaces)")
+    if code in cpm.code:
+        raise ValueError(f"Activity ID {code} " + ("is already a fragnet activity of these edits"
+                                                   if cpm.t[cpm.code[code]].get("fragnet") else
+                                                   f"already exists in project {cpm.prj['proj_short_name']}"))
+    name = e.get("task_name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("task_name is required")
+    ty = e.get("task_type") or "TT_Task"
+    if ty not in FRAGNET_TYPES:
+        raise ValueError(f"task_type must be one of {list(FRAGNET_TYPES)}")
+    for k in ("remaining_days", "add_remaining_days"):
+        if e.get(k) is not None:
+            raise ValueError(f"add_activity takes original_days, not {k} (a fragnet activity is not started)")
+    if ty == "TT_Task" and e.get("original_days") is None:
+        raise ValueError("original_days is required for a TT_Task activity")
+    days = _num(e.get("original_days") if e.get("original_days") is not None else 0)
+    if days is None or days < 0:
+        raise ValueError("original_days must be 0 or more")
+    if ty != "TT_Task" and days:
+        raise ValueError("a milestone has no duration: original_days 0 or left out")
+    cal_id, hpd = ctx["pcal"], ctx["pcal_hpd"]
+    if e.get("calendar") is not None:
+        want = str(e["calendar"]).strip()
+        hits = [c for c in ctx["cals"] if c["name"] == want] or \
+            [c for c in ctx["cals"] if (c["name"] or "").casefold() == want.casefold()]
+        if not hits:
+            raise ValueError(f"calendar {want!r} not found (global or project calendars). Calendars: "
+                             f"{sorted({c['name'] for c in ctx['cals'] if c['name']})[:15]}")
+        if len(hits) > 1:
+            raise ValueError(f"calendar {want!r} names several calendars (clndr_id {[c['clndr_id'] for c in hits]})")
+        cal_id, hpd = hits[0]["clndr_id"], hits[0]["hpd"]
+    nodes = ctx["wbs"]
+    if not nodes:
+        raise ValueError("the project has no WBS node")
+    node = nodes[0]
+    if e.get("wbs"):
+        w, top, sep = str(e["wbs"]).strip(), nodes[0]["wbs_code"], ctx["sep"]
+        node = next((n for n in nodes if n["wbs_code"] in (w, top + sep + w)), None)
+        if node is None:
+            raise ValueError(f"WBS code {w!r} not found in {cpm.prj['proj_short_name']}. Codes: "
+                             f"{[n['wbs_code'] for n in nodes[1:16]]}")
+    cal = cpm.cals.get(cal_id)
+    cstr, cdt = _cstr_arg(cal, e) if e.get("constraint") not in (None, "none") else (None, None)
+    tid = ctx["next_id"]
+    ctx["next_id"] += 1
+    h = float(days) * hpd
+    d = dict.fromkeys(_FRAG_NONE)
+    d.update(task_id=tid, task_code=code, task_name=name.strip(), proj_id=cpm.pid, wbs_id=node["wbs_id"],
+             task_type=ty, status_code="TK_NotStart", clndr_id=cal_id, remain_drtn_hr_cnt=h, target_drtn_hr_cnt=h,
+             cstr_type=cstr, cstr_date=cdt, hpd=hpd, bad_dates=[], cal=cal, rem=h,
+             wbs=node["wbs_id"] if node["wbs_id"] in cpm.wbs_parent else None, fragnet=True,
+             wbs_code=node["wbs_code"], calendar=cal.name if cal is not None else None)
+    cpm.t[tid] = d
+    cpm.code[code] = tid
+    ctx["added"].append(tid)
+    rec(op="add_activity", task_id=tid)
+    if cstr:
+        rec(op="constraint", task_id=tid, before=(None, None), after=(cstr, cdt))
+    return (f"add activity {code} ({ty}, {days:g} d, WBS {node['wbs_code']})"
+            + (f", constraint {_cstr_label(cstr)} {_fmt_dt(cdt) if cdt else ''}".rstrip() if cstr else ""))
 
 WHATIF_CAVEAT = ("The engine calculates these dates the way P6 would. It does not check that crews, materials or "
                  "access allow them.")
@@ -662,7 +798,8 @@ def _temp_network(con, pid: int, cpm: _Cpm, res: Optional[dict], bid: Optional[i
     """Shadow TASK, TASKPRED and PROJECT on this read-only connection with temp copies (an unqualified name
     resolves to the temp schema first) holding cpm's network and the engine results res: what _dcma and _cpt
     read then is the in-memory network, and the database file is never written. TASK keeps the project, its
-    baseline and the activities linked to it; TASKPRED the links touching the project."""
+    baseline and the activities linked to it, plus the fragnet activities of cpm (add_activity, task_ids above
+    every TASK row); TASKPRED the links touching the project."""
     al = functools.partial(_alive, con)
     con.execute("CREATE TEMP TABLE TASK AS SELECT * FROM main.TASK WHERE proj_id IN (?, ?) OR task_id IN ("
                 "SELECT r.pred_task_id FROM main.TASKPRED r JOIN main.TASK s ON s.task_id = r.task_id WHERE s.proj_id = ?) "
@@ -675,6 +812,14 @@ def _temp_network(con, pid: int, cpm: _Cpm, res: Optional[dict], bid: Optional[i
                                 ("TASKPRED", "pred_task_id"), ("TASKPRED", "task_pred_id"), ("PROJECT", "proj_id"))):
         con.execute(f"CREATE INDEX temp.wi_{i} ON {t} ({c})")
     tcols = _cols(con, "TASK")
+    for d in cpm.t.values():
+        if d.get("fragnet"):  # a fragnet activity of the what-if: a new row (task_id above every TASK row)
+            row = {k: v for k, v in (("task_id", d["task_id"]), ("proj_id", pid), ("wbs_id", d["wbs_id"]),
+                                     ("clndr_id", d["clndr_id"]), ("task_code", d["task_code"]),
+                                     ("task_name", d["task_name"]), ("task_type", d["task_type"]),
+                                     ("status_code", d["status_code"]), ("phys_complete_pct", 0.0))
+                   if k in tcols}
+            con.execute(f"INSERT INTO TASK ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
     base_ids = {r[0] for r in con.execute("SELECT r.task_pred_id FROM TASKPRED r JOIN TASK s ON s.task_id = r.task_id "
                                           "JOIN TASK p ON p.task_id = r.pred_task_id WHERE s.proj_id = ? AND p.proj_id = ?"
                                           + al("TASKPRED", "r"), (pid, pid))}
@@ -783,11 +928,13 @@ def _whatif_assumptions(base: _Cpm, trial: _Cpm, before: dict, r1: dict, trace: 
     or remaining duration, open or dangling ends left by deleted or retyped links, new hard constraints, negative
     lags, SS links with zero lag, activities that became near critical, links driving the finish."""
     T, A = base.t, trial.t
-    code = lambda n: {"task_code": T[n]["task_code"], "task_name": T[n]["task_name"]}  # noqa: E731
-    cuts, ends, hard, neg, ss0 = [], [], [], [], []
+    code = lambda n: {"task_code": A[n]["task_code"], "task_name": A[n]["task_name"]}  # noqa: E731
+    cuts, ends, hard, neg, ss0, added = [], [], [], [], [], []
     for t in trace:
-        if t["op"] == "duration":
-            d = T[t["task_id"]]
+        if t["op"] == "add_activity":
+            added.append(t)
+        elif t["op"] == "duration":
+            d = A[t["task_id"]]
             hpd = d["hpd"] or 8.0
             orig = float(d.get("target_drtn_hr_cnt") or 0)
             old = orig if t["original"] else t["rem_before"]
@@ -806,7 +953,7 @@ def _whatif_assumptions(base: _Cpm, trial: _Cpm, before: dict, r1: dict, trace: 
                              "constraint_date": ad and _fmt_dt(ad), "before": _cstr_label(b) if b else None})
         else:
             lk, old = t["link"], t["before"]
-            p, s = T[lk["pred"]], T[lk["succ"]]
+            p, s = A[lk["pred"]], A[lk["succ"]]
             view = {"predecessor": p["task_code"], "predecessor_name": p["task_name"], "successor": s["task_code"],
                     "successor_name": s["task_name"], "edit": t["edit"]}
             if t["op"] != "delete_link":
@@ -844,14 +991,19 @@ def _whatif_assumptions(base: _Cpm, trial: _Cpm, before: dict, r1: dict, trace: 
             if why and (n, why) not in seen:
                 seen.add((n, why))
                 open_ends.append({**code(n), "left_with": why, "edit": view["edit"]})
+    for t in added:  # a fragnet activity is a new activity: its open ends are flagged as the ones a deleted link leaves
+        n = t["task_id"]
+        for side, why in (("succ", "no predecessor"), ("pred", "no successor")):
+            if not has(n, side):
+                open_ends.append({**code(n), "left_with": why, "edit": t["edit"]})
     hpd = lambda n: T[n]["hpd"] or 8.0  # noqa: E731
     near = lambda tf, n: tf is not None and tf <= near_h0 + near_days * hpd(n) + CPM_TF_TOL_H  # noqa: E731
     rows = sorted(({**code(n), "total_float_d_before": _days(before[n]["tf_h"], hpd(n)),
                     "total_float_d_after": _days(r1[n]["tf_h"], hpd(n))} for n in opn
                    if near(r1[n]["tf_h"], n) and not crit_a(n) and not near(before[n]["tf_h"], n) and not crit_b(n)),
                   key=lambda r: (r["total_float_d_after"] if r["total_float_d_after"] is not None else 0, r["task_code"]))
-    conv = lambda ties: {"driving_links": len(ties), "predecessors": sorted({T[p]["task_code"] for p, _ in ties})[:CTX_LINKS],  # noqa: E731
-                         "finish_activities": sorted({T[f]["task_code"] for _, f in ties})[:CTX_LINKS]}  # those entered
+    conv = lambda ties: {"driving_links": len(ties), "predecessors": sorted({A[p]["task_code"] for p, _ in ties})[:CTX_LINKS],  # noqa: E731
+                         "finish_activities": sorted({A[f]["task_code"] for _, f in ties})[:CTX_LINKS]}  # those entered
     flags = {"duration_cuts": cuts, "open_ends": open_ends, "hard_constraints": hard, "negative_lags": neg,
              "ss_zero_lag": ss0}
     return {**flags, "near_critical": {"definition": f"total float within {near_days:g} d of the critical limit "
@@ -863,6 +1015,92 @@ def _whatif_assumptions(base: _Cpm, trial: _Cpm, before: dict, r1: dict, trace: 
                                                  "converge on it"},
             "flag_count": sum(len(v) for v in flags.values()) + len(rows), "max_cut_pct": max_cut_pct,
             "note": "Flags only: none of them stops the run. They mark what a reviewer would question."}
+
+
+def _fragnet_impact(base: _Cpm, trial: _Cpm, before: dict, fin_before: Optional[datetime], r1: dict, d1: dict,
+                    crit_a: Callable, milestones: Optional[list], basis: str) -> dict:
+    """The fragnet block of p6_schedule_whatif (time impact analysis): the fragnet activities with the engine's dates
+    and float, the delay of the project finish and of each milestone in working days of the project calendar, and
+    the driving path from the fragnet into the project finish (ties() of the forward pass)."""
+    T, A = base.t, trial.t
+    frag = list(trial.frag_ctx["added"])
+    pcal = trial.pcal if trial.pcal is not None and not trial.pcal.error else None
+    cd = lambda a, b: None if a is None or b is None else round((b - a).total_seconds() / 86400, 2) + 0.0  # noqa: E731
+    wd = lambda a, b: None if a is None or b is None or pcal is None else round(pcal.work_days(a, b), 2) + 0.0  # noqa: E731
+    fmt = lambda v: v and _fmt_dt(v)  # noqa: E731
+    fm, fin_after = trial.finish(r1)
+    # driving path: every activity whose link sets the dates of an activity on the project finish, walked back, then
+    # the part of it a fragnet activity starts
+    ends = [n for n, d in A.items() if d["task_type"] not in ("TT_LOE", "TT_WBS") and r1[n]["ef"] >= fin_after - CPM_TOL]
+    ties: dict = {}
+    stack = list(ends)
+    while stack:
+        n = stack.pop()
+        if n not in ties:
+            ties[n] = tuple(dict.fromkeys(trial.ties(d1.get(n))))
+            stack.extend(ties[n])
+    kids: dict = {}
+    for n, ps in ties.items():
+        for p in ps:
+            kids.setdefault(p, []).append(n)
+    reach, stack = set(), [n for n in frag if n in ties]
+    while stack:
+        n = stack.pop()
+        if n not in reach:
+            reach.add(n)
+            stack.extend(kids.get(n, ()))
+    rank = {n: i for i, n in enumerate(trial._plan_cache()["order"])}
+    codes = lambda ns: [A[n]["task_code"] for n in ns]  # noqa: E731
+    path = [{"task_code": A[n]["task_code"], "task_name": A[n]["task_name"], "fragnet": bool(A[n].get("fragnet")),
+             "early_start": fmt(r1[n]["es"]), "early_finish": fmt(r1[n]["ef"]),
+             "total_float_d": _days(r1[n]["tf_h"], A[n]["hpd"]), "driven_by": codes(ties[n]),
+             "on_project_finish": n in ends} for n in sorted(reach, key=lambda n: rank.get(n, 0))]
+    by = lambda side, n: sorted(A[lk[side]]["task_code"] for lk in trial.links  # noqa: E731
+                                if lk["succ" if side == "pred" else "pred"] == n)
+    acts = []
+    for n in frag:
+        d, r = A[n], r1[n]
+        acts.append({"task_code": d["task_code"], "task_name": d["task_name"], "task_type": d["task_type"],
+                     "wbs_code": d["wbs_code"], "calendar": d["calendar"], "original_d": _days(d["rem"], d["hpd"]),
+                     "constraint": _cstr_label(d["cstr_type"]), "constraint_date": fmt(d["cstr_date"]),
+                     "early_start": fmt(r["es"]), "early_finish": fmt(r["ef"]), "late_start": fmt(r["ls"]),
+                     "late_finish": fmt(r["lf"]), "total_float_d": _days(r["tf_h"], d["hpd"]),
+                     "free_float_d": _days(r.get("ff_h"), d["hpd"]), "critical": bool(crit_a(n)),
+                     "longest_path": bool(r.get("longest")), "predecessors": by("pred", n),
+                     "successors": by("succ", n), "driven_by": codes(trial.ties(d1.get(n))),
+                     "drives_finish": n in reach})
+    if milestones:
+        keys = [base.code[c] for c in dict.fromkeys(milestones)]
+    else:
+        keys = [n for n, d in T.items() if d["task_type"] in ("TT_Mile", "TT_FinMile") and d["status_code"] != "TK_Complete"]
+    ms = []
+    for n in keys:
+        k = "es" if T[n]["task_type"] == "TT_Mile" else "ef"
+        b, a = before[n][k], r1[n][k]
+        ms.append({"task_code": T[n]["task_code"], "task_name": T[n]["task_name"], "task_type": T[n]["task_type"],
+                   "date_before": fmt(b), "date_after": fmt(a), "delay_cd": cd(b, a), "delay_wd": wd(b, a),
+                   "delayed": b is not None and a - b > CPM_TOL})
+    ms.sort(key=lambda m: (-(m["delay_wd"] if m["delay_wd"] is not None else m["delay_cd"] or 0), m["date_after"] or "",
+                           m["task_code"]))
+    return {
+        "activities": acts,
+        "impact": {"project_finish": {"before": fmt(fin_before), "after": fmt(fin_after), "delay_cd": cd(fin_before, fin_after),
+                                      "delay_wd": wd(fin_before, fin_after), "finish_activity": fm and fm["task_code"]},
+                   "milestones": ms[:ACT_LINKS_CAP], "milestones_total": len(ms),
+                   "milestones_delayed": sum(m["delayed"] for m in ms),
+                   "calendar": pcal.name if pcal is not None else None,
+                   "definition": "delay = after - before; delay_wd in working days of the project calendar (null when "
+                                 "it is unreadable); milestones: the ones given, else every open milestone (start of a "
+                                 "start milestone, else finish), most delayed first; before = " + basis},
+        "driving_path": {"drives_finish": bool(reach), "count": len(path), "rows": path[:FRAGNET_PATH_CAP],
+                         "definition": "activities whose relationship sets the early dates of the next one, from a "
+                                       "fragnet activity to the activities on the project finish (engine forward "
+                                       "pass), in network order; driven_by lists every predecessor that sets the "
+                                       "activity's dates"},
+        "note": "Fragnet activities exist only in this calculation: nothing is written. They are new activities for "
+                "the assumptions and DCMA blocks; float_change, longest_path_change and the changed rows cover the "
+                "existing activities only.",
+    }
 
 
 def _finish_ties(cpm: _Cpm, res: dict, drv: dict) -> tuple:

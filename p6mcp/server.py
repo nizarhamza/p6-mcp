@@ -79,7 +79,8 @@ from p6mcp.registry import (  # noqa: F401  (re-exported)
     AsgEdits, BaselineDates, _before_call, CalCheckKind, CalCheckKinds, _CALL, CompareSection, CompareTo, _confirm_text,
     ConfirmText, ConfirmToken, CpMode, CstrName, CutPct, DanglingKind, DATE_PATTERN, DateStr, DATETIME_PATTERN,
     DateTimeStr, DcmaCheck, Depth, DESTRUCTIVE_DOC, Detail, DetailArg, Direction, DryRun, DurationBasis, _eppm_refusal,
-    _eppm_skill_ok, EpsOrder, Explain, FloatEdges, _gated, GroupBy, HcCheck, HINT_KEYS, ImportMode, INSTRUCTIONS,
+    _eppm_skill_ok, EpsOrder, Explain, FloatEdges, FragnetType, _gated, GroupBy, HcCheck, HINT_KEYS, ImportMode,
+    INSTRUCTIONS,
     IntegrityFlag, _json_text, LaGrid, LegacyConfirm, Level, LevelPriority, Limit, LinkEdit, LinkEdits, _LinkEnds,
     LinkIds, LinkNew, LinkNews, LinkRef, LinkRefs, LISTED, Measure, MsCodes, MsOrder, NewEps, _NewEpsKeys, NonNegDays,
     NonNegQty, Offset, PathNo, Pct, Period, _plan_gate, _preview, ProjectId, ProjectIds, ProjectList, ProjOrder,
@@ -133,8 +134,9 @@ from p6mcp.core.analysis import (  # noqa: F401  (re-exported)
 )
 from p6mcp.core.explain import (  # noqa: F401  (re-exported)
     _cal_window, CAUSE_CLASSES, _cpm_classify, _cpm_compare, _cpm_context, CPM_DIFF_LABELS, _cpm_other_fields,
-    _cpm_reloaded, _cpt, CTX_LINKS, CTX_WINDOW_WD, _data_issues, _dcma_brief, _dcma_memory, _engine_rules, F9_SAVE_TOL,
-    _finish_ties, FLOAT_TEXT, IMPORT_WINDOW, LABEL_OF_TABLE, LAG_CAL_TEXT, OOS_TEXT, _project_context, _stale_f9,
+    _cpm_reloaded, _cpt, _cstr_arg, CTX_LINKS, CTX_WINDOW_WD, _data_issues, _dcma_brief, _dcma_memory, _engine_rules,
+    F9_SAVE_TOL, _finish_ties, FLOAT_TEXT, _FRAG_NONE, _fragnet_add, _fragnet_ctx, _fragnet_impact, FRAGNET_PATH_CAP,
+    FRAGNET_TYPES, IMPORT_WINDOW, LABEL_OF_TABLE, LAG_CAL_TEXT, _link_cycle, OOS_TEXT, _project_context, _stale_f9,
     _stale_min, STALE_SAMPLE, _stale_view, _temp_network, _whatif_apply, _whatif_assumptions, WHATIF_CAVEAT,
     WHATIF_CUT_PCT,
 )

@@ -36,8 +36,22 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
   calendar, a relationship P6 would refuse, a logic loop the new relationships close. One edit log entry per
   activity and per relationship; the project is marked stale (F9). Not available on a P6 EPPM working copy (the
   push does not create activities); offered to remote clients with edits allowed.
+- Fragnet what-if (time impact analysis): `p6_schedule_whatif` takes `add_activity` edits that insert new activities
+  in memory only (a new Activity ID and name, the original duration in days of a calendar, the project calendar by
+  default, task type TT_Task, TT_Mile or TT_FinMile, a WBS code, the project node by default, and an optional
+  constraint), and `add_link` edits link them to each other or to existing activities. The result then adds a
+  `fragnet` block: the fragnet activities with the engine's early and late dates, total and free float, critical
+  and longest path flags, links and what drives them; the impact on the project finish and on each milestone (the
+  ones given, else every open milestone) before and after, with the delay in calendar days and in working days of
+  the project calendar; and the driving path from the fragnet into the project finish (the activities whose
+  relationships set the dates). Fragnet activities count as new activities in the assumption flags (an activity
+  left without a predecessor or successor is an open end) and in the DCMA checks run before and after the edits.
+  Nothing is written to the database. Without `add_activity` edits the result is unchanged.
 
 ### Changed
+
+- `p6_schedule_whatif`: an `add_link` edit that would close a loop is refused at that edit, with the loop it closes
+  (`A -> B -> C -> A`), instead of the engine's loop error after every edit.
 
 - The core skills shipped with the app (installed on first start, or when the skill shop cannot be reached) follow
   the skill shop at 3b082c3: two new skills, `trend-report` (`p6_trend`) and `resource-loading-review`

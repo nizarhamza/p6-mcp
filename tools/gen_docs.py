@@ -93,8 +93,8 @@ SUMMARY = {
                 "score, milestone slips and what changed between updates",
     "p6_cpm_validate": "Runs the built-in CPM engine against P6's last F9 and explains each difference: changed "
                        "since the F9, bad input, an engine rule or unknown",
-    "p6_schedule_whatif": "What-if in memory: add or remove links, change durations or constraints, see the new "
-                          "finish and what a reviewer would question",
+    "p6_schedule_whatif": "What-if in memory: add or remove links, change durations or constraints, insert a "
+                          "fragnet of new activities, see the new finish and what a reviewer would question",
     "p6_schedule_risk": "Monte Carlo schedule risk in memory: finish percentiles, on-time probability, "
                         "criticality index",
     "p6_inspect_xer": "Reads an XER file without importing it and runs the import pre-flight checks",
