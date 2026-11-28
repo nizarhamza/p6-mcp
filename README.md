@@ -53,7 +53,8 @@ from the schedule; the model explains it. Dates and float come from P6's last sc
   copy (REST API, optional read-only SQL account), run every tool on it, edit locally, push the changes after a
   conflict check and your yes, and schedule on the server with P6's own scheduler.
 - **Edits** (off by default): durations, constraints, actual dates, physical % complete, resource assignment
-  units, activity UDF values, relationships, schedule options, EPS, deletes, backups and restore.
+  units, activity UDF values, activity code values, WBS moves, relationships, schedule options, EPS, deletes,
+  backups and restore.
 
 ## Install
 
@@ -174,7 +175,7 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 ## Tools
 
 <!-- tools:start -->
-70 tools: 42 read-only (11 of them in the Basic profile), 4 that write a file, 23 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
+72 tools: 42 read-only (11 of them in the Basic profile), 4 that write a file, 25 write tools (off by default; a dry run, then your confirmation; a backup first) and 1 that changes the app's own settings. Generated from the code by `tools/gen_docs.py`.
 
 **Projects and structure**
 
@@ -271,6 +272,8 @@ the [local HTTP transport](#local-http-transport). From the command line (the in
 | `p6_update_assignments` | Sets the units of many assignments in one all-or-nothing change | Write |  |
 | `p6_update_udf` | Sets or clears one activity UDF value | Write |  |
 | `p6_update_udfs` | Sets or clears many activity UDF values in one change | Write |  |
+| `p6_update_activity_codes` | Assigns, replaces or clears activity code values of many activities in one change | Write |  |
+| `p6_move_activities` | Moves activities to another WBS of their project in one change | Write |  |
 | `p6_add_relationship` | Adds a relationship (FS, SS, FF, SF, with lag) | Write |  |
 | `p6_add_relationships` | Adds many relationships in one all-or-nothing change | Write |  |
 | `p6_update_relationship` | Changes the type or lag of a relationship | Write |  |
@@ -545,14 +548,15 @@ Then, from your MCP client:
    which schedules the pushed projects once every call has succeeded, under the same confirmation (the text is
    then `PUSH TO <server> AND SCHEDULE`).
 
-Not in this version: deleting activities, UDF edits, schedule options and other structure changes through the
-working copy (do them in P6 EPPM, then pull again). Tested against P6 EPPM 25.12 on SQL Server.
+Not in this version: deleting activities, UDF edits, activity code values, WBS moves, schedule options and other
+structure changes through the working copy (do them in P6 EPPM, then pull again). Tested against P6 EPPM 25.12
+on SQL Server.
 
 ## FAQ
 
 **What is an MCP server for Primavera P6?**
 MCP (Model Context Protocol) is the open standard AI assistants use to call tools. This server gives an assistant
-70 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
+72 tools that read and analyse Primavera P6 schedules, so you can ask questions in plain language and get answers
 computed from the schedule rather than guessed by the model.
 
 **Can the AI change my schedule?**

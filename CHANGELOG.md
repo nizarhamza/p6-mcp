@@ -7,6 +7,22 @@ All notable changes to MCP for Primavera P6 (called P6 MCP before 2.0). The form
 
 ### Added
 
+- `p6_update_activity_codes`: assigns, replaces or clears activity code values of many activities in one
+  all-or-nothing change (dry run, then your confirmation). Item `{task_code, code_type, code_value}` or
+  `{task_code, code_type, clear: true}`; the code type is the one the project sees (its project codes, then its EPS
+  codes, then global codes, case ignored), the value its short name, else its path (`CON.MEC`), else its name
+  (several matches are refused with their paths). P6 keeps one value per type and activity (TASKACTV primary key):
+  a new value replaces the old one, a soft-deleted row is revived, a clear is a hard delete as in P6. Codes move no
+  date: no project is marked stale, no F9 needed. One edit log entry per value.
+- `p6_move_activities`: moves activities to another WBS node of their project in one all-or-nothing change. `wbs`
+  = the WBS code as `p6_list_wbs` shows it (with or without the Project ID), else a WBS name unique in the project;
+  the project node itself is allowed (P6 keeps activities there), a WBS of another project is refused. Dates
+  depend on the WBS only through WBS summary activities: the project is marked stale (F9) only when one spans the
+  old or the new WBS (`schedule_effect`, `wbs_summaries` per item); P6's summary tables are reported in
+  `summaries_stale` (Tools > Summarize). One edit log entry per activity.
+- Both are write tools (Full profile, writes on, two-step confirmation; remote clients only with remote edits on
+  and a grant with edits). They are refused on a P6 EPPM working copy: the push does not send activity code
+  values or WBS changes yet.
 - `p6_add_activities`: creates activities in a project, with their relationships, in one all-or-nothing change
   (two-step write, at most 500 items). Item: Activity ID (unique in the project, length limit of the admin
   preferences), name, WBS (code or unique name; default the project node), type (task, resource dependent, start or

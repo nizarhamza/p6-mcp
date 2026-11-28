@@ -169,6 +169,10 @@ def _eppm_refusal(tool: str) -> str:
     if tool == "p6_delete_activity":
         return ("Activities are not deleted through a P6 EPPM working copy in this version: delete it in P6 EPPM, "
                 "then pull again.")
+    if tool in ("p6_update_activity_codes", "p6_move_activities"):
+        what = "Activity code values" if tool == "p6_update_activity_codes" else "WBS moves"
+        return (f"{what} are not sent to the P6 EPPM server by the push in this version ({tool} is not available on a "
+                "P6 EPPM working copy): change them in P6 EPPM, then pull again.")
     if tool == "p6_add_activities":
         return ("Activities are not created through a P6 EPPM working copy in this version: add them in P6 EPPM, "
                 "then pull again.")
@@ -649,6 +653,31 @@ class AsgEdit(TypedDict, total=False):
 
 
 AsgEdits = Annotated[list[AsgEdit], Field(min_length=1, description="Assignments to change.")]
+
+
+# ----------------------------------------------------------------- activity code values and WBS moves
+
+class _CodeEditKeys(TypedDict):
+    task_code: str
+    code_type: str
+
+
+class CodeEdit(_CodeEditKeys, total=False):
+    """An activity code value to assign (code_value) or remove (clear=True) for one code type."""
+    code_value: str
+    clear: bool
+
+
+CodeEdits = Annotated[list[CodeEdit], Field(min_length=1, description="Activity code values to assign or clear.")]
+
+
+class WbsMove(TypedDict):
+    """An activity and the WBS it moves to (WBS code as p6_list_wbs shows it, or a WBS name unique in the project)."""
+    task_code: str
+    wbs: str
+
+
+WbsMoves = Annotated[list[WbsMove], Field(min_length=1, description="Activities to move to another WBS.")]
 
 
 # ----------------------------------------------------------------- activity UDF values

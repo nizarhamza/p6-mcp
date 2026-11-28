@@ -68,6 +68,15 @@ def test_every_tool_has_a_remote_decision(server):
             assert k == "write", t
     assert kinds["p6_eppm_pull"] == "write" and kinds["p6_list_projects"] == "read"
     assert kinds["p6_trend"] == "read"  # 3.5.0: read only, offered to remote clients
+    # 3.8.0: activity code values and WBS moves are writes, as p6_update_activities: remote writes switch + scope
+    assert kinds["p6_update_activity_codes"] == kinds["p6_move_activities"] == "write"
+    full = dict(profile="full", allow_writes=True)
+    for t in ("p6_update_activity_codes", "p6_move_activities"):
+        assert not policy.remote_listed(t, **full, remote_writes=False)
+        assert policy.remote_listed(t, **full, remote_writes=True)
+        assert policy.remote_refusal(t, "full", True, False, {"p6:read", "p6:write"}) == policy.REMOTE_WRITES_OFF
+        assert policy.remote_refusal(t, "full", True, True, {"p6:read"}) == policy.REMOTE_SCOPE_OFF
+        assert policy.remote_refusal(t, "full", True, True, {"p6:read", "p6:write"}) is None
 
 
 def test_remote_listing():

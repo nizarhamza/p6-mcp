@@ -106,6 +106,8 @@ Facts an assistant should get right:
 - `p6_update_assignments`: Sets the units of many assignments in one all-or-nothing change (write)
 - `p6_update_udf`: Sets or clears one activity UDF value (write)
 - `p6_update_udfs`: Sets or clears many activity UDF values in one change (write)
+- `p6_update_activity_codes`: Assigns, replaces or clears activity code values of many activities in one change (write)
+- `p6_move_activities`: Moves activities to another WBS of their project in one change (write)
 - `p6_add_relationship`: Adds a relationship (FS, SS, FF, SF, with lag) (write)
 - `p6_add_relationships`: Adds many relationships in one all-or-nothing change (write)
 - `p6_update_relationship`: Changes the type or lag of a relationship (write)
