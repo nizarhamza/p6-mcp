@@ -457,6 +457,26 @@ def eppm_profile(cfg: dict, name: Optional[str] = None) -> Optional[dict]:
     return next((p for p in cfg.get("eppm_profiles", []) if p.get("name") == name), None)
 
 
+# The key naming the active profile of each data source (XER-only mode has one file set, no name).
+SOURCE_KEYS = {"database": "active_database", "xer": None, "eppm": "eppm_active", "pmdb": "pmdb_active"}
+
+
+def source_choice(cfg: dict) -> tuple[str, Optional[str]]:
+    """(data source, active profile name) a config dict selects."""
+    ds = cfg.get("data_source") or "database"
+    key = SOURCE_KEYS.get(ds)
+    return ds, (cfg.get(key) if key else None)
+
+
+def source_selection(source: str, profile: Optional[str]) -> dict:
+    """The config keys that select this data source and profile: what p6_use_database layers over the file for one
+    server process (load(override=...)), never saved."""
+    if source not in SOURCE_KEYS:
+        raise ValueError(f"source must be one of {list(SOURCE_KEYS)}")
+    key = SOURCE_KEYS[source]
+    return {"data_source": source, **({key: profile} if key else {})}
+
+
 # ----------------------------------------------------------------- file access
 
 _cache: dict[str, tuple] = {}  # path -> ((mtime_ns, size), validated dict, migration steps)
@@ -567,9 +587,17 @@ def _env_flag(name: str) -> Optional[bool]:
     return v.strip().lower() in ("1", "true", "yes", "on")
 
 
-def load() -> Settings:
+SWITCHED_NOTE = (" (This server process was switched to another data source with p6_use_database; "
+                 "p6_use_database(source=\"saved\") returns to the saved choice.)")
+
+
+def load(override: Optional[dict] = None) -> Settings:
     """Effective settings now (cheap: the file is cached until it changes). Never raises: a broken
-    config file gives no database, with the reason in config_error and db_problem."""
+    config file gives no database, with the reason in config_error and db_problem.
+
+    override: config keys that select another data source (source_selection), layered over the file's content for
+    this call only (p6_use_database: one server process); the environment (P6_DB_PATH) still wins and a broken or
+    missing file ignores it. raw then holds the overridden selection."""
     path = config_path()
     err = None
     try:
@@ -580,6 +608,9 @@ def load() -> Settings:
     if "${" in env_db:  # an MCP bundle option left empty: the host passes the template unresolved
         env_db = ""
     cfg = data or copy.deepcopy(DEFAULTS)
+    switched = bool(override) and data is not None and not env_db
+    if switched:
+        cfg = dict(cfg, **override)
     source = "config" if data is not None else ("env" if env_db else "none")
 
     db_path, db_name, problem = "", None, None
@@ -639,6 +670,8 @@ def load() -> Settings:
         problem = (f"The configured database was not found: {db_path}. Open MCP for Primavera P6 Settings to "
                    "select another one.")
         db_path = ""
+    if switched and problem:
+        problem += SWITCHED_NOTE
 
     legacy = source == "env"  # v2 layout: files beside the database, one backup per process
     db_dir = os.path.dirname(db_path) if db_path else ""

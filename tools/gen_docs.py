@@ -46,7 +46,7 @@ GROUPS: list[tuple[str, list[str]]] = [
                                 "p6_delete_relationships", "p6_set_schedule_options", "p6_create_eps",
                                 "p6_delete_activity", "p6_delete_project"]),
     ("Backups, log and diagnostics", ["p6_backup_database", "p6_list_backups", "p6_restore_backup", "p6_edit_log",
-                                      "p6_diagnose", "p6_sql_select"]),
+                                      "p6_diagnose", "p6_use_database", "p6_sql_select"]),
     ("Skill shop", ["p6_shop_search", "p6_shop_get", "p6_shop_install"]),
 ]
 
@@ -137,6 +137,8 @@ SUMMARY = {
     "p6_restore_backup": "Puts a backup back in place, after a safety backup of the current database",
     "p6_edit_log": "Every confirmed write, with its parameters, before and after values",
     "p6_diagnose": "Configuration, database, P6 version and P6 running state at a glance",
+    "p6_use_database": "Switches this server to another database, XER set, P6 EPPM or SQL Server / Oracle copy "
+                       "already confirmed in Settings, for this session only (never saved), after your confirmation",
     "p6_sql_select": "Read-only SQL on the P6 database, as a last resort",
     "p6_shop_search": "Searches the skill shop (ready-made P6 workflows shared on GitHub)",
     "p6_shop_get": "Shows one skill of the shop in full",

@@ -42,6 +42,11 @@ PMDB_MANIFEST: Optional[dict] = None  # P6 Professional on SQL Server / Oracle: 
 _engine_cache: "OrderedDict[tuple, object]" = OrderedDict()
 _engine_lock = threading.Lock()
 _engine_stats: Counter = Counter()
+# p6_use_database: the data source of THIS server process, layered over config.json at every _refresh() until it is
+# switched back or the process ends (never saved): {"source", "profile", "since", "selection" (config keys)}.
+# None = the saved choice. The tool list stays the one of STARTUP.
+OVERRIDE: Optional[dict] = None
+TRANSPORT = "stdio"  # "http" once http_server builds its app: one process then serves every HTTP client
 
 
 def _engine_cache_clear() -> None:
@@ -54,11 +59,12 @@ def _engine_cache_clear() -> None:
 
 
 def _refresh() -> _config.Settings:
-    """Re-read the settings (cheap while config.json is unchanged). A new database clears the caches
-    tied to the old one."""
+    """Re-read the settings (cheap while config.json is unchanged), with the data source switch of this process
+    (OVERRIDE) layered over them. A new database clears the caches tied to the old one."""
     global SETTINGS, DB_PATH, P6_USER, BACKUP_DIR, LOG_DIR, SKIP_PROC, _backup_done, _last_backup, XER_MANIFEST
     global EPPM_MANIFEST, PMDB_MANIFEST
-    st = _config.load()
+    ov = OVERRIDE
+    st = _config.load(override=ov["selection"] if ov else None)
     XER_MANIFEST = EPPM_MANIFEST = PMDB_MANIFEST = None
     if st.pmdb:  # P6 Professional on SQL Server / Oracle: the local read-only copy, once there is one
         PMDB_MANIFEST = _pmdb.read_manifest(st.pmdb)

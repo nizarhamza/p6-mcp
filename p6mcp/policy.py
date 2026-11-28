@@ -5,8 +5,8 @@ kind:
   file         reads the database and writes a file the caller names (export_xer, export_dashboard): Full profile
   write        changes the database: Full profile + allow_writes + dry run + confirmation token
   destructive  write that deletes or replaces data: also needs the exact confirmation text
-  config       changes the app's own settings, never the database (p6_shop_install): Full profile + dry run +
-               confirmation token, not gated by allow_writes
+  config       changes the app's own settings, never the database (p6_shop_install; p6_use_database, for this
+               server process only): Full profile + dry run + confirmation token, not gated by allow_writes
 
 The skill shop tools (SHOP_TOOLS) read github.com: they are listed only when shop_enabled is on.
 
@@ -54,8 +54,8 @@ TOOL_KIND: dict[str, str] = {
     # destructive
     "p6_delete_activity": DESTRUCTIVE, "p6_delete_project": DESTRUCTIVE, "p6_restore_backup": DESTRUCTIVE,
     "p6_eppm_push": DESTRUCTIVE,  # writes to the P6 EPPM server
-    # MCP for Primavera P6 settings
-    "p6_shop_install": CONFIG,
+    # MCP for Primavera P6 settings (p6_use_database: the data source of this server process only, never saved)
+    "p6_shop_install": CONFIG, "p6_use_database": CONFIG,
 }
 
 # Basic profile: a small read-only set that small local models handle well
@@ -66,7 +66,8 @@ BASIC_TOOLS = frozenset({
 })
 # Tools that do not need a database (the rest refuse with the "No database configured" message)
 NO_DB_TOOLS = frozenset({"p6_diagnose", "p6_inspect_xer", "p6_shop_search", "p6_shop_get", "p6_shop_install",
-                         "p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status", "p6_pmdb_refresh"})
+                         "p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status", "p6_pmdb_refresh",
+                         "p6_use_database"})
 # The skill shop (p6mcp.shop): GitHub reads, offered only while the setting shop_enabled is on
 SHOP_TOOLS = frozenset({"p6_shop_search", "p6_shop_get", "p6_shop_install"})
 SHOP_OFF = ("The skill shop is turned off. Turn on 'Allow the skill shop' in MCP for Primavera P6 Settings "

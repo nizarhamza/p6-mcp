@@ -100,6 +100,8 @@ class P6:
 
     def __init__(self, server, tmp_path, golden):
         from p6mcp import config
+        from p6mcp.core import state
+        state.OVERRIDE = None  # p6_use_database: a switch never outlives its test
         self.s, self.config = server, config
         self.db = str(tmp_path / "demo.db")
         shutil.copyfile(golden, self.db)
