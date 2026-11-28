@@ -6,6 +6,8 @@ import re
 import sqlite3
 from typing import Optional
 
+from p6mcp.pmdb import READ_ONLY as PMDB_READ_ONLY  # noqa: F401  (P6 Professional on SQL Server / Oracle)
+
 
 MAX_ROWS = 200
 HPD_SQL = "COALESCE(NULLIF(c.day_hr_cnt, 0), 8)"  # hours per day of calendar alias c (0 or NULL -> 8)

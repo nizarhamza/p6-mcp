@@ -44,8 +44,9 @@ class DatabasePage(QWidget):
         self.src_db = QRadioButton(tr("db.source.database"))
         self.src_xer = QRadioButton(tr("db.source.xer"))
         self.src_eppm = QRadioButton(tr("db.source.eppm"))
+        self.src_pmdb = QRadioButton(tr("db.source.pmdb"))
         self.src_grp = QButtonGroup(self)
-        for b in (self.src_db, self.src_xer, self.src_eppm):
+        for b in (self.src_db, self.src_xer, self.src_eppm, self.src_pmdb):
             self.src_grp.addButton(b)
             sl.addWidget(b)
         self.src_grp.buttonClicked.connect(self._source)
@@ -87,10 +88,7 @@ class DatabasePage(QWidget):
         self.name_edit.editingFinished.connect(self._rename)
         form.addRow(tr("db.name"), self.name_edit)
         self.kind = QComboBox()
-        self.kind.addItem(tr("db.kind.sqlite"), "sqlite")
-        for key in ("db.kind.sqlserver", "db.kind.oracle"):
-            self.kind.addItem(tr(key) + " " + tr("db.kind.later"))
-            self.kind.model().item(self.kind.count() - 1).setEnabled(False)
+        self.kind.addItem(tr("db.kind.sqlite"), "sqlite")  # SQL Server and Oracle: the data source of their own
         form.addRow(tr("db.kind"), self.kind)
         prow = QHBoxLayout()
         self.path_edit = QLineEdit()
@@ -130,11 +128,15 @@ class DatabasePage(QWidget):
         from p6mcp.settings_app.eppm_panel import EppmPanel
         self.eppm = EppmPanel(win)
         lay.addWidget(self.eppm)
+        from p6mcp.settings_app.pmdb_panel import PmdbPanel
+        self.pmdb = PmdbPanel(win)
+        lay.addWidget(self.pmdb)
         lay.addStretch(1)
         self.refresh()
 
     def _source(self, *_args) -> None:
-        src = "xer" if self.src_xer.isChecked() else ("eppm" if self.src_eppm.isChecked() else "database")
+        src = ("xer" if self.src_xer.isChecked() else "eppm" if self.src_eppm.isChecked()
+               else "pmdb" if self.src_pmdb.isChecked() else "database")
         self.win.set_data(dict(self.win.data, data_source=src))
         self.refresh()
         self.win.page_changed()
@@ -151,16 +153,19 @@ class DatabasePage(QWidget):
         keep = select or self.selected()
         data = self.win.data
         src = data.get("data_source", "database")
-        xer, ep = src == "xer", src == "eppm"
-        {"xer": self.src_xer, "eppm": self.src_eppm}.get(src, self.src_db).setChecked(True)
-        self.profiles_box.setVisible(not (xer or ep))
-        self.detail.setVisible(not (xer or ep))
+        xer, ep, pm = src == "xer", src == "eppm", src == "pmdb"
+        {"xer": self.src_xer, "eppm": self.src_eppm, "pmdb": self.src_pmdb}.get(src, self.src_db).setChecked(True)
+        self.profiles_box.setVisible(not (xer or ep or pm))
+        self.detail.setVisible(not (xer or ep or pm))
         if hasattr(self, "xer"):
             self.xer.setVisible(xer)
             self.xer.refresh()
         if hasattr(self, "eppm"):
             self.eppm.setVisible(ep)
             self.eppm.refresh()
+        if hasattr(self, "pmdb"):
+            self.pmdb.setVisible(pm)
+            self.pmdb.refresh()
         self.table.blockSignals(True)
         self.table.setRowCount(0)
         for d in data.get("databases", []):
@@ -683,10 +688,13 @@ class ToolsPage(QWidget):
         full = d.get("tool_profile") == "full"
         (self.full if full else self.basic).setChecked(True)
         src = d.get("data_source")
-        xer = src == "xer"  # P6 EPPM mode writes its local working copy (sent to the server only by a push)
+        # XER-only mode and a P6 Professional SQL Server / Oracle copy never write; P6 EPPM mode writes its local
+        # working copy (sent to the server only by a push)
+        xer = src in ("xer", "pmdb")
         self.allow.setChecked(bool(d.get("allow_writes")))
         self.allow.setEnabled(full and not xer)
-        self.allow.setToolTip(tr("tools.allow.xer") if xer else tr("tools.allow.eppm") if src == "eppm" and full
+        self.allow.setToolTip(tr("tools.allow.xer") if src == "xer" else tr("tools.allow.pmdb") if xer
+                              else tr("tools.allow.eppm") if src == "eppm" and full
                               else ("" if full else tr("tools.allow.needs_full")))
         self.backup.setChecked(bool(d.get("backup_before_write", True)))
         self.block.setChecked(bool(d.get("block_when_p6_running", True)))

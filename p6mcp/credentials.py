@@ -85,6 +85,11 @@ def eppm_proxy_key(profile: str) -> str:
     return f"eppm-proxy:{profile}"
 
 
+def pmdb_key(profile: str) -> str:
+    """Password of the database login of a P6 Professional SQL Server / Oracle profile (p6mcp.pmdb)."""
+    return f"pmdb:{profile}"
+
+
 def new_token() -> str:
     """256 bits, URL-safe."""
     return _rand.token_urlsafe(32)

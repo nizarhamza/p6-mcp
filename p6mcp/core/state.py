@@ -14,6 +14,7 @@ from contextvars import ContextVar
 from typing import Optional
 
 from p6mcp import config as _config
+from p6mcp import pmdb as _pmdb
 from p6mcp import xerstore as _xerstore
 from p6mcp.eppm import store as _eppm_store
 
@@ -35,6 +36,7 @@ _log_cache: dict[str, tuple] = {}  # edit log file -> ((mtime_ns, size), entries
 _schema_cache: dict[str, dict] = {}  # db path -> schema.detect() (trust applied at read time)
 XER_MANIFEST: Optional[dict] = None  # XER-only mode: files, projects (Project ID renames), warnings
 EPPM_MANIFEST: Optional[dict] = None  # P6 EPPM mode: pull.json of the working copy (server, projects, rows)
+PMDB_MANIFEST: Optional[dict] = None  # P6 Professional on SQL Server / Oracle: copy.json of the local copy
 # The network cache (core/netcache.py): (database file, proj_id) -> entry, least recently used first; its lock
 # (tool calls run on threads in the HTTP and remote servers) and its counters for p6_diagnose.
 _engine_cache: "OrderedDict[tuple, object]" = OrderedDict()
@@ -55,9 +57,13 @@ def _refresh() -> _config.Settings:
     """Re-read the settings (cheap while config.json is unchanged). A new database clears the caches
     tied to the old one."""
     global SETTINGS, DB_PATH, P6_USER, BACKUP_DIR, LOG_DIR, SKIP_PROC, _backup_done, _last_backup, XER_MANIFEST
-    global EPPM_MANIFEST
+    global EPPM_MANIFEST, PMDB_MANIFEST
     st = _config.load()
-    XER_MANIFEST = EPPM_MANIFEST = None
+    XER_MANIFEST = EPPM_MANIFEST = PMDB_MANIFEST = None
+    if st.pmdb:  # P6 Professional on SQL Server / Oracle: the local read-only copy, once there is one
+        PMDB_MANIFEST = _pmdb.read_manifest(st.pmdb)
+        if PMDB_MANIFEST:
+            st = dataclasses.replace(st, db_path=_pmdb.store_path(st.pmdb), db_problem=None)
     if st.eppm:  # P6 EPPM mode: the working copy of the pulled projects, once there is one
         EPPM_MANIFEST = _eppm_store.read_manifest(st.eppm)
         if EPPM_MANIFEST:

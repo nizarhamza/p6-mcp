@@ -14,7 +14,7 @@ stay outside this repository.
 
 ## Layout
 
-- The server (72 tools; the former single-file `p6_mcp_server.py`, then `p6mcp/server.py`, split into modules in
+- The server (73 tools; the former single-file `p6_mcp_server.py`, then `p6mcp/server.py`, split into modules in
   3.5.0 without a change in behaviour). Entry point `python -m p6mcp` (`p6mcp/__main__.py`).
   - `p6mcp/server.py`: the facade. It imports the modules below (a tool module registers its tools when imported,
     so the import order is the tool list order), re-exports every name they define (the tests, `remote/server.py`,
@@ -56,9 +56,10 @@ stay outside this repository.
   mtime/size; never raises: `config_error`, `db_problem`). Env vars win (`P6_DB_PATH` = explicit selection,
   `P6MCP_TOOL_PROFILE`, `P6MCP_ALLOW_WRITES`...). P6_DB_PATH without a config file keeps the v2 layout
   (files beside the DB, backup once per process, no pruning). A database entry is used only when
-  `confirmed` (set by `confirm_database` after Test connection). Secrets are refused in the file.
+  `confirmed` (set by `confirm_database` after Test connection). Secrets are refused in the file. `DB_KINDS` stays
+  `("sqlite",)`: SQL Server / Oracle databases are the data source `pmdb` (below), not `databases` entries.
 - `p6mcp/credentials.py`: Windows Credential Manager via keyring (service `P6MCP`, `P6MCP_SECRET_SERVICE`
-  for tests): `http_token`, `db:<profile>`.
+  for tests): `http_token`, `db:<profile>`, `eppm*:<profile>`, `pmdb:<profile>` (`pmdb_key`).
 - `p6mcp/policy.py`: `TOOL_KIND` (read / file / write / destructive) for every tool, `BASIC_TOOLS`,
   `listed()` (tool list fixed at startup), `refusal()` / `write_refusal()` (checked on every call).
 - `p6mcp/remote/` (3.2, plan in `MCP_P6\REMOTE_ACCESS_PLAN.md`, outside this repo): remote access for claude.ai and
@@ -267,6 +268,36 @@ stay outside this repository.
   proxy keys only when they differ from the default. Tests: `test_eppm_connection.py` (`Proxy`, a local forward
   and CONNECT proxy that resolves `eppm.test` itself), `test_settings_app.py::test_eppm_proxy_in_settings`,
   `test_eppm_push.py` (push and schedule, diagnose).
+
+- P6 Professional on SQL Server or Oracle (plan item P1, read only; `p6mcp/pmdb.py`): config `data_source: pmdb`,
+  `pmdb_profiles` ({name, driver mssql/oracle, host, port, service = SQL Server database or Oracle service, schema =
+  owner, user, tls, projects [Project IDs], eps [EPS IDs], baselines current/all/none, confirmed, ...}; checked by
+  `config._check_pmdb`, `config.pmdb_profile`), `pmdb_active`; no schema_version bump (an older version refuses only
+  the value `pmdb` of data_source). `load()` gives `Settings.pmdb` (confirmed active profile), `allow_writes` forced
+  off. Password `credentials.pmdb_key`, stored by the panel after a test or a copy that worked. `pmdb.digest` =
+  connection keys only (`CONNECTION_KEYS`; the selection is not the connection), `selection_digest` (copy.json, so
+  `p6_diagnose` says `settings_changed_since`). `pmdb.test_profile` (CORE_TABLES `WHERE 1 = 0`, PREFER
+  `database_version` through `sql.first_row`, project count, `resolve`), `pmdb.resolve` (Project IDs by
+  `UPPER(proj_short_name) IN (marks)` in groups of `PARAMS_MAX`; EPS by the node's short name then name, subtree in
+  Python, templates `WS_Template` and baselines left out; baselines current = `sum_base_proj_id`, all =
+  `orig_proj_id IN`), `pmdb.copy` (`TABLES` templates with `{S}` and `{TABLE}`, filled by
+  `eppm.store._copy_table`; on Oracle `SET TRANSACTION READ ONLY` first; links to projects not copied left out with
+  a warning; `xerstore._support_tables` + indexes; temp file then `os.replace`; `copy.json` in
+  `%LOCALAPPDATA%\P6MCP\pmdb\<profile>`, file `pmdb_<profile>.db`). Shared with the EPPM SQL route:
+  `eppm/sql.py` `connect` (tls: pymssql `encryption="require"`, oracledb `protocol="tcps"`), `marks` (%s / :n),
+  `first_row` (TOP 1 / FETCH FIRST 1 ROWS ONLY), `table` (schema prefix); `eppm/store.py` `_value` (LOB `read()`,
+  datetime to text, Decimal), `_in_lists` (IN lists cut at `IN_MAX` 1000 for Oracle), `_affinity` (INTEGER / REAL
+  from the XER store's name hints: a whole Decimal would make hours / hours per day an integer division). Server:
+  `_refresh` points `DB_PATH` at the copy (`PMDB_MANIFEST`), `_before_call` and `_write_refusal` refuse writes with
+  `pmdb.READ_ONLY` (`PMDB_READ_ONLY`), `_diag_schema` label, `_schedule_state` adds `copied_at` / `copy_age_hours`,
+  `p6_diagnose` `pmdb_mode`, tool `p6_pmdb_refresh` (tools/database.py; FILE, `NO_DB_TOOLS`, remote
+  `REMOTE_AS_WRITE`), instructions `PMDB_HEADER`. Settings: fourth radio `src_pmdb`, `settings_app/pmdb_panel.py`
+  `PmdbPanel` (Test connection, Use this database, Install the driver through `eppm/drivers.py`, Copy now;
+  `module_factory` seam for tests), `settings_logic` `*_pmdb*`, `forget_pmdb` (password and local copy).
+  Tests: `tests/test_pmdb.py` with `tests/fixtures/fake_pmdb.py` (a fake SQL Server and a fake Oracle over the demo
+  database: dialect, schema prefix, upper case names, LOBs, decimals, '' as NULL, ORA-01795, SELECT only; every read
+  tool of a review compared with the database itself), `test_settings_app.py::test_pmdb_mode_in_settings`. Not
+  checked on a real SQL Server or Oracle P6 database yet.
 
 - Packaging (`packaging/`, see `docs/RELEASING.md`): `make_assets.py` (copies the brand icon, version
   resources), `p6mcp.spec` (PyInstaller onedir: `dist/P6MCP` with both exes, `dist/P6MCP-server`

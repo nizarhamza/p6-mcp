@@ -38,7 +38,23 @@ def table(sql: dict, name: str) -> str:
     return (schema + "." if schema else "") + (sql.get("table_prefix") or "") + name
 
 
+def marks(sql: dict, n: int) -> str:
+    """n parameter markers in the driver's style: %s for pymssql (format), :1, :2 for oracledb (numeric)."""
+    if sql.get("driver") == "oracle":
+        return ", ".join(f":{i + 1}" for i in range(n))
+    return ", ".join("%s" for _ in range(n))
+
+
+def first_row(sql: dict, select: str) -> str:
+    """'SELECT <select>' limited to one row: TOP 1 on SQL Server, FETCH FIRST 1 ROWS ONLY on Oracle (12c+)."""
+    if sql.get("driver") == "oracle":
+        return f"SELECT {select} FETCH FIRST 1 ROWS ONLY"
+    return f"SELECT TOP 1 {select}"
+
+
 def connect(sql: dict, password: str, module: Any = None):
+    """A DB-API connection. tls (P6 Professional databases, p6mcp.pmdb): SQL Server encryption required, Oracle over
+    TCPS; without it, each driver's default."""
     if not (sql.get("user") or "").strip():
         raise SqlError("No SQL user name: enter the read-only SQL account.")
     mod = module or driver_module(sql["driver"])
@@ -46,8 +62,12 @@ def connect(sql: dict, password: str, module: Any = None):
         raise SqlError(f"The {DRIVERS[sql['driver']]} driver is not installed.")
     try:
         if sql["driver"] == "mssql":
+            extra = {"encryption": "require"} if sql.get("tls") else {}
             return mod.connect(server=sql["host"], port=int(sql["port"]), user=sql["user"], password=password,
-                               database=sql["service"], login_timeout=20, timeout=120)
+                               database=sql["service"], login_timeout=20, timeout=120, **extra)
+        if sql.get("tls"):
+            return mod.connect(user=sql["user"], password=password, host=sql["host"], port=int(sql["port"]),
+                               service_name=sql["service"], protocol="tcps")
         dsn = f"{sql['host']}:{int(sql['port'])}/{sql['service']}"
         return mod.connect(user=sql["user"], password=password, dsn=dsn)
     except Exception as e:  # noqa: BLE001  (every driver raises its own classes)
@@ -64,7 +84,7 @@ def failed_sign_ins(sql: dict, password: str, user: str, module: Any = None) -> 
         return None
     try:
         cur = con.cursor()
-        mark = ":1" if sql.get("driver") == "oracle" else "%s"
+        mark = marks(sql, 1)
         cur.execute(f"SELECT failed_login_attempts_cnt FROM {table(sql, 'USERS')} "
                     f"WHERE UPPER(user_name) = UPPER({mark})", (user,))
         rows = cur.fetchall()
@@ -103,9 +123,7 @@ def test_connection(sql: dict, password: str, module_factory: Optional[Callable[
                                + ". Check the schema, the table prefix and the account's rights.")
             cur.execute(f"SELECT COUNT(*) FROM {table(sql, 'PROJECT')}")
             res["project_rows"] = int(cur.fetchall()[0][0])
-            one = "FETCH FIRST 1 ROWS ONLY" if sql["driver"] == "oracle" else ""
-            top = "" if one else "TOP 1 "
-            cur.execute(f"SELECT {top}* FROM {table(sql, 'TASK')} {one}".strip())
+            cur.execute(first_row(sql, f"* FROM {table(sql, 'TASK')}"))
             cur.fetchall()
             res["task_columns"] = len(cur.description or [])
             res["ok"] = True

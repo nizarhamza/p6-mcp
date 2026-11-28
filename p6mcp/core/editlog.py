@@ -130,6 +130,11 @@ def _schedule_state(con, pid: int, explain: bool = False) -> dict:
         note += (" last_schedule_date is empty (never scheduled in a P6 version that records it,"
                  " or imported from an XER without it).")
     note += " Edits are tracked in the edit log next to the database (p6_edit_log)."
-    return {"data_date": row["last_recalc_date"], "last_schedule_date": row["last_schedule_date"],
-            "stale": bool(e), "edited_since_last_schedule": e,
-            "note": note if explain or e or not row["last_schedule_date"] else None}
+    out = {"data_date": row["last_recalc_date"], "last_schedule_date": row["last_schedule_date"],
+           "stale": bool(e), "edited_since_last_schedule": e,
+           "note": note if explain or e or not row["last_schedule_date"] else None}
+    if _state.SETTINGS.pmdb and _state.PMDB_MANIFEST:  # a local copy: when it was read from the database server
+        from p6mcp import pmdb
+        out["copied_at"] = _state.PMDB_MANIFEST.get("copied_at")
+        out["copy_age_hours"] = pmdb.age_hours(_state.PMDB_MANIFEST)
+    return out

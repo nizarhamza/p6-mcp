@@ -10,12 +10,13 @@ from time import monotonic
 from typing import Any, Optional
 
 from p6mcp import config as _config
+from p6mcp import pmdb as _pmdb
 from p6mcp import policy as _policy
 from p6mcp import shop as _shop
 from p6mcp.eppm import store as _eppm_store
 
 from p6mcp.core import state as _state
-from p6mcp.core.state import _shop_on
+from p6mcp.core.state import _cols_cache, _engine_cache_clear, _refresh, _schema_cache, _shop_on
 from p6mcp.core.constants import (
     CAL_CHECK_KINDS, CAL_CHECK_YEARS, CAL_EXC_EACH, CAL_EXC_PAGE, CAL_EXC_ROWS, MAX_ROWS, SEVERITY_RANK, SQL_COUNT_CAP,
     SQL_COUNT_SECONDS, SQL_PAGE_BYTES, SQL_QUERY_SECONDS,
@@ -454,6 +455,19 @@ def p6_diagnose() -> dict:
         if prof:  # how the REST calls go out (no password: the proxy user only); the SQL route is never proxied
             from p6mcp.eppm import proxy as _eppm_proxy
             out["eppm_mode"]["proxy"] = _eppm_proxy.resolve(prof.get("base_url", ""), prof)
+    if st.pmdb:
+        prof = _config.pmdb_profile(st.raw, st.pmdb) or {}
+        m = _state.PMDB_MANIFEST
+        out["pmdb_mode"] = {
+            "database": st.pmdb, "driver": prof.get("driver"), "server": prof.get("host"), "port": prof.get("port"),
+            "service": prof.get("service"), "schema": prof.get("schema") or None, "login": prof.get("user"),
+            "tls": bool(prof.get("tls")), "selection": {"projects": prof.get("projects", []),
+                                                        "eps": prof.get("eps", []),
+                                                        "baselines": prof.get("baselines", "current")},
+            "local_copy": _pmdb.store_path(st.pmdb) if m else None, "copy": _pmdb.summary(m, prof),
+            "rows": (m or {}).get("rows"), "warnings": (m or {}).get("warnings", [])[:10],
+            "note": "Read only: the tools read a local copy made by p6_pmdb_refresh (only SELECT statements run on "
+                    "the database server, never a write). Refresh it to see changes made in P6 since copied_at."}
     if not _state.DB_PATH:
         out["database_problem"] = st.db_problem or _config.NO_DB_MESSAGE
         return out
@@ -477,3 +491,39 @@ def p6_diagnose() -> dict:
     finally:
         con.close()
     return out
+
+
+# ----------------------------------------------------------------- P6 Professional on SQL Server or Oracle
+
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True})
+def p6_pmdb_refresh() -> dict:
+    """P6 Professional on SQL Server or Oracle: copy again, from the database server, the projects chosen in MCP
+    for Primavera P6 Settings (Project IDs or an EPS, with their baselines) into the local read-only copy that
+    every other tool reads. Only SELECT statements run on the server: nothing is ever written there. The previous
+    copy is replaced once the new one is complete (kept when the copy fails). copied_at says when it was read."""
+    from p6mcp import credentials
+    st = _state.SETTINGS
+    p = _config.pmdb_profile(st.raw, st.pmdb) if st.pmdb else None
+    if p is None:
+        raise ValueError("Not in P6 Professional SQL Server / Oracle mode: in MCP for Primavera P6 Settings (Database), "
+                         "choose 'P6 Professional on SQL Server or Oracle', add the database, test the connection, "
+                         "click Use this database, then Save.")
+    try:
+        pw = credentials.get(credentials.pmdb_key(p["name"]))
+    except credentials.SecretStoreError as e:
+        raise ValueError(str(e)) from None
+    if not pw:
+        raise ValueError("No password is stored for this database login: enter it in MCP for Primavera P6 Settings "
+                         "(Database) and click Test connection.")
+    try:
+        m = _pmdb.copy(p, pw)
+    except _pmdb.CopyError as e:
+        raise ValueError(str(e)) from None
+    _cols_cache.clear()
+    _schema_cache.clear()
+    _engine_cache_clear()
+    _refresh()
+    return {"database": p["name"], "copied_at": m["copied_at"], "seconds": m["seconds"],
+            "p6_version": m["p6_version"].get("version"), "projects": m["projects"], "baselines": m["baselines"],
+            "eps": m["eps"], "rows": m["rows"], "warnings": m["warnings"],
+            "next": "Every tool now reads this copy. It is read only: make changes in P6, then refresh again."}

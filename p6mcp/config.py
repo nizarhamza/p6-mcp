@@ -31,8 +31,11 @@ TOOL_PROFILES = ("basic", "full")
 TRANSPORTS = ("stdio", "http")
 REMOTE_MODES = ("relay", "domain")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
-DB_KINDS = ("sqlite",)  # SQL Server / Oracle: later versions (read only)
-DATA_SOURCES = ("database", "xer", "eppm")  # xer: read-only analysis of XER files; eppm: a P6 EPPM server
+# databases entries are SQLite files. P6 Professional on SQL Server or Oracle is the data source pmdb (pmdb_profiles,
+# p6mcp.pmdb): a server connection and a selection of projects copied into a local read-only copy, not a file path.
+DB_KINDS = ("sqlite",)
+# xer: read-only analysis of XER files; eppm: a P6 EPPM server; pmdb: P6 Professional on SQL Server or Oracle
+DATA_SOURCES = ("database", "xer", "eppm", "pmdb")
 EPPM_AUTH = ("auto", "oauth", "login")  # auto: OAuth for Oracle Cloud hosts, else the /login session
 EPPM_SQL_DRIVERS = ("mssql", "oracle")  # pymssql / oracledb, installed on demand
 BACKUP_SCOPES = ("every_write", "session")
@@ -50,6 +53,12 @@ DEFAULTS: dict[str, Any] = {
                                   #   timeout_s, sql {driver, host, port, service, user, schema, table_prefix}
                                   #   or null, confirmed, tested_at, ...}]; passwords in the Credential Manager
     "eppm_active": None,          # name of the active entry of eppm_profiles (data_source eppm)
+    # 3.9: P6 Professional on SQL Server or Oracle (p6mcp.pmdb). No schema_version bump: an older version keeps the
+    # keys as unknown ones; only data_source pmdb itself is refused there (config_error), as any unknown value.
+    "pmdb_profiles": [],          # [{name, driver (mssql/oracle), host, port, service, schema, user, tls,
+                                  #   projects [Project IDs], eps [EPS IDs], baselines (current/all/none),
+                                  #   confirmed, tested_at, ...}]; the database password in the Credential Manager
+    "pmdb_active": None,          # name of the active entry of pmdb_profiles (data_source pmdb)
     "tool_profile": "basic",      # basic: read-only curated set; full: every tool
     "allow_writes": False,
     "backup_before_write": True,
@@ -262,6 +271,7 @@ def validate(d: dict) -> dict:
     if out["active_database"] is not None and out["active_database"] not in names:
         errs.append(f"active_database {out['active_database']!r} is not in databases")
     errs += _check_eppm(out)
+    errs += _check_pmdb(out)
     errs += _check_remote(out)
     leaks = _secret_keys(out)
     if leaks:
@@ -392,6 +402,55 @@ def _check_proxy(p: dict, at: str) -> list[str]:
     return errs
 
 
+def _check_pmdb(out: dict) -> list[str]:
+    """pmdb_profiles entries (P6 Professional on SQL Server or Oracle, p6mcp.pmdb) and pmdb_active."""
+    errs, names = [], set()
+    profs = out["pmdb_profiles"]
+    if not isinstance(profs, list):
+        return ["pmdb_profiles must be a list"]
+    for i, p in enumerate(profs):
+        at = f"pmdb_profiles[{i}]"
+        if not isinstance(p, dict):
+            errs.append(f"{at} must be an object")
+            continue
+        name = p.get("name")
+        if not _text(name):
+            errs.append(f"{at}.name must be non-empty text")
+        elif name in names:
+            errs.append(f"{at}.name {name!r} is used twice")
+        names.add(name)
+        if p.get("driver") not in EPPM_SQL_DRIVERS:
+            errs.append(f"{at}.driver must be one of {list(EPPM_SQL_DRIVERS)}")
+        for key in ("host", "service"):  # may still be empty while the user fills the panel
+            if not _text(p.get(key, ""), empty_ok=True):
+                errs.append(f"{at}.{key} must be text")
+        for key in ("schema", "user"):
+            if p.get(key) is not None and not _text(p.get(key), empty_ok=True):
+                errs.append(f"{at}.{key} must be text")
+        port = p.get("port")
+        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+            errs.append(f"{at}.port must be a whole number between 1 and 65535")
+        for key in ("tls", "confirmed"):
+            if not isinstance(p.get(key, False), bool):
+                errs.append(f"{at}.{key} must be true or false")
+        for key in ("projects", "eps"):
+            v = p.get(key, [])
+            if not isinstance(v, list) or not all(_text(x) for x in v):
+                errs.append(f"{at}.{key} must be a list of IDs")
+        if p.get("baselines", "current") not in ("current", "all", "none"):
+            errs.append(f"{at}.baselines must be one of ['current', 'all', 'none']")
+    act = out["pmdb_active"]
+    if act is not None and act not in names:
+        errs.append(f"pmdb_active {act!r} is not in pmdb_profiles")
+    return errs
+
+
+def pmdb_profile(cfg: dict, name: Optional[str] = None) -> Optional[dict]:
+    """The named entry of pmdb_profiles (the active one by default), or None."""
+    name = cfg.get("pmdb_active") if name is None else name
+    return next((p for p in cfg.get("pmdb_profiles", []) if p.get("name") == name), None)
+
+
 def eppm_profile(cfg: dict, name: Optional[str] = None) -> Optional[dict]:
     """The named entry of eppm_profiles (the active one by default), or None."""
     name = cfg.get("eppm_active") if name is None else name
@@ -474,6 +533,8 @@ class Settings:
     db_problem: Optional[str] = None  # why db_path is empty or unusable (user-facing)
     xer_files: tuple[str, ...] = ()   # XER-only mode: db_path is then set by the server (p6mcp.xerstore)
     eppm: Optional[str] = None        # P6 EPPM mode: name of the confirmed active server profile
+    pmdb: Optional[str] = None        # P6 Professional on SQL Server / Oracle: the confirmed active profile (the
+                                      #   server's _refresh points db_path at its local copy, p6mcp.pmdb)
     tool_profile: str = "basic"
     allow_writes: bool = False
     backup_before_write: bool = True
@@ -526,6 +587,7 @@ def load() -> Settings:
         problem = f"{err} Open MCP for Primavera P6 Settings to fix it."
     xer_files: tuple[str, ...] = ()
     eppm: Optional[str] = None
+    pmdb: Optional[str] = None
     if env_db:
         db_path, db_name, problem = os.path.abspath(env_db), "P6_DB_PATH", None
     elif not err and cfg.get("data_source") == "xer":
@@ -551,6 +613,18 @@ def load() -> Settings:
             eppm, db_name = prof["name"], prof["name"]
             problem = (f"P6 EPPM server {prof['name']!r}: no project pulled yet. Pull one with p6_eppm_pull "
                        "(p6_eppm_projects lists the projects you can read).")
+    elif not err and cfg.get("data_source") == "pmdb":
+        prof = pmdb_profile(cfg)
+        if prof is None:
+            problem = ("P6 Professional on SQL Server or Oracle: no database selected. Open MCP for Primavera P6 "
+                       "Settings (Database) to add one.")
+        elif not prof.get("confirmed"):
+            problem = (f"Database server {prof['name']!r} was added but its connection was not tested and confirmed. "
+                       "Open MCP for Primavera P6 Settings (Database) and click Test connection.")
+        else:  # the local copy becomes db_path once it exists (core/state.py _refresh)
+            pmdb, db_name = prof["name"], prof["name"]
+            problem = (f"Database server {prof['name']!r}: no local copy yet. Copy the projects with p6_pmdb_refresh, "
+                       "or with Copy now in MCP for Primavera P6 Settings (Database).")
     elif not err:
         active = cfg.get("active_database")
         entry = next((d for d in cfg["databases"] if d.get("name") == active), None)
@@ -582,11 +656,13 @@ def load() -> Settings:
     if profile not in TOOL_PROFILES:
         profile = "basic"
     allow = _env_flag("P6MCP_ALLOW_WRITES")
-    if xer_files:
-        allow = False  # XER-only mode never writes (P6 EPPM mode writes its local working copy only)
+    if xer_files or pmdb:
+        allow = False  # XER-only mode and a P6 Professional SQL Server / Oracle copy never write (P6 EPPM mode
+        # writes its local working copy only)
     block = cfg["block_when_p6_running"] and os.environ.get("P6_SKIP_PROCESS_CHECK", "0") != "1"
     return Settings(
         source=source, db_path=db_path, db_name=db_name, db_problem=problem, xer_files=xer_files, eppm=eppm,
+        pmdb=pmdb,
         tool_profile=profile, allow_writes=cfg["allow_writes"] if allow is None else allow,
         backup_before_write=cfg["backup_before_write"],
         backup_scope="session" if legacy and data is None else cfg["backup_scope"],

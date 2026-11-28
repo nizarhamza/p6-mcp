@@ -43,6 +43,7 @@ def env(tmp_path, monkeypatch, golden):
     monkeypatch.setattr(pages, "ask", lambda *a, **k: answers["value"])
     monkeypatch.setattr("p6mcp.settings_app.clients_page.ask", lambda *a, **k: answers["value"])
     monkeypatch.setattr("p6mcp.settings_app.eppm_panel.ask", lambda *a, **k: answers["value"])
+    monkeypatch.setattr("p6mcp.settings_app.pmdb_panel.ask", lambda *a, **k: answers["value"])
     monkeypatch.setattr(SettingsWindow, "ask_close", lambda self: "discard")
     # config.json written by another program (the p6 helper, the shop install tool): overwrite unless a test says
     monkeypatch.setattr(SettingsWindow, "ask_changed", lambda self: answers.get("changed", "overwrite"))
@@ -485,6 +486,75 @@ def test_eppm_mode_in_settings(qtbot, win, monkeypatch):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_pmdb_mode_in_settings(qtbot, win, env, monkeypatch):
+    """P6 Professional on SQL Server or Oracle: the fourth data source, its panel, Test connection, Use, Copy now,
+    Save (no password in the file), a connection change, a rename and the removal (fake Oracle, no real server)."""
+    import fake_pmdb
+
+    from p6mcp import pmdb, settings_logic
+    from p6mcp.settings_app import pmdb_panel
+    vault = {}  # the Credential Manager, faked
+    monkeypatch.setattr(pmdb_panel.credentials, "get", lambda k: vault.get(k))
+    monkeypatch.setattr(pmdb_panel.credentials, "set", lambda k, v: vault.__setitem__(k, v))
+    monkeypatch.setattr(pmdb_panel.credentials, "delete", lambda k: vault.pop(k, None) is not None)
+    drv = fake_pmdb.driver(env["db"], "oracle")
+    pw = drv.password
+    page = win.page(DatabasePage)
+    panel = page.pmdb
+    panel.module_factory = lambda _d: drv
+    assert not panel.isVisibleTo(page)
+    page.src_pmdb.click()
+    assert win.data["data_source"] == "pmdb" and panel.isVisibleTo(page) and not page.profiles_box.isVisibleTo(page)
+    assert "SQL Server or Oracle" in win.banner.text()
+    name = panel.add_database("Plant DB")
+    assert name == "Plant DB" and panel.selected() == name and not panel.use_btn.isEnabled()
+    panel.driver.setCurrentIndex(panel.driver.findData("oracle"))  # port and schema follow the database type
+    p = settings_logic.find_pmdb(win.data, name)
+    assert (p["driver"], p["port"], p["schema"]) == ("oracle", 1521, "ADMUSER")
+    for edit, value in ((panel.host_edit, "db.test"), (panel.service_edit, "P6PDB"), (panel.user_edit, "reader"),
+                        (panel.projects_edit, "demo-a, NOPE")):
+        edit.setText(value)
+        edit.editingFinished.emit()
+    assert settings_logic.find_pmdb(win.data, name)["projects"] == ["demo-a", "NOPE"]
+    panel.pw_edit.setText("wrong-pass")
+    panel.run_test()
+    qtbot.waitUntil(lambda: panel.job is None, timeout=15000)
+    assert "Login failed" in panel.result.text() and "wrong-pass" not in panel.result.text()
+    assert not vault and not panel.use_btn.isEnabled()
+    panel.pw_edit.setText(pw)
+    panel.run_test()
+    qtbot.waitUntil(lambda: panel.job is None, timeout=15000)
+    text = panel.result.text()
+    assert "P6 25.12, 1 project(s)" in text and "DEMO-A" in text and "Not found in the database: NOPE" in text
+    assert vault == {f"pmdb:{name}": pw} and panel.use_btn.isEnabled()  # kept once it worked
+    panel.use_btn.click()
+    assert win.data["pmdb_active"] == name and settings_logic.find_pmdb(win.data, name)["confirmed"]
+    assert not (win.banner.isVisibleTo(win) and "SQL Server or Oracle" in win.banner.text())
+    assert not tools_allow_enabled(win)  # read only: writes cannot be turned on
+    panel.projects_edit.setText("DEMO-A")
+    panel.projects_edit.editingFinished.emit()
+    assert settings_logic.find_pmdb(win.data, name)["confirmed"]  # the selection is not the connection
+    panel.pw_edit.clear()
+    panel.run_copy()  # with the stored password
+    qtbot.waitUntil(lambda: panel.job is None, timeout=30000)
+    assert "Local copy of" in panel.copy_state.text() and "7 activities" in panel.copy_state.text()
+    assert pmdb.read_manifest(name)["projects"][0]["project_id"] == "DEMO-A"
+    assert win.save()
+    saved = open(env["cfg"], encoding="utf-8").read()
+    assert pw not in saved and '"data_source": "pmdb"' in saved
+    st = config.load()
+    assert st.pmdb == name and st.allow_writes is False and st.db_problem and "no local copy" in st.db_problem
+    panel.host_edit.setText("other.test")  # a connection change clears the confirmation
+    panel.host_edit.editingFinished.emit()
+    assert not settings_logic.find_pmdb(win.data, name)["confirmed"] and win.data["pmdb_active"] is None
+    panel.name_edit.setText("Main")  # the password follows a rename
+    panel.name_edit.editingFinished.emit()
+    assert vault == {"pmdb:Main": pw} and panel.selected() == "Main"
+    panel._remove()  # the env fixture answers yes
+    assert not win.data["pmdb_profiles"] and not vault
+    assert drv.connections and all(c.closed for c in drv.connections)
 
 
 def test_eppm_proxy_in_settings(qtbot, win, monkeypatch):

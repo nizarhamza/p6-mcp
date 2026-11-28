@@ -60,6 +60,7 @@
         "CPM what-if and Monte Carlo schedule risk in memory",
         "XER inspection, import and export, and an XER-only mode",
         "P6 EPPM servers: pull, local edits, a push you approve, server scheduling",
+        "P6 Professional on SQL Server or Oracle, read only through a local copy of the projects you choose",
         "Remote access for claude.ai and ChatGPT in the browser, through your own free Cloudflare account (beta)",
         "Edits written to the P6 Professional database after a dry run, a confirmation token and a backup, with an edit log",
         "Excel project controls dashboard"
@@ -111,7 +112,7 @@
           "name": "Which P6 versions and databases are supported?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM servers through their REST API (and optionally a read-only SQL account), tested with P6 EPPM 25.12 on SQL Server. P6 Professional connected directly to SQL Server or Oracle is not supported."
+            "text": "P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM servers through their REST API (and optionally a read-only SQL account), tested with P6 EPPM 25.12 on SQL Server. P6 Professional on SQL Server or Oracle through a local read-only copy of the projects you choose, not yet tested on a real server."
           }
         },
         {
@@ -203,6 +204,7 @@
           <li>[[i:database]]<span>P6 Professional database<small>standalone, SQLite</small></span></li>
           <li>[[i:file]]<span>XER files<small>inspect, import, export, XER-only mode</small></span></li>
           <li>[[i:database]]<span>P6 EPPM server<small>pull, edit locally, push you approve, server F9</small></span></li>
+          <li>[[i:database]]<span>P6 Professional on SQL Server or Oracle<small>read only, a local copy of the projects you choose</small></span></li>
           <li>[[i:archive]]<span>Backups and edit log<small>a backup before each write by default, every write logged</small></span></li>
         </ul>
       </div>
@@ -575,6 +577,7 @@
         <tr><th scope="row">Dry run, confirmation token, backup, edit log, restore</th><td class="ours">Yes, enforced by the server</td><td>Not applicable, or varies</td></tr>
         <tr><th scope="row">Reads, imports and exports XER files</th><td class="ours">Yes, plus an XER-only mode</td><td>Reads them</td></tr>
         <tr><th scope="row">Works with a live P6 EPPM server</th><td class="ours">Yes: pull, local edits, a push you approve, server scheduling</td><td>No</td></tr>
+        <tr><th scope="row">Reads P6 Professional on SQL Server or Oracle</th><td class="ours">Yes, read only: a local copy of the projects you choose</td><td>No</td></tr>
         <tr><th scope="row">CPM engine checked against P6's F9 dates</th><td class="ours">Yes, for what-if and Monte Carlo risk</td><td>Varies</td></tr>
         <tr><th scope="row">DCMA thresholds taken from the P6 project</th><td class="ours">Yes, DCMA defaults when none are set</td><td>Varies</td></tr>
         <tr><th scope="row">Excel dashboard and P6 skills</th><td class="ours">Yes</td><td>Varies</td></tr>
@@ -592,7 +595,7 @@
     <details><summary>Can the AI change my P6 schedule?</summary><div><p>Only if you allow it. Writes are off by default. When on, each change is previewed in a dry run and applied only with a single-use token after your explicit yes, a backup is taken first, and P6 must be closed. Planned dates and float are never written: P6 computes them when you press F9.</p></div></details>
     <details><summary>Does my schedule leave my PC?</summary><div><p>The server runs locally and sends nothing anywhere. What the tools return goes to the AI model of your MCP client; with a cloud model that means its provider. With remote access on (off by default), the results for claude.ai and ChatGPT also pass through your own Cloudflare account. For confidential projects use a local model, for example in LM Studio.</p></div></details>
     <details><summary>Are the dates computed by the AI?</summary><div><p>No. Dates and float come from P6's last schedule run. What-if and risk use the server's CPM engine, and <code>p6_cpm_validate</code> shows how closely it matches P6's own dates on your project before you rely on it.</p></div></details>
-    <details><summary>Which P6 versions and databases are supported?</summary><div><p>P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM servers through their REST API (and optionally a read-only SQL account), tested with P6 EPPM 25.12 on SQL Server. P6 Professional connected directly to SQL Server or Oracle is not supported.</p></div></details>
+    <details><summary>Which P6 versions and databases are supported?</summary><div><p>P6 Professional standalone (SQLite), tested with version 25.12; other versions are read only until tested or trusted. XER files work without P6. P6 EPPM servers through their REST API (and optionally a read-only SQL account), tested with P6 EPPM 25.12 on SQL Server. P6 Professional on SQL Server or Oracle through a local read-only copy of the projects you choose, not yet tested on a real server.</p></div></details>
     <details><summary>Do I need P6 installed?</summary><div><p>Not for XER files: XER-only mode analyses them without P6 or a P6 database. Not for a P6 EPPM server either: it is reached over the network.</p></div></details>
     <details><summary>Does it work with ChatGPT?</summary><div><p>Yes, in the browser: turn on remote access (beta, through your own free Cloudflare account) and add its address as a custom MCP server in ChatGPT; tested with the Free plan. Codex and OpenAI's Secure MCP Tunnel are other routes, documented in the <a href="https://github.com/nizarhamza/p6-mcp#chatgpt">README</a> but not yet tested by the maintainer. Claude Desktop, Claude Code, Cursor, VS Code, LM Studio and Cline are registered by the installer.</p></div></details>
     <details><summary>Does it run on macOS or Linux?</summary><div><p>No. P6 Professional is a Windows program and the server is built for Windows 10 and 11.</p></div></details>

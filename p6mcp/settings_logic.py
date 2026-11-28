@@ -223,6 +223,101 @@ def forget_eppm_passwords(name: str) -> None:
         credentials.delete(key)
 
 
+# ----------------------------------------------------------------- P6 Professional on SQL Server or Oracle
+
+PMDB_TEST_KEYS = ("confirmed", "tested_at", "test_digest", "p6_version", "projects_on_server")
+
+
+def find_pmdb(data: dict, name: str) -> Optional[dict]:
+    return config.pmdb_profile(data, name)
+
+
+def add_pmdb_profile(data: dict, driver: str = "mssql", name: Optional[str] = None) -> tuple[dict, str]:
+    """New database server entry (not confirmed), with the driver's default port and schema. Returns (data, name)."""
+    from p6mcp import pmdb
+    if driver not in pmdb.DEFAULT_PORTS:
+        raise config.ConfigError(f"Unknown database type {driver!r}")
+    data = copy.deepcopy(data)
+    base = (name or "P6 database").strip() or "P6 database"
+    names = {p.get("name") for p in data.get("pmdb_profiles", [])}
+    name, n = base, 2
+    while name in names:
+        name, n = f"{base} {n}", n + 1
+    data.setdefault("pmdb_profiles", []).append(
+        {"name": name, "driver": driver, "host": "", "port": pmdb.DEFAULT_PORTS[driver], "service": "",
+         "schema": pmdb.DEFAULT_SCHEMA[driver], "user": "", "tls": False, "projects": [], "eps": [],
+         "baselines": "current", "confirmed": False})
+    return data, name
+
+
+def update_pmdb_profile(data: dict, name: str, new_name: Optional[str] = None, **changes) -> dict:
+    """Rename and/or change settings. A change of a connection setting clears the confirmation and the test; the
+    selection (projects, eps, baselines) does not (the next copy takes it, p6_diagnose says the copy is older)."""
+    from p6mcp import pmdb
+    data = copy.deepcopy(data)
+    entry = find_pmdb(data, name)
+    if entry is None:
+        raise config.ConfigError(f"No database server named {name!r}")
+    if new_name is not None and new_name.strip() != name:
+        new_name = new_name.strip()
+        if not new_name:
+            raise config.ConfigError("A database needs a name.")
+        if find_pmdb(data, new_name) is not None:
+            raise config.ConfigError(f"The name {new_name!r} is already used.")
+        entry["name"] = new_name
+        if data.get("pmdb_active") == name:
+            data["pmdb_active"] = new_name
+    before = pmdb.digest(entry)
+    for k, v in changes.items():
+        if k not in pmdb.CONNECTION_KEYS + pmdb.SELECTION_KEYS:
+            raise config.ConfigError(f"Unknown database server setting {k!r}")
+        entry[k] = v.strip() if isinstance(v, str) else v
+    if pmdb.digest(entry) != before:
+        for k in PMDB_TEST_KEYS:
+            entry.pop(k, None)
+        entry["confirmed"] = False
+        if data.get("pmdb_active") == entry["name"]:
+            data["pmdb_active"] = None
+    return data
+
+
+def remove_pmdb_profile(data: dict, name: str) -> dict:
+    """The entry only: its password and its local copy stay until forget_pmdb."""
+    data = copy.deepcopy(data)
+    data["pmdb_profiles"] = [p for p in data.get("pmdb_profiles", []) if p.get("name") != name]
+    if data.get("pmdb_active") == name:
+        data["pmdb_active"] = None
+    return data
+
+
+def confirm_pmdb(data: dict, name: str, result: dict) -> dict:
+    """The user confirms a successful test of the current connection settings: entry confirmed and active."""
+    from p6mcp import pmdb
+    entry = find_pmdb(data, name)
+    if entry is None:
+        raise config.ConfigError(f"No database server named {name!r}")
+    if not result.get("ok"):
+        raise config.ConfigError("Only a successful connection test can be confirmed.")
+    if result.get("digest") != pmdb.digest(entry):
+        raise config.ConfigError("The settings changed after the test: test this database again.")
+    data = copy.deepcopy(data)
+    entry = find_pmdb(data, name)
+    entry.update(confirmed=True, tested_at=result.get("tested_at"), test_digest=result["digest"],
+                 p6_version=(result.get("p6_version") or {}).get("version"),
+                 projects_on_server=result.get("projects"))
+    data["pmdb_active"] = name
+    return data
+
+
+def forget_pmdb(name: str) -> None:
+    """Delete the login password from the Credential Manager and the local copy of a removed database."""
+    import shutil
+
+    from p6mcp import credentials, pmdb
+    credentials.delete(credentials.pmdb_key(name))
+    shutil.rmtree(pmdb.store_dir(name), ignore_errors=True)
+
+
 def trust_schema(data: dict, fingerprint: str, trusted: bool = True) -> dict:
     data = copy.deepcopy(data)
     fps = [f for f in data.get("trusted_schemas", []) if f != fingerprint]

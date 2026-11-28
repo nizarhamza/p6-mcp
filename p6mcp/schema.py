@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
-from typing import Iterable
+from typing import Iterable, Optional
 
 # Fingerprint -> label. Add an entry only after the whole test suite passed on that version.
 KNOWN_SCHEMAS: dict[str, str] = {
@@ -66,9 +66,14 @@ def p6_version(con: sqlite3.Connection, cols: dict[str, set[str]]) -> dict:
         return out
     if row:
         out["database_version"], out["min_client_version"] = row[0], row[1]
-        m = re.search(r"(\d{2})(\d{2})\.\d+", str(row[0] or ""))
-        out["version"] = f"{m[1]}.{m[2]}" if m else None
+        out["version"] = version_label(row[0])
     return out
+
+
+def version_label(database_version) -> Optional[str]:
+    """'25.12' from PREFER.database_version ('PPMDB,2512.0000.0000.0003'), None when it does not read."""
+    m = re.search(r"(\d{2})(\d{2})\.\d+", str(database_version or ""))
+    return f"{m[1]}.{m[2]}" if m else None
 
 
 def detect(con: sqlite3.Connection, trusted: Iterable[str] = ()) -> dict:
