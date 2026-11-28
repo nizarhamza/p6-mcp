@@ -169,6 +169,13 @@ def _eppm_refusal(tool: str) -> str:
     if tool == "p6_delete_activity":
         return ("Activities are not deleted through a P6 EPPM working copy in this version: delete it in P6 EPPM, "
                 "then pull again.")
+    if tool in ("p6_update_activity_codes", "p6_move_activities"):
+        what = "Activity code values" if tool == "p6_update_activity_codes" else "WBS moves"
+        return (f"{what} are not sent to the P6 EPPM server by the push in this version ({tool} is not available on a "
+                "P6 EPPM working copy): change them in P6 EPPM, then pull again.")
+    if tool == "p6_add_activities":
+        return ("Activities are not created through a P6 EPPM working copy in this version: add them in P6 EPPM, "
+                "then pull again.")
     return (f"{tool} is not available on a P6 EPPM working copy: the push to the server supports activity, "
             "relationship and assignment edits only. Do it in P6 EPPM, then pull again.")
 
@@ -473,7 +480,8 @@ DanglingKind = Literal["start", "finish", "both"]
 RedundantCategory = Literal["completed_predecessor", "marked_deleted", "transitive", "duplicate"]
 
 
-WhatIfOp = Literal["add_link", "delete_link", "update_link", "duration", "constraint"]
+WhatIfOp = Literal["add_link", "delete_link", "update_link", "duration", "constraint", "add_activity"]
+FragnetType = Literal["TT_Task", "TT_Mile", "TT_FinMile"]
 
 
 class WhatIfEdit(TypedDict, total=False):
@@ -481,7 +489,10 @@ class WhatIfEdit(TypedDict, total=False):
     rel_type, lag_days, current_type (or task_pred_id for delete / update); op duration: task_code and
     remaining_days, original_days (not started only) or add_remaining_days (days added to the current
     remaining duration, any status); op constraint: task_code, constraint (as p6_update_activity),
-    constraint_date."""
+    constraint_date; op add_activity (fragnet, in memory only): task_code (a new Activity ID), task_name,
+    original_days (in days of calendar, default the project calendar; 0 for a milestone), task_type
+    (TT_Task default, TT_Mile, TT_FinMile), wbs (a WBS code, default the project node), constraint and
+    constraint_date; link it with add_link edits after it."""
     op: WhatIfOp
     predecessor_code: str
     successor_code: str
@@ -490,6 +501,10 @@ class WhatIfEdit(TypedDict, total=False):
     current_type: RelType
     lag_days: float
     task_code: str
+    task_name: str
+    task_type: FragnetType
+    calendar: str
+    wbs: str
     remaining_days: float
     original_days: float
     add_remaining_days: float
@@ -638,6 +653,44 @@ class ActEdit(_ActEditKeys, total=False):
 ActEdits = Annotated[list[ActEdit], Field(min_length=1, description="Activities to change.")]
 
 
+# ----------------------------------------------------------------- new activities (p6_add_activities)
+
+ActType = Literal["task", "resource_dependent", "start_milestone", "finish_milestone", "level_of_effort",
+                  "wbs_summary"]
+
+
+class _NewLinkKeys(TypedDict):
+    task_code: str
+
+
+class NewLink(_NewLinkKeys, total=False):
+    """A relationship of a new activity: the other activity (of the project, of the same call, or of project=),
+    type (FS default) and lag_days (0 default)."""
+    type: RelType
+    lag_days: float
+    project: str
+
+
+class _NewActKeys(TypedDict):
+    task_code: str
+    task_name: str
+
+
+class NewActivity(_NewActKeys, total=False):
+    """An activity to create (not started) and its relationships."""
+    wbs: str
+    type: ActType
+    original_duration_days: float
+    calendar: str
+    constraint: CstrName
+    constraint_date: str
+    predecessors: list[NewLink]
+    successors: list[NewLink]
+
+
+NewActivities = Annotated[list[NewActivity], Field(min_length=1, description="Activities to create.")]
+
+
 class AsgEdit(TypedDict, total=False):
     """An assignment (taskrsrc_id, or task_code with resource or role) and the units to set."""
     task_code: str
@@ -651,6 +704,31 @@ class AsgEdit(TypedDict, total=False):
 
 
 AsgEdits = Annotated[list[AsgEdit], Field(min_length=1, description="Assignments to change.")]
+
+
+# ----------------------------------------------------------------- activity code values and WBS moves
+
+class _CodeEditKeys(TypedDict):
+    task_code: str
+    code_type: str
+
+
+class CodeEdit(_CodeEditKeys, total=False):
+    """An activity code value to assign (code_value) or remove (clear=True) for one code type."""
+    code_value: str
+    clear: bool
+
+
+CodeEdits = Annotated[list[CodeEdit], Field(min_length=1, description="Activity code values to assign or clear.")]
+
+
+class WbsMove(TypedDict):
+    """An activity and the WBS it moves to (WBS code as p6_list_wbs shows it, or a WBS name unique in the project)."""
+    task_code: str
+    wbs: str
+
+
+WbsMoves = Annotated[list[WbsMove], Field(min_length=1, description="Activities to move to another WBS.")]
 
 
 # ----------------------------------------------------------------- activity UDF values

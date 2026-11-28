@@ -21,8 +21,8 @@ from p6mcp.core.read import _critical_clause
 from p6mcp.core.engine import _Cpm, CPM_TF_TOL_H, CPM_TOL, CPM_TRUST, ENGINE_VERSION, _Net
 from p6mcp.core.analysis import HC_UNSCORED
 from p6mcp.core.explain import (
-    _cpm_compare, _cpm_context, _dcma_brief, _dcma_memory, _finish_ties, _project_context, _stale_f9, _stale_view,
-    _whatif_apply, _whatif_assumptions, WHATIF_CAVEAT, WHATIF_CUT_PCT,
+    _cpm_compare, _cpm_context, _dcma_brief, _dcma_memory, _finish_ties, _fragnet_ctx, _fragnet_impact,
+    _project_context, _stale_f9, _stale_view, _whatif_apply, _whatif_assumptions, WHATIF_CAVEAT, WHATIF_CUT_PCT,
 )
 from p6mcp.core.risk import (
     _pctl, RISK_CAVEAT, RISK_DEFAULT, RISK_ITERATIONS, _risk_pcts, _risk_ranges, RISK_SOURCES, _risk_udfs, RISK_WORK,
@@ -139,6 +139,15 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     flag_count, and dcma: p6_health_check's DCMA checks before and after the edits, in memory with no
     snapshot (failed_before, failed_after, newly_failed, no_longer_failed, changed; dcma=False skips them).
     caveat: the dates are calculated the way P6 would, not checked against crews, materials or access.
+    Fragnet (time impact analysis): add_activity edits add new activities in memory only (a new Activity ID,
+    name, original_days in days of calendar (default the project calendar), task_type TT_Task / TT_Mile /
+    TT_FinMile, wbs code (default the project node), optional constraint); add_link then links them to each
+    other or to existing activities (a link that closes a loop is refused with the loop). With them the result
+    adds fragnet: activities (engine dates, total and free float, critical, links, driven_by, drives_finish),
+    impact (project finish and milestones before / after, delay_cd and delay_wd in working days of the project
+    calendar; milestones given, else every open milestone) and driving_path (the chain whose relationships set
+    the dates, from the fragnet to the project finish). Fragnet activities count as new activities in the
+    assumptions and DCMA blocks; the changed rows and float_change cover the existing activities.
     Changes to make for real: the write tools, then F9 in P6."""
     if compare_to not in get_args(CompareTo):
         raise ValueError("compare_to must be current or engine")
@@ -149,12 +158,14 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
         raise ValueError("max_cut_pct must be a number from 0 to 100")
     if near is None or near < 0:
         raise ValueError("near_critical_days must be 0 or more")
+    frag = any(isinstance(e, Mapping) and e.get("op") == "add_activity" for e in edits)
     con = _connect()
     pid = _project_id(con, project)
     con.execute("BEGIN")
     try:
         base = _Cpm(con, pid)
         thr_h, used = _critical_clause(con, pid, "project", None)[3:5]
+        ctx = _fragnet_ctx(con, pid) if frag else None
     finally:
         con.rollback()
     state = _schedule_state(con, pid)
@@ -162,6 +173,8 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     r0 = base.run(d0)
     chk = _cpm_compare(base, r0, state["stale"])
     trial = base.copy()
+    if ctx is not None:
+        trial.code, trial.frag_ctx = dict(base.code), ctx  # fragnet activities: in the trial network only
     done, trace = [], []
     for i, e in enumerate(edits):
         if not isinstance(e, Mapping):
@@ -188,12 +201,15 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     delta = lambda a, b: None if a is None or b is None else round((b - a).total_seconds() / 86400, 2)  # noqa: E731
     wd = lambda a, b: None if a is None or b is None or fcal is None else round(fcal.work_days(a, b), 2)  # noqa: E731
     fm0 = base.finish(r0)[0]
-    keys = list(dict.fromkeys(milestones or ([x["task_code"] for x in (fm0, fm) if x] + sorted(
-        d["task_code"] for d in trial.t.values() if d["cstr_type"] and d["status_code"] != "TK_Complete"))))
+    keys = list(dict.fromkeys(milestones or [c for c in [x["task_code"] for x in (fm0, fm) if x] + sorted(
+        d["task_code"] for d in trial.t.values() if d["cstr_type"] and d["status_code"] != "TK_Complete")
+        if c in base.code]))
     ms = []
     for code in keys:
         if code not in base.code:
-            raise ValueError(f"milestones: activity {code} not found in project {project}")
+            raise ValueError(f"milestones: activity {code} " + (
+                "is a fragnet activity: its dates are in fragnet.activities" if code in trial.code
+                else f"not found in project {project}"))
         n = base.code[code]
         b, a = before[n], r1[n]
         ms.append({"task_code": code, "task_name": T[n]["task_name"], "finish_before": b["ef"] and _fmt_dt(b["ef"]),
@@ -259,6 +275,10 @@ def p6_schedule_whatif(project: ProjectId, edits: WhatIfEdits, compare_to: Compa
     else:
         assumptions["dcma"] = None
     out = _slice(changed, offset, limit)
+    if ctx is not None:
+        out["fragnet"] = _fragnet_impact(base, trial, before, fin_before, r1, d1, crit_a, milestones,
+                                         "P6's last F9 as stored" if compare_to == "current"
+                                         else "the engine on the unchanged network")
     out.update(project=project, edits=done, compare_to=compare_to,
                project_finish={"before": fin_before and _fmt_dt(fin_before), "after": _fmt_dt(fin_after),
                                "delta_cd": delta(fin_before, fin_after), "delta_wd": wd(fin_before, fin_after),

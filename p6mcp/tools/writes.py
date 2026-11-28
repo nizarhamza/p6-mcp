@@ -1,4 +1,5 @@
-"""Edit tools: relationships, activities, assignments, UDF values, activity delete."""
+"""Edit tools: relationships, activities, assignments, UDF values, activity code values, WBS moves,
+activity delete."""
 
 from __future__ import annotations
 
@@ -6,17 +7,19 @@ from typing import Mapping, Optional
 
 from p6mcp.core.constants import ACT_LINKS_CAP, STATUS_NAMES, TYPE_NAMES
 from p6mcp.registry import (
-    ActEdits, ActivityId, AsgEdits, CstrName, DateTimeStr, LinkEdits, LinkIds, LinkNews, LinkRefs, NonNegDays,
-    NonNegQty, Pct, ProjectId, RelType, _tool, UdfEdits, UdfValue,
+    ActEdits, ActivityId, AsgEdits, CstrName, DateTimeStr, LinkEdits, LinkIds, LinkNews, LinkRefs, NewActivities,
+    NonNegDays, NonNegQty, Pct, ProjectId, RelType, _tool, UdfEdits, UdfValue,
 )
 from p6mcp.core.db import _alive, _cols, _connect, _project_id, _task
 from p6mcp.core.props import _sched_options
 from p6mcp.core.read import _act_details, _rel_code, _rel_row_fn, _rel_sql
 from p6mcp.core.writes import (
-    _act_check, _act_delete_rows, ACT_SNAPSHOT, _act_update, _asg_update, _batch, _batch_commit, _commit, _items_arg,
-    _link_batch, MAX_BATCH, _Refused, _rel_add, _rel_delete, _rel_update, _side_effects, _single_link, _sum_plan,
-    _summaries_stale, _udf_next, _udf_set, _write_session,
+    _act_add_batch, _act_check, _act_delete_rows, ACT_SNAPSHOT, _act_update, _asg_update, _batch, _batch_commit,
+    _commit, _items_arg, _link_batch, MAX_BATCH, NEW_DATES_NOTE, _Refused, _rel_add, _rel_delete, _rel_update,
+    _side_effects, _single_link, _sum_plan, _summaries_stale, _udf_next, _udf_set, _write_session,
 )
+from p6mcp.registry import CodeEdits, WbsMoves  # activity code values and WBS moves
+from p6mcp.core.writes import _act_move, _code_set, _codes_next, _moves_next
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
@@ -166,6 +169,33 @@ def p6_update_activities(project: ProjectId, items: ActEdits, confirm: bool = Fa
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
+def p6_add_activities(project: ProjectId, items: NewActivities, confirm: bool = False) -> dict:
+    """Create activities in a project, with their relationships, in one transaction (all or nothing; dry run
+    unless confirm=True). Item: {task_code (new Activity ID, unique in the project), task_name, wbs (WBS code as
+    p6_list_wbs shows it, or a unique WBS name; default the project node), type (task (default),
+    resource_dependent, start_milestone, finish_milestone, level_of_effort, wbs_summary), original_duration_days
+    (days of the activity calendar; task and resource dependent default to the admin preference; none for
+    milestones, level of effort and WBS summary), calendar (name of a global or project calendar; default the
+    project calendar), constraint and constraint_date (as p6_update_activity), predecessors and successors
+    [{task_code, type (FS default), lag_days (0 default, lag calendar rule as p6_add_relationship), project
+    (another project)}]: they may name activities of the same call}. New activities are Not Started, remaining
+    = original duration, physical % 0, duration and % complete types from the project defaults; their dates sit
+    at the data date until F9 (late dates and float empty). Refused: an Activity ID already used or too long, an
+    unknown WBS or calendar, a relationship P6 would refuse, a logic loop the new relationships close. items:
+    one report per activity (task_id from NEXTKEY, links with task_pred_id, or the errors). One edit log entry
+    per activity and per relationship. At most 500 items. Then press F9 in P6."""
+    items = _items_arg(items)
+    with _write_session(confirm) as (con, backup):
+        b = _act_add_batch(con, project, items)
+        for rep, it in zip(b["items"], items, strict=False):
+            rep["item"] = it
+        word = "activity" if len(items) == 1 else "activities"
+        res = _batch_commit(con, b, confirm, f"Add {len(items)} {word} to {project}", backup, tail=[NEW_DATES_NOTE])
+        res.update(data_date=b["data_date"], dates_from=b["dates_from"], loops=b["loops"])
+        return res
+
+
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 def p6_update_assignment(
     project: ProjectId, task_code: Optional[ActivityId] = None, resource: Optional[str] = None,
     role: Optional[str] = None, taskrsrc_id: Optional[int] = None,
@@ -260,6 +290,59 @@ def p6_update_udfs(project: ProjectId, items: UdfEdits, confirm: bool = False) -
         for rep, it in zip(b["items"], items, strict=False):
             rep["item"] = it
         return _udf_next(_batch_commit(con, b, confirm, f"Set {len(items)} activity UDF value(s) in {project}", backup))
+
+
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
+def p6_update_activity_codes(project: ProjectId, items: CodeEdits, confirm: bool = False) -> dict:
+    """Assign or clear activity code values in one transaction (all or nothing; dry run unless
+    confirm=True). Item: {task_code, code_type, code_value} assigns the value (it replaces the activity's
+    current value of that type: P6 keeps one per type), {task_code, code_type, clear: true} removes it.
+    code_type: the type name as the project sees it (its own project codes, then its EPS codes, then
+    global codes; case ignored). code_value: the code's short name, else its path (e.g. 'CON.MEC'), else
+    its name; several matches are refused with their paths. items: one report per item (code type,
+    scope, value before / after, or the error). One edit log entry per value. Codes do not move dates:
+    no project is marked stale, no F9 needed (schedule_effect). At most 500 items."""
+    items = _items_arg(items)
+    with _write_session(confirm) as (con, backup):
+        _project_id(con, project)
+        b = _batch(con, items, lambda i, it: _code_set(con, project, it))
+        for rep, it in zip(b["items"], items, strict=False):
+            rep["item"] = it
+        res = _batch_commit(con, b, confirm, f"Set {len(items)} activity code value(s) in {project}", backup)
+        return _codes_next(res)
+
+
+@_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
+def p6_move_activities(project: ProjectId, items: WbsMoves, confirm: bool = False) -> dict:
+    """Move activities to another WBS node of the same project in one transaction (all or nothing; dry
+    run unless confirm=True). Item: {task_code, wbs}; wbs: the WBS code as p6_list_wbs shows it (with or
+    without the leading Project ID, e.g. 'DEMO-A.CON' or 'CON'), else the WBS name when one node of the
+    project has it. The project node itself is allowed (P6 keeps activities directly under the project);
+    a WBS of another project is refused. items: one report per item (move: from_wbs, to_wbs,
+    wbs_summaries = WBS summary activities whose span changes, or the error). Dates depend on the WBS only
+    through WBS summary activities: the project is marked stale (F9) only when one spans the old or the
+    new WBS (schedule_effect says which). WBS rollups follow at once; P6's summary tables only after Tools
+    > Summarize (summaries_stale). One edit log entry per activity. At most 500 items."""
+    items = _items_arg(items)
+    with _write_session(confirm) as (con, backup):
+        _project_id(con, project)
+        trees: dict = {}
+        pids: set = set()
+
+        def apply_one(i: int, it) -> dict:
+            x = _act_move(con, project, it, trees)
+            pids.add(x["_pid"])
+            return x
+
+        b = _batch(con, items, apply_one)
+        for rep, it in zip(b["items"], items, strict=False):
+            rep["item"] = it
+        sums = _summaries_stale(con, [(p, None, None) for p in sorted(pids)])
+        word = "activity" if len(items) == 1 else "activities"
+        res = _batch_commit(con, b, confirm, f"Move {len(items)} {word} to another WBS in {project}", backup,
+                            tail=_sum_plan(sums))
+        res["summaries_stale"] = sums
+        return _moves_next(res, bool(b["projects"]))
 
 
 @_tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})

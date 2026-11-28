@@ -37,9 +37,10 @@ GROUPS: list[tuple[str, list[str]]] = [
     ("XER files", ["p6_inspect_xer", "p6_import_xer", "p6_export_xer"]),
     ("P6 EPPM server", ["p6_eppm_projects", "p6_eppm_pull", "p6_eppm_status", "p6_eppm_discard",
                         "p6_eppm_push", "p6_eppm_schedule"]),
-    ("Edits (off by default)", ["p6_update_activity", "p6_update_activities", "p6_update_assignment",
-                                "p6_update_assignments",
-                                "p6_update_udf", "p6_update_udfs", "p6_add_relationship", "p6_add_relationships",
+    ("Edits (off by default)", ["p6_update_activity", "p6_update_activities", "p6_add_activities",
+                                "p6_update_assignment", "p6_update_assignments",
+                                "p6_update_udf", "p6_update_udfs", "p6_update_activity_codes", "p6_move_activities",
+                                "p6_add_relationship", "p6_add_relationships",
                                 "p6_update_relationship", "p6_update_relationships", "p6_delete_relationship",
                                 "p6_delete_relationships", "p6_set_schedule_options", "p6_create_eps",
                                 "p6_delete_activity", "p6_delete_project"]),
@@ -92,8 +93,8 @@ SUMMARY = {
                 "score, milestone slips and what changed between updates",
     "p6_cpm_validate": "Runs the built-in CPM engine against P6's last F9 and explains each difference: changed "
                        "since the F9, bad input, an engine rule or unknown",
-    "p6_schedule_whatif": "What-if in memory: add or remove links, change durations or constraints, see the new "
-                          "finish and what a reviewer would question",
+    "p6_schedule_whatif": "What-if in memory: add or remove links, change durations or constraints, insert a "
+                          "fragnet of new activities, see the new finish and what a reviewer would question",
     "p6_schedule_risk": "Monte Carlo schedule risk in memory: finish percentiles, on-time probability, "
                         "criticality index, correlated durations and ranked risk events",
     "p6_inspect_xer": "Reads an XER file without importing it and runs the import pre-flight checks",
@@ -110,10 +111,14 @@ SUMMARY = {
                         "again",
     "p6_update_activity": "Edits an activity: name, durations, constraint, actual dates, physical % complete",
     "p6_update_activities": "Edits many activities in one all-or-nothing change (a progress update)",
+    "p6_add_activities": "Creates activities with their relationships in one all-or-nothing change (F9 afterwards)",
     "p6_update_assignment": "Sets budgeted, actual or remaining units of one resource assignment",
     "p6_update_assignments": "Sets the units of many assignments in one all-or-nothing change",
     "p6_update_udf": "Sets or clears one activity UDF value",
     "p6_update_udfs": "Sets or clears many activity UDF values in one change",
+    "p6_update_activity_codes": "Assigns, replaces or clears activity code values of many activities in one "
+                                "change",
+    "p6_move_activities": "Moves activities to another WBS of their project in one change",
     "p6_add_relationship": "Adds a relationship (FS, SS, FF, SF, with lag)",
     "p6_add_relationships": "Adds many relationships in one all-or-nothing change",
     "p6_update_relationship": "Changes the type or lag of a relationship",

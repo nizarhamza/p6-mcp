@@ -33,7 +33,10 @@ def _head_instructions() -> str:
 # ----------------------------------------------------------------- instructions
 
 def test_default_instructions_are_unchanged():
-    assert instructions.build(None) == instructions.build(config.DEFAULTS) == _head_instructions()
+    # 3.8.0: p6_add_activities creates activities, so the "planned" line names it (the only change since fba4211)
+    head = _head_instructions().replace("new activities only come from p6_import_xer.",
+                                        "new activities come from p6_add_activities or p6_import_xer.")
+    assert instructions.build(None) == instructions.build(config.DEFAULTS) == head
 
 
 def test_instructions_follow_the_settings():

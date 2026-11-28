@@ -79,7 +79,7 @@ Facts an assistant should get right:
 - `p6_update_integrity`: Review of an update against the previous one: changes a reviewer should question (read)
 - `p6_trend`: Trend across a series of updates: finish, variances, progress, SPI, critical counts, float, DCMA score, milestone slips and what changed between updates (read)
 - `p6_cpm_validate`: Runs the built-in CPM engine against P6's last F9 and explains each difference: changed since the F9, bad input, an engine rule or unknown (read)
-- `p6_schedule_whatif`: What-if in memory: add or remove links, change durations or constraints, see the new finish and what a reviewer would question (read)
+- `p6_schedule_whatif`: What-if in memory: add or remove links, change durations or constraints, insert a fragnet of new activities, see the new finish and what a reviewer would question (read)
 - `p6_schedule_risk`: Monte Carlo schedule risk in memory: finish percentiles, on-time probability, criticality index, correlated durations and ranked risk events (read)
 
 ### XER files
@@ -101,10 +101,13 @@ Facts an assistant should get right:
 
 - `p6_update_activity`: Edits an activity: name, durations, constraint, actual dates, physical % complete (write)
 - `p6_update_activities`: Edits many activities in one all-or-nothing change (a progress update) (write)
+- `p6_add_activities`: Creates activities with their relationships in one all-or-nothing change (F9 afterwards) (write)
 - `p6_update_assignment`: Sets budgeted, actual or remaining units of one resource assignment (write)
 - `p6_update_assignments`: Sets the units of many assignments in one all-or-nothing change (write)
 - `p6_update_udf`: Sets or clears one activity UDF value (write)
 - `p6_update_udfs`: Sets or clears many activity UDF values in one change (write)
+- `p6_update_activity_codes`: Assigns, replaces or clears activity code values of many activities in one change (write)
+- `p6_move_activities`: Moves activities to another WBS of their project in one change (write)
 - `p6_add_relationship`: Adds a relationship (FS, SS, FF, SF, with lag) (write)
 - `p6_add_relationships`: Adds many relationships in one all-or-nothing change (write)
 - `p6_update_relationship`: Changes the type or lag of a relationship (write)

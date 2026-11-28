@@ -39,9 +39,11 @@ TOOL_KIND: dict[str, str] = {
     # file output (p6_eppm_pull: the local working copy, the server is only read)
     "p6_export_xer": FILE, "p6_export_dashboard": FILE, "p6_export_lookahead": FILE, "p6_eppm_pull": FILE,
     # write
-    "p6_update_activity": WRITE, "p6_update_activities": WRITE, "p6_update_assignment": WRITE,
+    "p6_update_activity": WRITE, "p6_update_activities": WRITE, "p6_add_activities": WRITE,
+    "p6_update_assignment": WRITE,
     "p6_update_assignments": WRITE,
     "p6_update_udf": WRITE, "p6_update_udfs": WRITE,
+    "p6_update_activity_codes": WRITE, "p6_move_activities": WRITE,
     "p6_add_relationship": WRITE, "p6_add_relationships": WRITE,
     "p6_update_relationship": WRITE, "p6_update_relationships": WRITE, "p6_delete_relationship": WRITE,
     "p6_delete_relationships": WRITE, "p6_create_eps": WRITE, "p6_import_xer": WRITE,
